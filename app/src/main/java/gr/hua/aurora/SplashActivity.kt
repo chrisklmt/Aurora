@@ -120,8 +120,9 @@ private fun SplashScreen(appName: String){
                 enter = fadeIn(),
                 exit = fadeOut()
             ){
+                // Χρησιμοποιήθηκε vector drawable γιατί η Compose δεν υποστηρίζει adaptive-icon XML από mipmap στο painterResource.
                 Image(
-                    painter=painterResource(id=R.mipmap.ic_launcher_round),
+                    painter=painterResource(id=R.drawable.ic_launcher_foreground),
                     contentDescription="App logo",
                     modifier=Modifier.size(96.dp)
                 )
