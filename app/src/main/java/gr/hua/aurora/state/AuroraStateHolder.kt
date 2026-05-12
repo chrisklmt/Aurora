@@ -48,6 +48,18 @@ class AuroraStateHolder(
         )
     }
 
+    fun updateUsername(username: String) {
+        val sanitizedUsername = username.trim()
+        if (sanitizedUsername.isEmpty()) return
+
+        uiState = AuroraUiState(
+            contacts = uiState.contacts,
+            globalMessages = uiState.globalMessages,
+            privateMessagesByPeerId = uiState.privateMessagesByPeerId,
+            currentUsername = sanitizedUsername
+        )
+    }
+
     fun privateMessagesForPeerId(peerId: String): List<ChatMessage> {
         return uiState.privateMessagesByPeerId[peerId].orEmpty()
     }

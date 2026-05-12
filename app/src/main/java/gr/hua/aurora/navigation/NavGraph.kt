@@ -74,6 +74,8 @@ fun NavGraph(
 
         composable(Routes.SETTINGS) {
             SettingsScreen(
+                currentUsername = uiState.currentUsername,
+                onUsernameChange = stateHolder::updateUsername,
                 onBack = { navController.popBackStack() }
             )
         }
