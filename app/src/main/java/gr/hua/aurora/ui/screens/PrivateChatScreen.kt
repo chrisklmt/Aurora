@@ -15,7 +15,8 @@ fun PrivateChatScreen(
     currentUsername: String,
     messages: List<ChatMessage>,
     onBack: () -> Unit,
-    onSendMessage: (String) -> Unit
+    onSendMessage: (String) -> Unit,
+    onResetLocalData: () -> Unit
 ) {
     val mappedMessages = messages.map { it.toMessageListItem() }
 
@@ -25,6 +26,7 @@ fun PrivateChatScreen(
         messages = mappedMessages,
         localUsername = currentUsername,
         topBarUsername = currentUsername,
+        onTopBarUsernameTripleTap = onResetLocalData,
         topBarRightAction = AuroraTopBarAction.BACK,
         onTopBarRightAction = onBack,
         composerHint = "Reply in preview mode",

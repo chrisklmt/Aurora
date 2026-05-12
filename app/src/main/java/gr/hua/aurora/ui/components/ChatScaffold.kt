@@ -26,6 +26,7 @@ fun ChatScaffold(
     subtitle: String? = null,
     localUsername: String? = null,
     topBarUsername: String? = null,
+    onTopBarUsernameTripleTap: (() -> Unit)? = null,
     topBarRightAction: AuroraTopBarAction = AuroraTopBarAction.NONE,
     onTopBarRightAction: (() -> Unit)? = null,
     composerHint: String = "Type a message",
@@ -41,6 +42,7 @@ fun ChatScaffold(
                 title = title,
                 subtitle = subtitle,
                 username = topBarUsername,
+                onUsernameTripleTap = onTopBarUsernameTripleTap,
                 rightAction = topBarRightAction,
                 onRightActionClick = onTopBarRightAction
             )

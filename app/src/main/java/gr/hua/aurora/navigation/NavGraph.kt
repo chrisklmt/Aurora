@@ -19,6 +19,16 @@ fun NavGraph(
     modifier: Modifier = Modifier
 ) {
     val uiState = stateHolder.uiState
+    val onNavigateBackOrGlobal: () -> Unit = {
+        if (!navController.popBackStack()) {
+            navController.navigate(Routes.GLOBAL) {
+                launchSingleTop = true
+                popUpTo(Routes.GLOBAL) {
+                    inclusive = false
+                }
+            }
+        }
+    }
 
     NavHost(
         navController = navController,
@@ -29,11 +39,6 @@ fun NavGraph(
             GlobalChatScreen(
                 currentUsername = uiState.currentUsername,
                 messages = uiState.globalMessages,
-                onOpenGlobal = {
-                    navController.navigate(Routes.GLOBAL) {
-                        launchSingleTop = true
-                    }
-                },
                 onOpenContacts = {
                     navController.navigate(Routes.CONTACTS) {
                         launchSingleTop = true
@@ -41,14 +46,17 @@ fun NavGraph(
                 },
                 onOpenNearby = { navController.navigate(Routes.NEARBY) },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
-                onSendMessage = stateHolder::sendGlobalPreviewMessage
+                onSendMessage = stateHolder::sendGlobalPreviewMessage,
+                onResetLocalData = stateHolder::resetLocalData
             )
         }
 
         composable(Routes.CONTACTS) {
             ContactsScreen(
                 contacts = uiState.contacts,
-                onBack = { navController.popBackStack() }
+                currentUsername = uiState.currentUsername,
+                onResetLocalData = stateHolder::resetLocalData,
+                onBack = onNavigateBackOrGlobal
             )
         }
 
@@ -59,17 +67,20 @@ fun NavGraph(
                 peerDisplayName = stateHolder.displayNameForPeerId(peerId),
                 currentUsername = uiState.currentUsername,
                 messages = stateHolder.privateMessagesForPeerId(peerId),
-                onBack = { navController.popBackStack() },
+                onBack = onNavigateBackOrGlobal,
                 onSendMessage = { text ->
                     stateHolder.sendPrivatePreviewMessage(peerId, text)
-                }
+                },
+                onResetLocalData = stateHolder::resetLocalData
             )
         }
 
         composable(Routes.NEARBY) {
             NearbyDevicesScreen(
                 nearbyDevices = uiState.nearbyDevices,
-                onBack = { navController.popBackStack() }
+                currentUsername = uiState.currentUsername,
+                onResetLocalData = stateHolder::resetLocalData,
+                onBack = onNavigateBackOrGlobal
             )
         }
 
@@ -78,7 +89,7 @@ fun NavGraph(
                 currentUsername = uiState.currentUsername,
                 onUsernameChange = stateHolder::updateUsername,
                 onClearLocalData = stateHolder::resetLocalData,
-                onBack = { navController.popBackStack() }
+                onBack = onNavigateBackOrGlobal
             )
         }
     }

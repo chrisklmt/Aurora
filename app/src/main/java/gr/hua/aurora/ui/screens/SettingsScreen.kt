@@ -18,6 +18,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import gr.hua.aurora.ui.components.AuroraTopBarAction
 
 @Composable
 fun SettingsScreen(
@@ -31,7 +32,9 @@ fun SettingsScreen(
 
     PlaceholderScreenScaffold(
         title = "Settings",
-        subtitle = "UI placeholder"
+        subtitle = "UI placeholder",
+        rightAction = AuroraTopBarAction.BACK,
+        onRightActionClick = onBack
     ) {
         Column(
             verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -90,12 +93,6 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Clear Local Data")
-            }
-            Button(
-                onClick = onBack,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Back")
             }
         }
     }

@@ -8,33 +8,30 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import gr.hua.aurora.model.ContactPreview
-import gr.hua.aurora.ui.components.AuroraTopBar
 import gr.hua.aurora.ui.components.AuroraTopBarAction
 
 @Composable
 fun ContactsScreen(
     contacts: List<ContactPreview>,
+    currentUsername: String,
+    onResetLocalData: () -> Unit,
     onBack: () -> Unit
 ) {
-    Scaffold(
-        topBar = {
-            AuroraTopBar(
-                title = "Contacts",
-                subtitle = "UI placeholder",
-                rightAction = AuroraTopBarAction.BACK,
-                onRightActionClick = onBack
-            )
-        }
-    ) { innerPadding ->
+    PlaceholderScreenScaffold(
+        title = "Contacts",
+        subtitle = "UI placeholder",
+        username = currentUsername,
+        onUsernameTripleTap = onResetLocalData,
+        rightAction = AuroraTopBarAction.BACK,
+        onRightActionClick = onBack
+    ) {
         Column(
             modifier = Modifier
-                .padding(innerPadding)
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {

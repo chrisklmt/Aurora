@@ -31,6 +31,7 @@ fun AuroraTopBar(
     modifier: Modifier = Modifier,
     subtitle: String? = null,
     username: String? = null,
+    onUsernameTripleTap: (() -> Unit)? = null,
     rightAction: AuroraTopBarAction = AuroraTopBarAction.NONE,
     onRightActionClick: (() -> Unit)? = null
 ) {
@@ -58,7 +59,8 @@ fun AuroraTopBar(
                         if (username != null) {
                             UsernameChip(
                                 username = username,
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier.fillMaxWidth(),
+                                onTripleTap = onUsernameTripleTap
                             )
                         }
                     }

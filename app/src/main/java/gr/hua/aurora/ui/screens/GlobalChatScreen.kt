@@ -21,11 +21,11 @@ import kotlinx.coroutines.launch
 fun GlobalChatScreen(
     currentUsername: String,
     messages: List<ChatMessage>,
-    onOpenGlobal: () -> Unit,
     onOpenContacts: () -> Unit,
     onOpenNearby: () -> Unit,
     onOpenSettings: () -> Unit,
-    onSendMessage: (String) -> Unit
+    onSendMessage: (String) -> Unit,
+    onResetLocalData: () -> Unit
 ) {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -40,12 +40,6 @@ fun GlobalChatScreen(
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                     DrawerContentHost(
                         currentRoute = Routes.GLOBAL,
-                        onOpenGlobal = {
-                            scope.launch {
-                                drawerState.close()
-                                onOpenGlobal()
-                            }
-                        },
                         onOpenContacts = {
                             scope.launch {
                                 drawerState.close()
@@ -75,6 +69,7 @@ fun GlobalChatScreen(
                     messages = mappedMessages,
                     localUsername = currentUsername,
                     topBarUsername = currentUsername,
+                    onTopBarUsernameTripleTap = onResetLocalData,
                     topBarRightAction = AuroraTopBarAction.MENU,
                     onTopBarRightAction = {
                         scope.launch { drawerState.open() }

@@ -17,7 +17,6 @@ import gr.hua.aurora.navigation.Routes
 @Composable
 fun DrawerContentHost(
     currentRoute: String,
-    onOpenGlobal: () -> Unit,
     onOpenContacts: () -> Unit,
     onOpenNearby: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -41,12 +40,6 @@ fun DrawerContentHost(
                 text = "This placeholder menu keeps the app shell visible before real drawer state is added.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            DrawerActionButton(
-                label = "Global Chat",
-                selected = currentRoute == Routes.GLOBAL,
-                onClick = onOpenGlobal
             )
             DrawerActionButton(
                 label = "Contacts",
