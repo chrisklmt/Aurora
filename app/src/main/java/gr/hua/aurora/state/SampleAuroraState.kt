@@ -3,6 +3,7 @@ package gr.hua.aurora.state
 import gr.hua.aurora.model.ChatMessage
 import gr.hua.aurora.model.ContactPreview
 import gr.hua.aurora.model.MessageStatus
+import gr.hua.aurora.model.NearbyDevicePreview
 import gr.hua.aurora.model.TransportType
 
 object SampleAuroraState {
@@ -32,6 +33,32 @@ object SampleAuroraState {
                     id = "nikos",
                     displayName = "Nikos",
                     detail = "Placeholder contact for the list layout."
+                )
+            ),
+            nearbyDevices = listOf(
+                NearbyDevicePreview(
+                    id = "peer-alex",
+                    displayName = "Alex's Phone",
+                    detail = "Preview item for nearby list layout.",
+                    transportType = TransportType.BLE,
+                    signalLabel = "-58 dBm",
+                    isConnectable = true
+                ),
+                NearbyDevicePreview(
+                    id = "peer-maria",
+                    displayName = "Maria Tablet",
+                    detail = "Visual-only nearby entry without active discovery.",
+                    transportType = TransportType.WIFI_DIRECT,
+                    signalLabel = "Strong",
+                    isConnectable = true
+                ),
+                NearbyDevicePreview(
+                    id = "peer-kiosk",
+                    displayName = "Campus Kiosk",
+                    detail = "Sample device card for unavailable connection state.",
+                    transportType = TransportType.UNKNOWN,
+                    signalLabel = "Unknown",
+                    isConnectable = false
                 )
             ),
             globalMessages = listOf(

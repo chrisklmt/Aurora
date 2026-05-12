@@ -68,6 +68,7 @@ fun NavGraph(
 
         composable(Routes.NEARBY) {
             NearbyDevicesScreen(
+                nearbyDevices = uiState.nearbyDevices,
                 onBack = { navController.popBackStack() }
             )
         }

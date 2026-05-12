@@ -24,6 +24,7 @@ class AuroraStateHolder(
 
         uiState = AuroraUiState(
             contacts = uiState.contacts,
+            nearbyDevices = uiState.nearbyDevices,
             globalMessages = uiState.globalMessages + createOutgoingMessage(
                 threadId = "global",
                 text = sanitizedText
@@ -44,6 +45,7 @@ class AuroraStateHolder(
 
         uiState = AuroraUiState(
             contacts = uiState.contacts,
+            nearbyDevices = uiState.nearbyDevices,
             globalMessages = uiState.globalMessages,
             privateMessagesByPeerId = uiState.privateMessagesByPeerId + (peerId to updatedMessages),
             currentUsername = uiState.currentUsername
@@ -56,6 +58,7 @@ class AuroraStateHolder(
 
         uiState = AuroraUiState(
             contacts = uiState.contacts,
+            nearbyDevices = uiState.nearbyDevices,
             globalMessages = uiState.globalMessages,
             privateMessagesByPeerId = uiState.privateMessagesByPeerId,
             currentUsername = sanitizedUsername
