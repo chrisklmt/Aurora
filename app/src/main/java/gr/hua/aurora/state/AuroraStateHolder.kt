@@ -64,6 +64,12 @@ class AuroraStateHolder(
         localProfileStore.saveUsername(sanitizedUsername)
     }
 
+    fun resetLocalData() {
+        // Το reset μένει σκόπιμα περιορισμένο στο τοπικό profile shell και στο in-memory preview state.
+        localProfileStore.clearProfile()
+        uiState = SampleAuroraState.create()
+    }
+
     fun privateMessagesForPeerId(peerId: String): List<ChatMessage> {
         return uiState.privateMessagesByPeerId[peerId].orEmpty()
     }

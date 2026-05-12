@@ -6,23 +6,29 @@ class LocalProfileStore(
     context: Context
 ) {
     // Αυτό το shell κρατά μόνο απλές τοπικές ρυθμίσεις προφίλ και δεν αποτελεί secure storage.
-    private val sharedPreferences = context.applicationContext.getSharedPreferences(
-        PREFERENCES_NAME,
+    private val sharedPrefs = context.applicationContext.getSharedPreferences(
+        storeName,
         Context.MODE_PRIVATE
     )
 
     fun loadUsername(): String? {
-        return sharedPreferences.getString(KEY_USERNAME, null)
+        return sharedPrefs.getString(keyUsername, null)?.trim()?.takeIf { it.isNotEmpty() }
     }
 
     fun saveUsername(username: String) {
-        sharedPreferences.edit()
-            .putString(KEY_USERNAME, username)
+        sharedPrefs.edit()
+            .putString(keyUsername, username)
+            .apply()
+    }
+
+    fun clearProfile() {
+        sharedPrefs.edit()
+            .remove(keyUsername)
             .apply()
     }
 
     private companion object {
-        const val PREFERENCES_NAME = "aurora_preferences"
-        const val KEY_USERNAME = "username"
+        const val storeName = "aurora_local_store"
+        const val keyUsername = "username"
     }
 }

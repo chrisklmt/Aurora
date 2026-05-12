@@ -76,6 +76,7 @@ fun NavGraph(
             SettingsScreen(
                 currentUsername = uiState.currentUsername,
                 onUsernameChange = stateHolder::updateUsername,
+                onClearLocalData = stateHolder::resetLocalData,
                 onBack = { navController.popBackStack() }
             )
         }

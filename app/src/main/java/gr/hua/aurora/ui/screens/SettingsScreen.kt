@@ -4,11 +4,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -21,9 +23,11 @@ import androidx.compose.ui.unit.dp
 fun SettingsScreen(
     currentUsername: String,
     onUsernameChange: (String) -> Unit,
+    onClearLocalData: () -> Unit,
     onBack: () -> Unit
 ) {
     var draftUsername by rememberSaveable(currentUsername) { mutableStateOf(currentUsername) }
+    var showClearDialog by rememberSaveable { mutableStateOf(false) }
 
     PlaceholderScreenScaffold(
         title = "Settings",
@@ -71,6 +75,22 @@ fun SettingsScreen(
             ) {
                 Text("Reset Draft")
             }
+            // Το clear αφορά μόνο τοπικές ρυθμίσεις προφίλ και το in-memory preview state που βλέπει το UI.
+            Text(
+                text = "Local data",
+                style = MaterialTheme.typography.titleMedium
+            )
+            Text(
+                text = "This action clears the saved username and resets preview state in memory.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            OutlinedButton(
+                onClick = { showClearDialog = true },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Clear Local Data")
+            }
             Button(
                 onClick = onBack,
                 modifier = Modifier.fillMaxWidth()
@@ -78,5 +98,34 @@ fun SettingsScreen(
                 Text("Back")
             }
         }
+    }
+
+    if (showClearDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearDialog = false },
+            title = {
+                Text("Clear Local Data")
+            },
+            text = {
+                Text("This will clear the saved username and reset the current preview state.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showClearDialog = false
+                        onClearLocalData()
+                    }
+                ) {
+                    Text("Clear")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showClearDialog = false }
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
