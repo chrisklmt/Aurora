@@ -5,11 +5,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import gr.hua.aurora.data.LocalProfileStore
 import gr.hua.aurora.model.ChatMessage
 import gr.hua.aurora.model.MessageStatus
 
 class AuroraStateHolder(
-    initialState: AuroraUiState
+    initialState: AuroraUiState,
+    private val localProfileStore: LocalProfileStore
 ) {
     var uiState by mutableStateOf(initialState)
         private set
@@ -58,6 +60,8 @@ class AuroraStateHolder(
             privateMessagesByPeerId = uiState.privateMessagesByPeerId,
             currentUsername = sanitizedUsername
         )
+
+        localProfileStore.saveUsername(sanitizedUsername)
     }
 
     fun privateMessagesForPeerId(peerId: String): List<ChatMessage> {
@@ -88,6 +92,13 @@ class AuroraStateHolder(
 }
 
 @Composable
-fun rememberAuroraStateHolder(): AuroraStateHolder {
-    return remember { AuroraStateHolder(SampleAuroraState.create()) }
+fun rememberAuroraStateHolder(
+    localProfileStore: LocalProfileStore
+): AuroraStateHolder {
+    return remember(localProfileStore) {
+        AuroraStateHolder(
+            initialState = SampleAuroraState.create(localProfileStore.loadUsername()),
+            localProfileStore = localProfileStore
+        )
+    }
 }

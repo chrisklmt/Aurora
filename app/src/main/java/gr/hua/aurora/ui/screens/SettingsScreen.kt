@@ -33,16 +33,16 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                text = "This screen lets you edit local profile state without persistence yet.",
+                text = "This screen lets you edit local profile state and save the username on this device.",
                 style = MaterialTheme.typography.bodyLarge
             )
-            // Η αλλαγή username μένει μόνο στη μνήμη του app σε αυτό το στάδιο και δεν γράφεται σε αποθήκευση.
+            // Το username αποθηκεύεται μόνο ως απλή τοπική ρύθμιση και όχι ως ασφαλές ή ευαίσθητο μυστικό.
             Text(
                 text = "Local profile",
                 style = MaterialTheme.typography.titleMedium
             )
             Text(
-                text = "Updates apply only to local in-memory state for now.",
+                text = "Username is stored locally with a lightweight settings shell.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
