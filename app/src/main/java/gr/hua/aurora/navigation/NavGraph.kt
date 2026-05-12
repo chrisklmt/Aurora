@@ -5,6 +5,7 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import gr.hua.aurora.ui.screens.ContactsScreen
 import gr.hua.aurora.ui.screens.GlobalChatScreen
 import gr.hua.aurora.ui.screens.NearbyDevicesScreen
 import gr.hua.aurora.ui.screens.PrivateChatScreen
@@ -22,11 +23,27 @@ fun NavGraph(
     ) {
         composable(Routes.GLOBAL) {
             GlobalChatScreen(
+                onOpenGlobal = {
+                    navController.navigate(Routes.GLOBAL) {
+                        launchSingleTop = true
+                    }
+                },
+                onOpenContacts = {
+                    navController.navigate(Routes.CONTACTS) {
+                        launchSingleTop = true
+                    }
+                },
                 onOpenNearby = { navController.navigate(Routes.NEARBY) },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                 onOpenSamplePrivateChat = {
                     navController.navigate(Routes.privateChat("demo-peer"))
                 }
+            )
+        }
+
+        composable(Routes.CONTACTS) {
+            ContactsScreen(
+                onBack = { navController.popBackStack() }
             )
         }
 
