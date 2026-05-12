@@ -13,31 +13,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import gr.hua.aurora.model.ContactPreview
 import gr.hua.aurora.ui.components.AuroraTopBar
 import gr.hua.aurora.ui.components.AuroraTopBarAction
 
-private data class ContactPreviewItem(
-    val name: String,
-    val detail: String
-)
-
-private val sampleContacts = listOf(
-    ContactPreviewItem(
-        name = "Alex",
-        detail = "Preview contact for upcoming conversation flow."
-    ),
-    ContactPreviewItem(
-        name = "Maria",
-        detail = "Static UI entry without nearby or saved-contact logic."
-    ),
-    ContactPreviewItem(
-        name = "Nikos",
-        detail = "Placeholder item for the contacts list layout."
-    )
-)
-
 @Composable
 fun ContactsScreen(
+    contacts: List<ContactPreview>,
     onBack: () -> Unit
 ) {
     Scaffold(
@@ -56,13 +38,13 @@ fun ContactsScreen(
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Τα contacts εδώ είναι στατικά ώστε να κλειδώσει πρώτα το navigation και το βασικό list UI.
+            // Η λίστα επαφών διαβάζει μόνο τοπική μνήμη ώστε να μείνει συνεκτικό το UI χωρίς discovery ή αποθήκευση.
             Text(
                 text = "Sample contacts",
                 style = MaterialTheme.typography.headlineSmall
             )
             Text(
-                text = "This screen is visual-only and does not load real contacts yet.",
+                text = "This screen is visual-only and does not load saved or nearby contacts yet.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -70,7 +52,7 @@ fun ContactsScreen(
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(sampleContacts) { contact ->
+                items(contacts) { contact ->
                     Card(
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -79,7 +61,7 @@ fun ContactsScreen(
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Text(
-                                text = contact.name,
+                                text = contact.displayName,
                                 style = MaterialTheme.typography.titleMedium
                             )
                             Text(
