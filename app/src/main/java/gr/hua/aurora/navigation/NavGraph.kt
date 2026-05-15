@@ -37,7 +37,7 @@ fun NavGraph(
     ) {
         composable(Routes.GLOBAL) {
             GlobalChatScreen(
-                currentUsername = uiState.currentUsername,
+                currentUsername = uiState.globalChatUsername,
                 messages = uiState.globalMessages,
                 onOpenContacts = {
                     navController.navigate(Routes.CONTACTS) {
@@ -54,7 +54,7 @@ fun NavGraph(
         composable(Routes.CONTACTS) {
             ContactsScreen(
                 contacts = uiState.contacts,
-                currentUsername = uiState.currentUsername,
+                currentUsername = uiState.privateProfileUsername,
                 onResetLocalData = stateHolder::resetLocalData,
                 onBack = onNavigateBackOrGlobal
             )
@@ -65,7 +65,7 @@ fun NavGraph(
             PrivateChatScreen(
                 peerId = peerId,
                 peerDisplayName = stateHolder.displayNameForPeerId(peerId),
-                currentUsername = uiState.currentUsername,
+                currentUsername = uiState.privateProfileUsername,
                 messages = stateHolder.privateMessagesForPeerId(peerId),
                 onBack = onNavigateBackOrGlobal,
                 onSendMessage = { text ->
@@ -78,7 +78,7 @@ fun NavGraph(
         composable(Routes.NEARBY) {
             NearbyDevicesScreen(
                 nearbyDevices = uiState.nearbyDevices,
-                currentUsername = uiState.currentUsername,
+                currentUsername = uiState.privateProfileUsername,
                 onResetLocalData = stateHolder::resetLocalData,
                 onBack = onNavigateBackOrGlobal
             )
@@ -86,8 +86,11 @@ fun NavGraph(
 
         composable(Routes.SETTINGS) {
             SettingsScreen(
-                currentUsername = uiState.currentUsername,
+                currentUsername = uiState.privateProfileUsername,
+                generatedUsername = uiState.generatedUsername,
+                useCustomUsernameInGlobalChat = uiState.useCustomUsernameInGlobalChat,
                 onUsernameChange = stateHolder::updateUsername,
+                onUseCustomUsernameInGlobalChatChange = stateHolder::updateUseCustomUsernameInGlobalChat,
                 onClearLocalData = stateHolder::resetLocalData,
                 onBack = onNavigateBackOrGlobal
             )

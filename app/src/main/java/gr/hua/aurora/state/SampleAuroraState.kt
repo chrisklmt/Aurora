@@ -8,11 +8,22 @@ import gr.hua.aurora.model.TransportType
 
 object SampleAuroraState {
     // Τα seed δεδομένα υπάρχουν μόνο για να μείνουν διαδραστικές οι οθόνες πριν προστεθεί πραγματικό data flow.
-    fun create(currentUsername: String): AuroraUiState {
+    fun create(
+        generatedUsername: String,
+        customUsername: String? = null,
+        useCustomUsernameInGlobalChat: Boolean = true
+    ): AuroraUiState {
         val now = System.currentTimeMillis()
-        val resolvedUsername = currentUsername.trim()
+        val resolvedGeneratedUsername = generatedUsername.trim()
+        val resolvedCustomUsername = customUsername?.trim()?.takeIf { it.isNotEmpty() }
+        val privateProfileUsername = resolvedCustomUsername ?: resolvedGeneratedUsername
+        val globalChatUsername = if (useCustomUsernameInGlobalChat) {
+            privateProfileUsername
+        } else {
+            resolvedGeneratedUsername
+        }
 
-        require(resolvedUsername.isNotEmpty()) { "currentUsername must not be blank." }
+        require(resolvedGeneratedUsername.isNotEmpty()) { "generatedUsername must not be blank." }
 
         return AuroraUiState(
             contacts = listOf(
@@ -78,7 +89,7 @@ object SampleAuroraState {
                     id = "global-2",
                     threadId = "global",
                     senderId = "self",
-                    senderName = resolvedUsername,
+                    senderName = globalChatUsername,
                     text = "This screen now uses local in-memory state without real transport logic.",
                     createdAtMillis = now - 6 * 60_000L,
                     status = MessageStatus.SENT,
@@ -111,7 +122,7 @@ object SampleAuroraState {
                         id = "alex-2",
                         threadId = "private:alex",
                         senderId = "self",
-                        senderName = resolvedUsername,
+                        senderName = privateProfileUsername,
                         text = "The screen layout is ready before real peer communication is added.",
                         createdAtMillis = now - 7 * 60_000L,
                         status = MessageStatus.SENT,
@@ -131,7 +142,9 @@ object SampleAuroraState {
                     )
                 )
             ),
-            currentUsername = resolvedUsername
+            generatedUsername = resolvedGeneratedUsername,
+            customUsername = resolvedCustomUsername,
+            useCustomUsernameInGlobalChat = useCustomUsernameInGlobalChat
         )
     }
 }

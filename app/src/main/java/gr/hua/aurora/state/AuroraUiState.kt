@@ -10,5 +10,17 @@ data class AuroraUiState(
     val nearbyDevices: List<NearbyDevicePreview>,
     val globalMessages: List<ChatMessage>,
     val privateMessagesByPeerId: Map<String, List<ChatMessage>>,
-    val currentUsername: String
-)
+    val generatedUsername: String,
+    val customUsername: String?,
+    val useCustomUsernameInGlobalChat: Boolean
+) {
+    val privateProfileUsername: String
+        get() = customUsername?.takeIf { it.isNotBlank() } ?: generatedUsername
+
+    val globalChatUsername: String
+        get() = if (useCustomUsernameInGlobalChat) {
+            privateProfileUsername
+        } else {
+            generatedUsername
+        }
+}

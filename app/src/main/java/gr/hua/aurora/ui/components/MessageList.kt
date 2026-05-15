@@ -13,6 +13,7 @@ import androidx.compose.ui.unit.dp
 data class MessageListItem(
     val sender: String,
     val text: String,
+    val isOutgoing: Boolean = false,
     val timestampLabel: String? = null,
     val supportingLabel: String? = null
 )
@@ -42,7 +43,7 @@ fun MessageList(
             MessageBubble(
                 sender = message.sender,
                 text = message.text,
-                isOwnMessage = localUsername != null && message.sender == localUsername,
+                isOwnMessage = message.isOutgoing,
                 timestampLabel = message.timestampLabel,
                 supportingLabel = message.supportingLabel
             )

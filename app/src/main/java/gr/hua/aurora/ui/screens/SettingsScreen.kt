@@ -13,6 +13,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -29,12 +30,16 @@ import gr.hua.aurora.ui.components.AuroraTopBarAction
 @Composable
 fun SettingsScreen(
     currentUsername: String,
+    generatedUsername: String,
+    useCustomUsernameInGlobalChat: Boolean,
     onUsernameChange: (String) -> Unit,
+    onUseCustomUsernameInGlobalChatChange: (Boolean) -> Unit,
     onClearLocalData: () -> Unit,
     onBack: () -> Unit
 ) {
     var draftUsername by rememberSaveable(currentUsername) { mutableStateOf(currentUsername) }
     var showClearDialog by rememberSaveable { mutableStateOf(false) }
+    val currentGlobalChatUsername = if (useCustomUsernameInGlobalChat) currentUsername else generatedUsername
 
     Scaffold(
         topBar = {
@@ -87,6 +92,39 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            Text(
+                text = "Global Chat",
+                style = MaterialTheme.typography.titleMedium
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "Use custom username in Global Chat",
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Text(
+                        text = "Generated username: $generatedUsername",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "Current Global Chat name: $currentGlobalChatUsername",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = useCustomUsernameInGlobalChat,
+                    onCheckedChange = onUseCustomUsernameInGlobalChatChange
+                )
+            }
             // Το UI καλεί το κεντρικό local reset path ώστε το ίδιο flow να καλύπτει σταδιακά όσα τοπικά δεδομένα προστεθούν.
             Text(
                 text = "Local data",

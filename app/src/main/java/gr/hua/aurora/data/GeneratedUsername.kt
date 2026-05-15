@@ -16,4 +16,8 @@ object GeneratedUsername {
             }
         }
     }
+
+    fun matchesFormat(username: String): Boolean {
+        return username.length == usernameLength && username.all { it in usernameAlphabet }
+    }
 }

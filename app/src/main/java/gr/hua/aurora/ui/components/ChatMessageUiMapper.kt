@@ -11,6 +11,7 @@ fun ChatMessage.toMessageListItem(): MessageListItem {
     return MessageListItem(
         sender = senderName,
         text = text,
+        isOutgoing = isOutgoing,
         timestampLabel = createdAtMillis.toPreviewTimeLabel(),
         supportingLabel = status.toPreviewStatusLabel()
     )

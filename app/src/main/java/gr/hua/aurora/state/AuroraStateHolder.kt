@@ -6,19 +6,21 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import gr.hua.aurora.data.GeneratedUsername
+import gr.hua.aurora.data.LocalProfileSettings
+import gr.hua.aurora.data.LocalProfileSettingsStore
 import gr.hua.aurora.data.LocalProfileStore
 import gr.hua.aurora.model.ChatMessage
 import gr.hua.aurora.model.MessageStatus
 
 class AuroraStateHolder(
     initialState: AuroraUiState,
-    private val localProfileStore: LocalProfileStore
+    private val localProfileStore: LocalProfileSettingsStore
 ) {
     var uiState by mutableStateOf(initialState)
         private set
 
     // Οι helpers ενημερώνουν μόνο την τοπική Compose μνήμη ώστε το UI να δείχνει συνεκτικό,
-    // χωρίς αποθήκευση, δικτύωση ή άλλη business orchestration.
+    // χωρίς αποθήκευση μηνυμάτων, δικτύωση ή άλλη business orchestration.
     fun sendGlobalPreviewMessage(text: String) {
         val sanitizedText = text.trim()
         if (sanitizedText.isEmpty()) return
@@ -28,10 +30,13 @@ class AuroraStateHolder(
             nearbyDevices = uiState.nearbyDevices,
             globalMessages = uiState.globalMessages + createOutgoingMessage(
                 threadId = "global",
+                senderName = uiState.globalChatUsername,
                 text = sanitizedText
             ),
             privateMessagesByPeerId = uiState.privateMessagesByPeerId,
-            currentUsername = uiState.currentUsername
+            generatedUsername = uiState.generatedUsername,
+            customUsername = uiState.customUsername,
+            useCustomUsernameInGlobalChat = uiState.useCustomUsernameInGlobalChat
         )
     }
 
@@ -41,6 +46,7 @@ class AuroraStateHolder(
 
         val updatedMessages = privateMessagesForPeerId(peerId) + createOutgoingMessage(
             threadId = "private:$peerId",
+            senderName = uiState.privateProfileUsername,
             text = sanitizedText
         )
 
@@ -49,7 +55,9 @@ class AuroraStateHolder(
             nearbyDevices = uiState.nearbyDevices,
             globalMessages = uiState.globalMessages,
             privateMessagesByPeerId = uiState.privateMessagesByPeerId + (peerId to updatedMessages),
-            currentUsername = uiState.currentUsername
+            generatedUsername = uiState.generatedUsername,
+            customUsername = uiState.customUsername,
+            useCustomUsernameInGlobalChat = uiState.useCustomUsernameInGlobalChat
         )
     }
 
@@ -62,17 +70,37 @@ class AuroraStateHolder(
             nearbyDevices = uiState.nearbyDevices,
             globalMessages = uiState.globalMessages,
             privateMessagesByPeerId = uiState.privateMessagesByPeerId,
-            currentUsername = sanitizedUsername
+            generatedUsername = uiState.generatedUsername,
+            customUsername = sanitizedUsername,
+            useCustomUsernameInGlobalChat = uiState.useCustomUsernameInGlobalChat
         )
 
-        localProfileStore.saveUsername(sanitizedUsername)
+        localProfileStore.saveCustomUsername(sanitizedUsername)
+    }
+
+    fun updateUseCustomUsernameInGlobalChat(enabled: Boolean) {
+        uiState = AuroraUiState(
+            contacts = uiState.contacts,
+            nearbyDevices = uiState.nearbyDevices,
+            globalMessages = uiState.globalMessages,
+            privateMessagesByPeerId = uiState.privateMessagesByPeerId,
+            generatedUsername = uiState.generatedUsername,
+            customUsername = uiState.customUsername,
+            useCustomUsernameInGlobalChat = enabled
+        )
+
+        localProfileStore.saveUseCustomUsernameInGlobalChat(enabled)
     }
 
     fun resetLocalData() {
-        // Το reset μένει σκόπιμα περιορισμένο στο τοπικό profile shell και στο in-memory preview state.
+        // Το reset μένει στο ίδιο κεντρικό flow ώστε να καθαρίζει σταδιακά όλα τα τοπικά profile settings.
         localProfileStore.clearProfile()
-        val freshUsername = createAndPersistGeneratedUsername()
-        uiState = SampleAuroraState.create(freshUsername)
+        val freshGeneratedUsername = createAndPersistGeneratedUsername()
+        uiState = SampleAuroraState.create(
+            generatedUsername = freshGeneratedUsername,
+            customUsername = null,
+            useCustomUsernameInGlobalChat = true
+        )
     }
 
     fun privateMessagesForPeerId(peerId: String): List<ChatMessage> {
@@ -85,6 +113,7 @@ class AuroraStateHolder(
 
     private fun createOutgoingMessage(
         threadId: String,
+        senderName: String,
         text: String
     ): ChatMessage {
         val now = System.currentTimeMillis()
@@ -93,7 +122,7 @@ class AuroraStateHolder(
             id = "$threadId-$now",
             threadId = threadId,
             senderId = "self",
-            senderName = uiState.currentUsername,
+            senderName = senderName,
             text = text,
             createdAtMillis = now,
             status = MessageStatus.SENT,
@@ -102,7 +131,7 @@ class AuroraStateHolder(
     }
 
     private fun createAndPersistGeneratedUsername(): String {
-        return GeneratedUsername.create().also(localProfileStore::saveUsername)
+        return GeneratedUsername.create().also(localProfileStore::saveGeneratedUsername)
     }
 }
 
@@ -110,14 +139,38 @@ class AuroraStateHolder(
 fun rememberAuroraStateHolder(
     localProfileStore: LocalProfileStore
 ): AuroraStateHolder {
-    val currentUsername = remember(localProfileStore) {
-        localProfileStore.loadUsername() ?: GeneratedUsername.create().also(localProfileStore::saveUsername)
+    val profileSettings = remember(localProfileStore) {
+        ensureGeneratedUsername(
+            profileSettings = localProfileStore.loadProfileSettings(),
+            localProfileStore = localProfileStore
+        )
     }
 
     return remember(localProfileStore) {
         AuroraStateHolder(
-            initialState = SampleAuroraState.create(currentUsername),
+            initialState = SampleAuroraState.create(
+                generatedUsername = profileSettings.generatedUsername
+                    ?: error("generatedUsername must be resolved before state creation."),
+                customUsername = profileSettings.customUsername,
+                useCustomUsernameInGlobalChat = profileSettings.useCustomUsernameInGlobalChat
+            ),
             localProfileStore = localProfileStore
         )
     }
+}
+
+private fun ensureGeneratedUsername(
+    profileSettings: LocalProfileSettings,
+    localProfileStore: LocalProfileSettingsStore
+): LocalProfileSettings {
+    val resolvedGeneratedUsername = profileSettings.generatedUsername ?: GeneratedUsername.create().also {
+        // Το generated όνομα γράφεται μία φορά όταν λείπει ώστε να μείνει σταθερό στα επόμενα ανοίγματα.
+        localProfileStore.saveGeneratedUsername(it)
+    }
+
+    return LocalProfileSettings(
+        generatedUsername = resolvedGeneratedUsername,
+        customUsername = profileSettings.customUsername,
+        useCustomUsernameInGlobalChat = profileSettings.useCustomUsernameInGlobalChat
+    )
 }

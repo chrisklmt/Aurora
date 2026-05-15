@@ -21,4 +21,12 @@ class GeneratedUsernameTest {
 
         assertEquals(first, second)
     }
+
+    @Test
+    fun matchesFormatAcceptsGeneratedPatternOnly() {
+        assertTrue(GeneratedUsername.matchesFormat("PIAIUFN1"))
+        assertTrue(!GeneratedUsername.matchesFormat("Aurora-1234"))
+        assertTrue(!GeneratedUsername.matchesFormat("john1234"))
+        assertTrue(!GeneratedUsername.matchesFormat("ABC123"))
+    }
 }
