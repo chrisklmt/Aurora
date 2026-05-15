@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import gr.hua.aurora.data.GeneratedUsername
 import gr.hua.aurora.data.LocalProfileStore
 import gr.hua.aurora.model.ChatMessage
 import gr.hua.aurora.model.MessageStatus
@@ -70,7 +71,8 @@ class AuroraStateHolder(
     fun resetLocalData() {
         // Το reset μένει σκόπιμα περιορισμένο στο τοπικό profile shell και στο in-memory preview state.
         localProfileStore.clearProfile()
-        uiState = SampleAuroraState.create()
+        val freshUsername = createAndPersistGeneratedUsername()
+        uiState = SampleAuroraState.create(freshUsername)
     }
 
     fun privateMessagesForPeerId(peerId: String): List<ChatMessage> {
@@ -98,15 +100,23 @@ class AuroraStateHolder(
             isOutgoing = true
         )
     }
+
+    private fun createAndPersistGeneratedUsername(): String {
+        return GeneratedUsername.create().also(localProfileStore::saveUsername)
+    }
 }
 
 @Composable
 fun rememberAuroraStateHolder(
     localProfileStore: LocalProfileStore
 ): AuroraStateHolder {
+    val currentUsername = remember(localProfileStore) {
+        localProfileStore.loadUsername() ?: GeneratedUsername.create().also(localProfileStore::saveUsername)
+    }
+
     return remember(localProfileStore) {
         AuroraStateHolder(
-            initialState = SampleAuroraState.create(localProfileStore.loadUsername()),
+            initialState = SampleAuroraState.create(currentUsername),
             localProfileStore = localProfileStore
         )
     }

@@ -8,9 +8,11 @@ import gr.hua.aurora.model.TransportType
 
 object SampleAuroraState {
     // Τα seed δεδομένα υπάρχουν μόνο για να μείνουν διαδραστικές οι οθόνες πριν προστεθεί πραγματικό data flow.
-    fun create(savedUsername: String? = null): AuroraUiState {
+    fun create(currentUsername: String): AuroraUiState {
         val now = System.currentTimeMillis()
-        val currentUsername = savedUsername?.trim()?.takeIf { it.isNotEmpty() } ?: "You"
+        val resolvedUsername = currentUsername.trim()
+
+        require(resolvedUsername.isNotEmpty()) { "currentUsername must not be blank." }
 
         return AuroraUiState(
             contacts = listOf(
@@ -76,7 +78,7 @@ object SampleAuroraState {
                     id = "global-2",
                     threadId = "global",
                     senderId = "self",
-                    senderName = currentUsername,
+                    senderName = resolvedUsername,
                     text = "This screen now uses local in-memory state without real transport logic.",
                     createdAtMillis = now - 6 * 60_000L,
                     status = MessageStatus.SENT,
@@ -109,7 +111,7 @@ object SampleAuroraState {
                         id = "alex-2",
                         threadId = "private:alex",
                         senderId = "self",
-                        senderName = currentUsername,
+                        senderName = resolvedUsername,
                         text = "The screen layout is ready before real peer communication is added.",
                         createdAtMillis = now - 7 * 60_000L,
                         status = MessageStatus.SENT,
@@ -129,7 +131,7 @@ object SampleAuroraState {
                     )
                 )
             ),
-            currentUsername = currentUsername
+            currentUsername = resolvedUsername
         )
     }
 }
