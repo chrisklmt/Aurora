@@ -8,6 +8,20 @@ data class LocalProfileSettings(
     val useCustomUsernameInGlobalChat: Boolean
 )
 
+internal data class StoredProfileSnapshot(
+    val generatedUsername: String?,
+    val customUsername: String?,
+    val legacyUsername: String?,
+    val useCustomUsernameInGlobalChat: Boolean?
+)
+
+internal data class ResolvedProfileSettings(
+    val settings: LocalProfileSettings,
+    val generatedUsernameToPersist: String? = null,
+    val customUsernameToPersist: String? = null,
+    val clearLegacyUsername: Boolean = false
+)
+
 interface LocalProfileSettingsStore {
     fun loadProfileSettings(): LocalProfileSettings
     fun saveGeneratedUsername(username: String)
@@ -26,50 +40,36 @@ class LocalProfileStore(
     )
 
     override fun loadProfileSettings(): LocalProfileSettings {
-        val generatedUsername = sharedPrefs.getString(keyGeneratedUsername, null).trimToNull()
-        val customUsername = sharedPrefs.getString(keyCustomUsername, null).trimToNull()
-        val useCustomUsernameInGlobalChat = if (sharedPrefs.contains(keyUseCustomUsernameInGlobalChat)) {
-            sharedPrefs.getBoolean(keyUseCustomUsernameInGlobalChat, true)
-        } else {
-            true
+        val resolvedProfileSettings = resolveStoredProfileSettings(
+            snapshot = StoredProfileSnapshot(
+                generatedUsername = sharedPrefs.getString(keyGeneratedUsername, null).trimToNull(),
+                customUsername = sharedPrefs.getString(keyCustomUsername, null).trimToNull(),
+                legacyUsername = sharedPrefs.getString(keyLegacyUsername, null).trimToNull(),
+                useCustomUsernameInGlobalChat = sharedPrefs.takeIf {
+                    it.contains(keyUseCustomUsernameInGlobalChat)
+                }?.getBoolean(keyUseCustomUsernameInGlobalChat, true)
+            ),
+            createGeneratedUsername = GeneratedUsername::create
+        )
+
+        if (resolvedProfileSettings.generatedUsernameToPersist != null ||
+            resolvedProfileSettings.customUsernameToPersist != null ||
+            resolvedProfileSettings.clearLegacyUsername
+        ) {
+            sharedPrefs.edit().apply {
+                if (resolvedProfileSettings.clearLegacyUsername) {
+                    remove(keyLegacyUsername)
+                }
+                resolvedProfileSettings.generatedUsernameToPersist?.let {
+                    putString(keyGeneratedUsername, it)
+                }
+                resolvedProfileSettings.customUsernameToPersist?.let {
+                    putString(keyCustomUsername, it)
+                }
+            }.apply()
         }
 
-        if (generatedUsername != null || customUsername != null) {
-            return LocalProfileSettings(
-                generatedUsername = generatedUsername,
-                customUsername = customUsername,
-                useCustomUsernameInGlobalChat = useCustomUsernameInGlobalChat
-            )
-        }
-
-        val legacyUsername = sharedPrefs.getString(keyLegacyUsername, null).trimToNull()
-            ?: return LocalProfileSettings(
-                generatedUsername = null,
-                customUsername = null,
-                useCustomUsernameInGlobalChat = true
-            )
-
-        return if (GeneratedUsername.matchesFormat(legacyUsername)) {
-            saveGeneratedUsername(legacyUsername)
-            sharedPrefs.edit().remove(keyLegacyUsername).apply()
-            LocalProfileSettings(
-                generatedUsername = legacyUsername,
-                customUsername = null,
-                useCustomUsernameInGlobalChat = useCustomUsernameInGlobalChat
-            )
-        } else {
-            val freshGeneratedUsername = GeneratedUsername.create()
-            sharedPrefs.edit()
-                .remove(keyLegacyUsername)
-                .putString(keyGeneratedUsername, freshGeneratedUsername)
-                .putString(keyCustomUsername, legacyUsername)
-                .apply()
-            LocalProfileSettings(
-                generatedUsername = freshGeneratedUsername,
-                customUsername = legacyUsername,
-                useCustomUsernameInGlobalChat = true
-            )
-        }
+        return resolvedProfileSettings.settings
     }
 
     override fun saveGeneratedUsername(username: String) {
@@ -114,4 +114,45 @@ class LocalProfileStore(
         const val keyCustomUsername = "custom_username"
         const val keyUseCustomUsernameInGlobalChat = "use_custom_username_in_global_chat"
     }
+}
+
+internal fun resolveStoredProfileSettings(
+    snapshot: StoredProfileSnapshot,
+    createGeneratedUsername: () -> String
+): ResolvedProfileSettings {
+    val resolvedToggle = snapshot.useCustomUsernameInGlobalChat ?: true
+
+    if (snapshot.generatedUsername != null || snapshot.customUsername != null) {
+        return ResolvedProfileSettings(
+            settings = LocalProfileSettings(
+                generatedUsername = snapshot.generatedUsername,
+                customUsername = snapshot.customUsername,
+                useCustomUsernameInGlobalChat = resolvedToggle
+            )
+        )
+    }
+
+    val legacyUsername = snapshot.legacyUsername
+        ?: return ResolvedProfileSettings(
+            settings = LocalProfileSettings(
+                generatedUsername = null,
+                customUsername = null,
+                useCustomUsernameInGlobalChat = true
+            )
+        )
+
+    val freshGeneratedUsername = createGeneratedUsername()
+
+    // Δεν μαντεύουμε αν το παλιό όνομα ήταν αυτόματο, γιατί ένα κανονικό όνομα χρήστη
+    // μπορεί να έχει την ίδια μορφή και πρέπει να μείνει ορατό μόνο ως προσωπική επιλογή.
+    return ResolvedProfileSettings(
+        settings = LocalProfileSettings(
+            generatedUsername = freshGeneratedUsername,
+            customUsername = legacyUsername,
+            useCustomUsernameInGlobalChat = resolvedToggle
+        ),
+        generatedUsernameToPersist = freshGeneratedUsername,
+        customUsernameToPersist = legacyUsername,
+        clearLegacyUsername = true
+    )
 }
