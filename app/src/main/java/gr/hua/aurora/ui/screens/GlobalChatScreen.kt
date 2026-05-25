@@ -9,7 +9,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import gr.hua.aurora.model.ChatMessage
-import gr.hua.aurora.navigation.Routes
 import gr.hua.aurora.ui.components.AuroraTopBarAction
 import gr.hua.aurora.ui.components.ChatScaffold
 import gr.hua.aurora.ui.components.TransportStatusCard
@@ -39,7 +38,6 @@ fun GlobalChatScreen(
             drawerContent = {
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                     DrawerContentHost(
-                        currentRoute = Routes.GLOBAL,
                         onOpenContacts = {
                             scope.launch {
                                 drawerState.close()
