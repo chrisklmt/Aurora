@@ -24,7 +24,6 @@ fun PrivateChatScreen(
         title = "Private Chat",
         subtitle = "Peer: $peerDisplayName",
         messages = mappedMessages,
-        localUsername = currentUsername,
         topBarUsername = currentUsername,
         onTopBarUsernameTripleTap = onResetLocalData,
         topBarRightAction = AuroraTopBarAction.BACK,

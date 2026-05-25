@@ -24,7 +24,6 @@ fun ChatScaffold(
     onSend: (String) -> Unit,
     modifier: Modifier = Modifier,
     subtitle: String? = null,
-    localUsername: String? = null,
     topBarUsername: String? = null,
     onTopBarUsernameTripleTap: (() -> Unit)? = null,
     topBarRightAction: AuroraTopBarAction = AuroraTopBarAction.NONE,
@@ -63,7 +62,6 @@ fun ChatScaffold(
 
             MessageList(
                 messages = messages,
-                localUsername = localUsername,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()

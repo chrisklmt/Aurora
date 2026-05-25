@@ -21,8 +21,7 @@ data class MessageListItem(
 @Composable
 fun MessageList(
     messages: List<MessageListItem>,
-    modifier: Modifier = Modifier,
-    localUsername: String? = null
+    modifier: Modifier = Modifier
 ) {
     // Σε αυτό το βήμα το list δουλεύει με απλό UI data class ώστε να μείνει ανεξάρτητο από domain models.
     val listState = rememberLazyListState()

@@ -65,7 +65,6 @@ fun GlobalChatScreen(
                     title = "Global Chat",
                     subtitle = "UI components preview",
                     messages = mappedMessages,
-                    localUsername = currentUsername,
                     topBarUsername = currentUsername,
                     onTopBarUsernameTripleTap = onResetLocalData,
                     topBarRightAction = AuroraTopBarAction.MENU,
