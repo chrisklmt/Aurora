@@ -19,6 +19,17 @@ class AesGcmCipherTest {
     }
 
     @Test
+    fun encryptDecryptEmptyPlaintextRoundtrip() {
+        val plaintext = ByteArray(0)
+
+        val encryptedPayload = AesGcmCipher.encrypt(validKey(), plaintext)
+
+        val decryptedPayload = AesGcmCipher.decrypt(validKey(), encryptedPayload)
+
+        assertArrayEquals(plaintext, decryptedPayload)
+    }
+
+    @Test
     fun wrongKeyFails() {
         val encryptedPayload = AesGcmCipher.encrypt(validKey(), "secret".toByteArray())
 
@@ -45,6 +56,26 @@ class AesGcmCipherTest {
                 )
             )
             fail("Decrypting tampered ciphertext should fail.")
+        } catch (_: GeneralSecurityException) {
+        }
+    }
+
+    @Test
+    fun tamperedNonceFails() {
+        val encryptedPayload = AesGcmCipher.encrypt(validKey(), "secret".toByteArray())
+        val tamperedNonce = encryptedPayload.nonce.also { bytes ->
+            bytes[0] = (bytes[0].toInt() xor 0x01).toByte()
+        }
+
+        try {
+            AesGcmCipher.decrypt(
+                validKey(),
+                EncryptedPayload(
+                    nonce = tamperedNonce,
+                    ciphertext = encryptedPayload.ciphertext
+                )
+            )
+            fail("Decrypting with a tampered nonce should fail.")
         } catch (_: GeneralSecurityException) {
         }
     }
