@@ -37,6 +37,18 @@ object AesGcmCipher {
     // Ο helper προστατεύει μόνο bytes payload όταν χρησιμοποιείται σωστά και δεν καλύπτει
     // ταυτότητα, ανταλλαγή κλειδιών, αποθήκευση κλειδιών, επαναλήψεις ή ασφάλεια καναλιού από μόνος του.
     fun encrypt(keyBytes: ByteArray, plaintext: ByteArray): EncryptedPayload {
+        return encrypt(
+            keyBytes = keyBytes,
+            plaintext = plaintext,
+            authenticatedData = null
+        )
+    }
+
+    fun encrypt(
+        keyBytes: ByteArray,
+        plaintext: ByteArray,
+        authenticatedData: ByteArray?
+    ): EncryptedPayload {
         requireKeyLength(keyBytes)
 
         val nonce = ByteArray(nonceLengthBytes)
@@ -48,6 +60,7 @@ object AesGcmCipher {
             SecretKeySpec(keyBytes.copyOf(), algorithm),
             GCMParameterSpec(authTagLengthBits, nonce)
         )
+        updateAuthenticatedData(cipher, authenticatedData)
 
         return EncryptedPayload(
             nonce = nonce,
@@ -56,6 +69,18 @@ object AesGcmCipher {
     }
 
     fun decrypt(keyBytes: ByteArray, encryptedPayload: EncryptedPayload): ByteArray {
+        return decrypt(
+            keyBytes = keyBytes,
+            encryptedPayload = encryptedPayload,
+            authenticatedData = null
+        )
+    }
+
+    fun decrypt(
+        keyBytes: ByteArray,
+        encryptedPayload: EncryptedPayload,
+        authenticatedData: ByteArray?
+    ): ByteArray {
         requireKeyLength(keyBytes)
 
         val cipher = Cipher.getInstance(transformation)
@@ -64,6 +89,7 @@ object AesGcmCipher {
             SecretKeySpec(keyBytes.copyOf(), algorithm),
             GCMParameterSpec(authTagLengthBits, encryptedPayload.nonce)
         )
+        updateAuthenticatedData(cipher, authenticatedData)
 
         return cipher.doFinal(encryptedPayload.ciphertext)
     }
@@ -72,6 +98,15 @@ object AesGcmCipher {
         require(keyBytes.size == acceptedKeyLengthBytes) {
             "AES-GCM helper accepts only $acceptedKeyLengthBytes-byte keys."
         }
+    }
+
+    private fun updateAuthenticatedData(
+        cipher: Cipher,
+        authenticatedData: ByteArray?
+    ) {
+        authenticatedData
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { cipher.updateAAD(it.copyOf()) }
     }
 }
 

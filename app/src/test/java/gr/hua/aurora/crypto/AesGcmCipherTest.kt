@@ -30,6 +30,18 @@ class AesGcmCipherTest {
     }
 
     @Test
+    fun encryptDecryptRoundtripWithAuthenticatedData() {
+        val plaintext = "Aurora secret payload".toByteArray()
+        val authenticatedData = "aad".toByteArray()
+
+        val encryptedPayload = AesGcmCipher.encrypt(validKey(), plaintext, authenticatedData)
+
+        val decryptedPayload = AesGcmCipher.decrypt(validKey(), encryptedPayload, authenticatedData)
+
+        assertArrayEquals(plaintext, decryptedPayload)
+    }
+
+    @Test
     fun wrongKeyFails() {
         val encryptedPayload = AesGcmCipher.encrypt(validKey(), "secret".toByteArray())
 
@@ -78,6 +90,65 @@ class AesGcmCipherTest {
             fail("Decrypting with a tampered nonce should fail.")
         } catch (_: GeneralSecurityException) {
         }
+    }
+
+    @Test
+    fun decryptWithDifferentAuthenticatedDataFails() {
+        val encryptedPayload = AesGcmCipher.encrypt(
+            validKey(),
+            "secret".toByteArray(),
+            "aad-one".toByteArray()
+        )
+
+        try {
+            AesGcmCipher.decrypt(
+                validKey(),
+                encryptedPayload,
+                "aad-two".toByteArray()
+            )
+            fail("Decrypting with different authenticated data should fail.")
+        } catch (_: GeneralSecurityException) {
+        }
+    }
+
+    @Test
+    fun decryptWithoutAuthenticatedDataFailsWhenEncryptionUsedAuthenticatedData() {
+        val encryptedPayload = AesGcmCipher.encrypt(
+            validKey(),
+            "secret".toByteArray(),
+            "aad".toByteArray()
+        )
+
+        try {
+            AesGcmCipher.decrypt(validKey(), encryptedPayload)
+            fail("Decrypting without authenticated data should fail when encryption used it.")
+        } catch (_: GeneralSecurityException) {
+        }
+    }
+
+    @Test
+    fun emptyAuthenticatedDataMatchesAbsentAuthenticatedData() {
+        val plaintext = "secret".toByteArray()
+        val encryptedWithEmptyAuthenticatedData = AesGcmCipher.encrypt(
+            validKey(),
+            plaintext,
+            ByteArray(0)
+        )
+        val decryptedWithoutAuthenticatedData = AesGcmCipher.decrypt(
+            validKey(),
+            encryptedWithEmptyAuthenticatedData
+        )
+
+        assertArrayEquals(plaintext, decryptedWithoutAuthenticatedData)
+
+        val encryptedWithoutAuthenticatedData = AesGcmCipher.encrypt(validKey(), plaintext)
+        val decryptedWithEmptyAuthenticatedData = AesGcmCipher.decrypt(
+            validKey(),
+            encryptedWithoutAuthenticatedData,
+            ByteArray(0)
+        )
+
+        assertArrayEquals(plaintext, decryptedWithEmptyAuthenticatedData)
     }
 
     @Test
