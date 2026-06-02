@@ -25,6 +25,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import gr.hua.aurora.ble.BluetoothPermissionStatusReader
 import gr.hua.aurora.ui.theme.AuroraTheme
 
 
@@ -69,18 +70,18 @@ class SplashActivity : ComponentActivity() {
 }
 
 private fun requiredRuntimePermissions(ctx:Context): List<String> {
-    val missing = mutableListOf<String>()
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        addIfMissing(missing, Manifest.permission.BLUETOOTH_SCAN)
-        addIfMissing(missing, Manifest.permission.BLUETOOTH_CONNECT)
-        addIfMissing(missing, Manifest.permission.BLUETOOTH_ADVERTISE)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            addIfMissing(missing, Manifest.permission.POST_NOTIFICATIONS)
-        }
-    } else {
-        addIfMissing(missing, Manifest.permission.ACCESS_COARSE_LOCATION)
-        addIfMissing(missing, Manifest.permission.ACCESS_FINE_LOCATION)
+    val missing = BluetoothPermissionStatusReader
+        .requiredPermissionsForSdkInt(Build.VERSION.SDK_INT)
+        .toMutableList()
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        addIfMissing(missing, Manifest.permission.POST_NOTIFICATIONS)
     }
+
+    if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.R) {
+        addIfMissing(missing, Manifest.permission.ACCESS_COARSE_LOCATION)
+    }
+
     return missing.filterNot {ctx.hasPermission(it)
     }
 }
