@@ -9,6 +9,7 @@ import android.os.Build
 class AndroidBleScanner(
     private val bluetoothAdapter: BluetoothAdapter?
 ) : BleScanner {
+    private val aggregator = BleScanAggregator()
     private var activeScanner: BluetoothLeScanner? = null
     private var activeCallback: ScanCallback? = null
     private var activeListener: BleScanner.Listener? = null
@@ -16,6 +17,7 @@ class AndroidBleScanner(
 
     override fun start(listener: BleScanner.Listener) {
         clearActiveScan(notifyStopped = false)
+        aggregator.clear()
 
         val adapter = bluetoothAdapter ?: run {
             listener.onStatusChanged(BleScanStatus.STOPPED)
@@ -28,12 +30,12 @@ class AndroidBleScanner(
 
         val callback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
-                activeListener?.onDeviceDiscovered(result.toBleDiscoveredDevice())
+                emitAggregatedDeviceUpdate(result)
             }
 
             override fun onBatchScanResults(results: MutableList<ScanResult>) {
                 results.forEach { result ->
-                    activeListener?.onDeviceDiscovered(result.toBleDiscoveredDevice())
+                    emitAggregatedDeviceUpdate(result)
                 }
             }
 
@@ -80,10 +82,25 @@ class AndroidBleScanner(
         activeCallback = null
         activeListener = null
         isScanning = false
+        aggregator.clear()
 
         if (shouldNotifyStopped) {
             listener?.onStatusChanged(BleScanStatus.STOPPED)
         }
+    }
+
+    private fun emitAggregatedDeviceUpdate(result: ScanResult) {
+        val mappedDevice = result.toBleDiscoveredDevice()
+        if (mappedDevice.address.isBlank()) {
+            return
+        }
+
+        val mergedDevice = aggregator
+            .update(mappedDevice)
+            .firstOrNull { device -> device.address == mappedDevice.address }
+            ?: return
+
+        activeListener?.onDeviceDiscovered(mergedDevice)
     }
 }
 
