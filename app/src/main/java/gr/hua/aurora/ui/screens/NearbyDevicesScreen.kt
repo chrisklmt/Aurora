@@ -10,8 +10,11 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import gr.hua.aurora.ble.BluetoothPermissionStatusReader
 import gr.hua.aurora.model.NearbyDevicePreview
 import gr.hua.aurora.model.TransportType
 import gr.hua.aurora.ui.components.AuroraTopBarAction
@@ -23,6 +26,11 @@ fun NearbyDevicesScreen(
     onResetLocalData: () -> Unit,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
+    val bluetoothStatus = remember(context) {
+        BluetoothPermissionStatusReader.read(context)
+    }
+
     PlaceholderScreenScaffold(
         title = "Nearby Devices",
         subtitle = "Discovery placeholder",
@@ -34,6 +42,32 @@ fun NearbyDevicesScreen(
         Column(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            Card(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = if (bluetoothStatus.allRequiredGranted) {
+                            "Permissions: Ready"
+                        } else {
+                            "Permissions: Missing"
+                        },
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        text = when (bluetoothStatus.isBluetoothEnabled) {
+                            true -> "Bluetooth: Enabled"
+                            false -> "Bluetooth: Disabled"
+                            null -> "Bluetooth: Status unknown"
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
             // Οι nearby εγγραφές εδώ είναι μόνο sample/in-memory UI state και δεν ξεκινούν πραγματική ανακάλυψη ή σύνδεση.
             Text(
                 text = "Nearby preview devices are shown from local state only. Real discovery is not active yet.",
