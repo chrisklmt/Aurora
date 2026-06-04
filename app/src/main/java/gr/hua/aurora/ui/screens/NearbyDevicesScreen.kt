@@ -1,5 +1,7 @@
 package gr.hua.aurora.ui.screens
 
+import android.content.Intent
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -86,6 +88,9 @@ fun NearbyDevicesScreen(
                             currentStatus.missingPermissions.toTypedArray()
                         )
                     }
+                },
+                onOpenBluetoothSettings = {
+                    context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
                 }
             )
             Text(
@@ -143,7 +148,8 @@ fun NearbyDevicesScreen(
 @Composable
 private fun ReadinessStatusCard(
     bluetoothStatus: BluetoothPermissionStatus,
-    onGrantBluetoothAccess: () -> Unit
+    onGrantBluetoothAccess: () -> Unit,
+    onOpenBluetoothSettings: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth()
@@ -176,11 +182,20 @@ private fun ReadinessStatusCard(
                     Text("Grant Bluetooth access")
                 }
             } else if (bluetoothStatus.isBluetoothEnabled == false) {
-                Text(
-                    text = "Bluetooth is off right now. Discovery will stay inactive until Bluetooth is enabled.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Bluetooth is off right now. Discovery will stay inactive until Bluetooth is enabled.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Button(
+                        onClick = onOpenBluetoothSettings
+                    ) {
+                        Text("Open Bluetooth settings")
+                    }
+                }
             }
         }
     }
