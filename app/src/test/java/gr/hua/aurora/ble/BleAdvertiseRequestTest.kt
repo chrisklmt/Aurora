@@ -33,7 +33,7 @@ class BleAdvertiseRequestTest {
     @Test
     fun rejectsPayloadAboveLegacyLimit() {
         try {
-            BleAdvertiseRequest(serviceUuid, ByteArray(32) { 0x01 })
+            BleAdvertiseRequest(serviceUuid, ByteArray(13) { 0x01 })
             fail("Expected oversized payload to be rejected.")
         } catch (_: IllegalArgumentException) {
         }

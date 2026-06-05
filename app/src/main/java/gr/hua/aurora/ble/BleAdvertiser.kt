@@ -1,7 +1,10 @@
 package gr.hua.aurora.ble
 
 interface BleAdvertiser {
-    fun start(listener: Listener)
+    fun start(
+        request: BleAdvertiseRequest,
+        listener: Listener
+    )
     fun stop()
 
     interface Listener {

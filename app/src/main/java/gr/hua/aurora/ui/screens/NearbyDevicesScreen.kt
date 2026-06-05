@@ -30,6 +30,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import gr.hua.aurora.ble.AndroidBleAdvertiser
 import gr.hua.aurora.ble.BleAdvertiseStatus
 import gr.hua.aurora.ble.BleAdvertiser
+import gr.hua.aurora.ble.BleAdvertiseRequest
 import gr.hua.aurora.ble.AndroidBleScanner
 import gr.hua.aurora.ble.BleDiscoveredDevice
 import gr.hua.aurora.ble.BleScanStatus
@@ -39,6 +40,10 @@ import gr.hua.aurora.ble.BluetoothPermissionStatusReader
 import gr.hua.aurora.model.NearbyDevicePreview
 import gr.hua.aurora.model.TransportType
 import gr.hua.aurora.ui.components.AuroraTopBarAction
+import java.util.UUID
+
+private val nearbyBlePlaceholderAdvertiseServiceUuid: UUID =
+    UUID.fromString("12345678-1234-1234-1234-1234567890ab")
 
 private data class NearbyBleSessionState(
     val bluetoothStatus: BluetoothPermissionStatus,
@@ -146,6 +151,12 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
     val bleScanner = remember(context) {
         AndroidBleScanner(bluetoothAdapter)
     }
+    val placeholderAdvertiseRequest = remember {
+        BleAdvertiseRequest(
+            serviceUuid = nearbyBlePlaceholderAdvertiseServiceUuid,
+            payload = byteArrayOf(0x00)
+        )
+    }
     var bluetoothStatus by remember(context) {
         mutableStateOf(BluetoothPermissionStatusReader.read(context))
     }
@@ -217,6 +228,7 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
         if (shouldAdvertise) {
             bleAdvertiseStatus = BleAdvertiseStatus.IDLE
             bleAdvertiser.start(
+                request = placeholderAdvertiseRequest,
                 listener = object : BleAdvertiser.Listener {
                     override fun onStatusChanged(status: BleAdvertiseStatus) {
                         bleAdvertiseStatus = status

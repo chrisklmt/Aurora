@@ -5,6 +5,7 @@ import android.bluetooth.le.AdvertiseCallback
 import android.bluetooth.le.AdvertiseData
 import android.bluetooth.le.AdvertiseSettings
 import android.bluetooth.le.BluetoothLeAdvertiser
+import android.os.ParcelUuid
 
 class AndroidBleAdvertiser(
     private val bluetoothAdapter: BluetoothAdapter?
@@ -14,7 +15,10 @@ class AndroidBleAdvertiser(
     private var activeListener: BleAdvertiser.Listener? = null
     private var isAdvertising = false
 
-    override fun start(listener: BleAdvertiser.Listener) {
+    override fun start(
+        request: BleAdvertiseRequest,
+        listener: BleAdvertiser.Listener
+    ) {
         clearActiveAdvertising(notifyStopped = false)
 
         val adapter = bluetoothAdapter ?: run {
@@ -53,7 +57,7 @@ class AndroidBleAdvertiser(
             activeListener = listener
             advertiser.startAdvertising(
                 createPlaceholderAdvertiseSettings(),
-                createPlaceholderAdvertiseData(),
+                createAdvertiseData(request),
                 callback
             )
         } catch (_: SecurityException) {
@@ -103,8 +107,10 @@ private fun createPlaceholderAdvertiseSettings(): AdvertiseSettings {
         .build()
 }
 
-private fun createPlaceholderAdvertiseData(): AdvertiseData {
+private fun createAdvertiseData(request: BleAdvertiseRequest): AdvertiseData {
+    val serviceDataUuid = ParcelUuid(request.serviceUuid)
     return AdvertiseData.Builder()
+        .addServiceData(serviceDataUuid, request.payload)
         .setIncludeDeviceName(false)
         .setIncludeTxPowerLevel(false)
         .build()

@@ -2,7 +2,7 @@ package gr.hua.aurora.ble
 
 import java.util.UUID
 
-private const val maxLegacyPayloadBytes = 31
+private const val maxLegacyServiceDataPayloadBytes = 12
 
 class BleAdvertiseRequest(
     val serviceUuid: UUID,
@@ -12,8 +12,8 @@ class BleAdvertiseRequest(
         require(copiedPayload.isNotEmpty()) {
             "Advertising payload must not be empty."
         }
-        require(copiedPayload.size <= maxLegacyPayloadBytes) {
-            "Advertising payload must be at most $maxLegacyPayloadBytes bytes."
+        require(copiedPayload.size <= maxLegacyServiceDataPayloadBytes) {
+            "Advertising payload must be at most $maxLegacyServiceDataPayloadBytes bytes."
         }
     }
 
