@@ -28,10 +28,18 @@ class BleDiscoveryPayload private constructor(
     companion object {
         fun current(): BleDiscoveryPayload {
             return BleDiscoveryPayload(
-                byteArrayOf(
-                    currentBleDiscoveryPayloadVersion,
-                    currentBleDiscoveryPayloadKind
-                )
+                currentBytes()
+            )
+        }
+
+        fun matchesCurrent(bytes: ByteArray?): Boolean {
+            return bytes?.contentEquals(currentBytes()) == true
+        }
+
+        private fun currentBytes(): ByteArray {
+            return byteArrayOf(
+                currentBleDiscoveryPayloadVersion,
+                currentBleDiscoveryPayloadKind
             )
         }
     }
