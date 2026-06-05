@@ -103,7 +103,6 @@ private fun createPlaceholderAdvertiseSettings(): AdvertiseSettings {
         .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_POWER)
         .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_ULTRA_LOW)
         .setConnectable(false)
-        .setTimeout(0)
         .build()
 }
 
