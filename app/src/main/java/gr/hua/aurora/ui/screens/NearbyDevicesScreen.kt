@@ -42,8 +42,9 @@ import gr.hua.aurora.model.TransportType
 import gr.hua.aurora.ui.components.AuroraTopBarAction
 import java.util.UUID
 
-private val nearbyBlePlaceholderAdvertiseServiceUuid: UUID =
+private val temporaryNearbyAdvertisePlaceholderServiceUuid: UUID =
     UUID.fromString("12345678-1234-1234-1234-1234567890ab")
+private val temporaryNearbyAdvertisePlaceholderPayload = byteArrayOf(0x00)
 
 private data class NearbyBleSessionState(
     val bluetoothStatus: BluetoothPermissionStatus,
@@ -151,10 +152,10 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
     val bleScanner = remember(context) {
         AndroidBleScanner(bluetoothAdapter)
     }
-    val placeholderAdvertiseRequest = remember {
+    val temporaryNearbyAdvertisePlaceholderRequest = remember {
         BleAdvertiseRequest(
-            serviceUuid = nearbyBlePlaceholderAdvertiseServiceUuid,
-            payload = byteArrayOf(0x00)
+            serviceUuid = temporaryNearbyAdvertisePlaceholderServiceUuid,
+            payload = temporaryNearbyAdvertisePlaceholderPayload
         )
     }
     var bluetoothStatus by remember(context) {
@@ -228,7 +229,7 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
         if (shouldAdvertise) {
             bleAdvertiseStatus = BleAdvertiseStatus.IDLE
             bleAdvertiser.start(
-                request = placeholderAdvertiseRequest,
+                request = temporaryNearbyAdvertisePlaceholderRequest,
                 listener = object : BleAdvertiser.Listener {
                     override fun onStatusChanged(status: BleAdvertiseStatus) {
                         bleAdvertiseStatus = status
