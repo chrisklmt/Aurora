@@ -37,6 +37,14 @@ import gr.hua.aurora.model.NearbyDevicePreview
 import gr.hua.aurora.model.TransportType
 import gr.hua.aurora.ui.components.AuroraTopBarAction
 
+private data class NearbyBleScanSessionState(
+    val bluetoothStatus: BluetoothPermissionStatus,
+    val bleScanStatus: BleScanStatus,
+    val discoveredBleDevices: List<BleDiscoveredDevice>,
+    val requestMissingPermissions: () -> Unit,
+    val openBluetoothSettings: () -> Unit
+)
+
 @Composable
 fun NearbyDevicesScreen(
     nearbyDevices: List<NearbyDevicePreview>,
@@ -44,87 +52,7 @@ fun NearbyDevicesScreen(
     onResetLocalData: () -> Unit,
     onBack: () -> Unit
 ) {
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    val bleScanner = remember(context) {
-        AndroidBleScanner(
-            context.getSystemService(BluetoothManager::class.java)?.adapter
-        )
-    }
-    var bluetoothStatus by remember(context) {
-        mutableStateOf(BluetoothPermissionStatusReader.read(context))
-    }
-    var isScreenVisible by remember(lifecycleOwner) {
-        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
-    }
-    var bleScanStatus by remember {
-        mutableStateOf(BleScanStatus.IDLE)
-    }
-    var discoveredBleDevices by remember {
-        mutableStateOf(emptyList<BleDiscoveredDevice>())
-    }
-
-    val refreshBluetoothStatus: () -> Unit = {
-        bluetoothStatus = BluetoothPermissionStatusReader.read(context)
-    }
-
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) {
-        refreshBluetoothStatus()
-    }
-
-    DisposableEffect(lifecycleOwner, context) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                isScreenVisible = true
-                refreshBluetoothStatus()
-            } else if (event == Lifecycle.Event.ON_STOP) {
-                isScreenVisible = false
-                bleScanner.stop()
-                bleScanStatus = BleScanStatus.STOPPED
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
-    }
-
-    val shouldScan = bluetoothStatus.allRequiredGranted &&
-        bluetoothStatus.isBluetoothEnabled == true &&
-        isScreenVisible
-
-    DisposableEffect(bleScanner, shouldScan) {
-        if (shouldScan) {
-            bleScanStatus = BleScanStatus.IDLE
-            discoveredBleDevices = emptyList()
-            bleScanner.start(
-                listener = object : BleScanner.Listener {
-                    override fun onStatusChanged(status: BleScanStatus) {
-                        bleScanStatus = status
-                    }
-
-                    override fun onDeviceDiscovered(device: BleDiscoveredDevice) {
-                        if (device.address.isBlank()) {
-                            return
-                        }
-
-                        discoveredBleDevices = discoveredBleDevices.upsertBleDevice(device)
-                    }
-                }
-            )
-        } else {
-            bleScanner.stop()
-            bleScanStatus = BleScanStatus.STOPPED
-            discoveredBleDevices = emptyList()
-        }
-
-        onDispose {
-            bleScanner.stop()
-            bleScanStatus = BleScanStatus.STOPPED
-        }
-    }
+    val bleScanSessionState = rememberNearbyBleScanSessionState()
 
     PlaceholderScreenScaffold(
         title = "Nearby Devices",
@@ -138,23 +66,13 @@ fun NearbyDevicesScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             ReadinessStatusCard(
-                bluetoothStatus = bluetoothStatus,
-                onGrantBluetoothAccess = {
-                    val currentStatus = BluetoothPermissionStatusReader.read(context)
-                    bluetoothStatus = currentStatus
-                    if (currentStatus.missingPermissions.isNotEmpty()) {
-                        permissionLauncher.launch(
-                            currentStatus.missingPermissions.toTypedArray()
-                        )
-                    }
-                },
-                onOpenBluetoothSettings = {
-                    context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
-                }
+                bluetoothStatus = bleScanSessionState.bluetoothStatus,
+                onGrantBluetoothAccess = bleScanSessionState.requestMissingPermissions,
+                onOpenBluetoothSettings = bleScanSessionState.openBluetoothSettings
             )
             DiscoveredBleDevicesCard(
-                scanStatus = bleScanStatus,
-                devices = discoveredBleDevices
+                scanStatus = bleScanSessionState.bleScanStatus,
+                devices = bleScanSessionState.discoveredBleDevices
             )
             Text(
                 text = "The sample nearby rows below still come from local preview state. They are separate from the live BLE scanner results above.",
@@ -206,6 +124,113 @@ fun NearbyDevicesScreen(
             }
         }
     }
+}
+
+@Composable
+private fun rememberNearbyBleScanSessionState(): NearbyBleScanSessionState {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val bleScanner = remember(context) {
+        AndroidBleScanner(
+            context.getSystemService(BluetoothManager::class.java)?.adapter
+        )
+    }
+    var bluetoothStatus by remember(context) {
+        mutableStateOf(BluetoothPermissionStatusReader.read(context))
+    }
+    var isScreenVisible by remember(lifecycleOwner) {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+    }
+    var bleScanStatus by remember {
+        mutableStateOf(BleScanStatus.IDLE)
+    }
+    var discoveredBleDevices by remember {
+        mutableStateOf(emptyList<BleDiscoveredDevice>())
+    }
+
+    val refreshBluetoothStatus: () -> Unit = {
+        bluetoothStatus = BluetoothPermissionStatusReader.read(context)
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        refreshBluetoothStatus()
+    }
+
+    val requestMissingPermissions: () -> Unit = {
+        val currentStatus = BluetoothPermissionStatusReader.read(context)
+        bluetoothStatus = currentStatus
+        if (currentStatus.missingPermissions.isNotEmpty()) {
+            permissionLauncher.launch(
+                currentStatus.missingPermissions.toTypedArray()
+            )
+        }
+    }
+
+    val openBluetoothSettings: () -> Unit = {
+        context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+    }
+
+    DisposableEffect(lifecycleOwner, bleScanner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                isScreenVisible = true
+                refreshBluetoothStatus()
+            } else if (event == Lifecycle.Event.ON_STOP) {
+                isScreenVisible = false
+                bleScanner.stop()
+                bleScanStatus = BleScanStatus.STOPPED
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    val shouldScan = bluetoothStatus.allRequiredGranted &&
+        bluetoothStatus.isBluetoothEnabled == true &&
+        isScreenVisible
+
+    DisposableEffect(bleScanner, shouldScan) {
+        if (shouldScan) {
+            bleScanStatus = BleScanStatus.IDLE
+            discoveredBleDevices = emptyList()
+            bleScanner.start(
+                listener = object : BleScanner.Listener {
+                    override fun onStatusChanged(status: BleScanStatus) {
+                        bleScanStatus = status
+                    }
+
+                    override fun onDeviceDiscovered(device: BleDiscoveredDevice) {
+                        if (device.address.isBlank()) {
+                            return
+                        }
+
+                        discoveredBleDevices = discoveredBleDevices.upsertBleDevice(device)
+                    }
+                }
+            )
+        } else {
+            bleScanner.stop()
+            bleScanStatus = BleScanStatus.STOPPED
+            discoveredBleDevices = emptyList()
+        }
+
+        onDispose {
+            bleScanner.stop()
+            bleScanStatus = BleScanStatus.STOPPED
+        }
+    }
+
+    return NearbyBleScanSessionState(
+        bluetoothStatus = bluetoothStatus,
+        bleScanStatus = bleScanStatus,
+        discoveredBleDevices = discoveredBleDevices,
+        requestMissingPermissions = requestMissingPermissions,
+        openBluetoothSettings = openBluetoothSettings
+    )
 }
 
 @Composable
