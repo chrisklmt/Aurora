@@ -14,7 +14,9 @@ class BleScanAggregator {
                 address = current.address,
                 name = device.name?.takeIf { it.isNotBlank() } ?: current.name,
                 rssi = device.rssi,
-                isConnectable = device.isConnectable ?: current.isConnectable
+                isConnectable = device.isConnectable ?: current.isConnectable,
+                hasAuroraDiscoveryPayload = current.hasAuroraDiscoveryPayload ||
+                    device.hasAuroraDiscoveryPayload
             )
         }
 

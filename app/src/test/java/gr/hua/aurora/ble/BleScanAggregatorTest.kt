@@ -79,6 +79,30 @@ class BleScanAggregatorTest {
     }
 
     @Test
+    fun discoveryPayloadStaysTrueAfterLaterFalseUpdate() {
+        val aggregator = BleScanAggregator()
+
+        aggregator.update(device(address = "AA:BB", hasAuroraDiscoveryPayload = true))
+        val snapshot = aggregator.update(
+            device(address = "AA:BB", hasAuroraDiscoveryPayload = false)
+        )
+
+        assertEquals(true, snapshot.single().hasAuroraDiscoveryPayload)
+    }
+
+    @Test
+    fun discoveryPayloadStaysFalseWhenNoTrueWasObserved() {
+        val aggregator = BleScanAggregator()
+
+        aggregator.update(device(address = "AA:BB", hasAuroraDiscoveryPayload = false))
+        val snapshot = aggregator.update(
+            device(address = "AA:BB", hasAuroraDiscoveryPayload = false)
+        )
+
+        assertEquals(false, snapshot.single().hasAuroraDiscoveryPayload)
+    }
+
+    @Test
     fun blankAddressIsIgnored() {
         val aggregator = BleScanAggregator()
 
@@ -127,13 +151,15 @@ class BleScanAggregatorTest {
         address: String,
         name: String? = null,
         rssi: Int? = null,
-        isConnectable: Boolean? = null
+        isConnectable: Boolean? = null,
+        hasAuroraDiscoveryPayload: Boolean = false
     ): BleDiscoveredDevice {
         return BleDiscoveredDevice(
             address = address,
             name = name,
             rssi = rssi,
-            isConnectable = isConnectable
+            isConnectable = isConnectable,
+            hasAuroraDiscoveryPayload = hasAuroraDiscoveryPayload
         )
     }
 }

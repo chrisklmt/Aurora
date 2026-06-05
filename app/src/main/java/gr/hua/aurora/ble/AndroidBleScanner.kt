@@ -5,6 +5,7 @@ import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.os.Build
+import android.os.ParcelUuid
 
 class AndroidBleScanner(
     private val bluetoothAdapter: BluetoothAdapter?
@@ -113,7 +114,10 @@ private fun ScanResult.toBleDiscoveredDevice(): BleDiscoveredDevice {
             isConnectable
         } else {
             null
-        }
+        },
+        hasAuroraDiscoveryPayload = BleDiscoveryPayload.matchesCurrent(
+            safeDiscoveryServiceData()
+        )
     )
 }
 
@@ -140,6 +144,16 @@ private fun ScanResult.safeDeviceName(): String? {
 private fun ScanResult.safeScanRecordDeviceName(): String? {
     return try {
         scanRecord?.deviceName
+    } catch (_: SecurityException) {
+        null
+    } catch (_: RuntimeException) {
+        null
+    }
+}
+
+private fun ScanResult.safeDiscoveryServiceData(): ByteArray? {
+    return try {
+        scanRecord?.getServiceData(ParcelUuid(BleDiscoveryService.serviceUuid))
     } catch (_: SecurityException) {
         null
     } catch (_: RuntimeException) {
