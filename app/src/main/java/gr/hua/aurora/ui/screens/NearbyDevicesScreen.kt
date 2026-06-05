@@ -33,6 +33,7 @@ import gr.hua.aurora.ble.BleAdvertiser
 import gr.hua.aurora.ble.BleAdvertiseRequest
 import gr.hua.aurora.ble.AndroidBleScanner
 import gr.hua.aurora.ble.BleDiscoveryPayload
+import gr.hua.aurora.ble.BleDiscoveryService
 import gr.hua.aurora.ble.BleDiscoveredDevice
 import gr.hua.aurora.ble.BleScanStatus
 import gr.hua.aurora.ble.BleScanner
@@ -41,10 +42,6 @@ import gr.hua.aurora.ble.BluetoothPermissionStatusReader
 import gr.hua.aurora.model.NearbyDevicePreview
 import gr.hua.aurora.model.TransportType
 import gr.hua.aurora.ui.components.AuroraTopBarAction
-import java.util.UUID
-
-private val temporaryNearbyAdvertisePlaceholderServiceUuid: UUID =
-    UUID.fromString("12345678-1234-1234-1234-1234567890ab")
 private val temporaryNearbyAdvertisePlaceholderPayload =
     BleDiscoveryPayload.current().toByteArray()
 
@@ -156,7 +153,7 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
     }
     val temporaryNearbyAdvertisePlaceholderRequest = remember {
         BleAdvertiseRequest(
-            serviceUuid = temporaryNearbyAdvertisePlaceholderServiceUuid,
+            serviceUuid = BleDiscoveryService.serviceUuid,
             payload = temporaryNearbyAdvertisePlaceholderPayload
         )
     }
