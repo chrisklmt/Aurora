@@ -386,6 +386,15 @@ private fun BleDiscoveredDeviceRow(device: BleDiscoveredDevice) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        Text(
+            text = if (device.hasAuroraDiscoveryPayload) {
+                "Aurora discovery marker: Seen"
+            } else {
+                "Aurora discovery marker: Not seen"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
