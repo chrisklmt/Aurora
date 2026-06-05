@@ -27,6 +27,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import gr.hua.aurora.ble.AndroidBleAdvertiser
+import gr.hua.aurora.ble.BleAdvertiseStatus
+import gr.hua.aurora.ble.BleAdvertiser
 import gr.hua.aurora.ble.AndroidBleScanner
 import gr.hua.aurora.ble.BleDiscoveredDevice
 import gr.hua.aurora.ble.BleScanStatus
@@ -37,8 +40,9 @@ import gr.hua.aurora.model.NearbyDevicePreview
 import gr.hua.aurora.model.TransportType
 import gr.hua.aurora.ui.components.AuroraTopBarAction
 
-private data class NearbyBleScanSessionState(
+private data class NearbyBleSessionState(
     val bluetoothStatus: BluetoothPermissionStatus,
+    val bleAdvertiseStatus: BleAdvertiseStatus,
     val bleScanStatus: BleScanStatus,
     val discoveredBleDevices: List<BleDiscoveredDevice>,
     val requestMissingPermissions: () -> Unit,
@@ -52,7 +56,7 @@ fun NearbyDevicesScreen(
     onResetLocalData: () -> Unit,
     onBack: () -> Unit
 ) {
-    val bleScanSessionState = rememberNearbyBleScanSessionState()
+    val bleSessionState = rememberNearbyBleSessionState()
 
     PlaceholderScreenScaffold(
         title = "Nearby Devices",
@@ -66,13 +70,16 @@ fun NearbyDevicesScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             ReadinessStatusCard(
-                bluetoothStatus = bleScanSessionState.bluetoothStatus,
-                onGrantBluetoothAccess = bleScanSessionState.requestMissingPermissions,
-                onOpenBluetoothSettings = bleScanSessionState.openBluetoothSettings
+                bluetoothStatus = bleSessionState.bluetoothStatus,
+                onGrantBluetoothAccess = bleSessionState.requestMissingPermissions,
+                onOpenBluetoothSettings = bleSessionState.openBluetoothSettings
+            )
+            BleAdvertisingStatusCard(
+                advertiseStatus = bleSessionState.bleAdvertiseStatus
             )
             DiscoveredBleDevicesCard(
-                scanStatus = bleScanSessionState.bleScanStatus,
-                devices = bleScanSessionState.discoveredBleDevices
+                scanStatus = bleSessionState.bleScanStatus,
+                devices = bleSessionState.discoveredBleDevices
             )
             Text(
                 text = "The sample nearby rows below still come from local preview state. They are separate from the live BLE scanner results above.",
@@ -127,19 +134,26 @@ fun NearbyDevicesScreen(
 }
 
 @Composable
-private fun rememberNearbyBleScanSessionState(): NearbyBleScanSessionState {
+private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val bluetoothAdapter = remember(context) {
+        context.getSystemService(BluetoothManager::class.java)?.adapter
+    }
+    val bleAdvertiser = remember(bluetoothAdapter) {
+        AndroidBleAdvertiser(bluetoothAdapter)
+    }
     val bleScanner = remember(context) {
-        AndroidBleScanner(
-            context.getSystemService(BluetoothManager::class.java)?.adapter
-        )
+        AndroidBleScanner(bluetoothAdapter)
     }
     var bluetoothStatus by remember(context) {
         mutableStateOf(BluetoothPermissionStatusReader.read(context))
     }
     var isScreenVisible by remember(lifecycleOwner) {
         mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+    }
+    var bleAdvertiseStatus by remember {
+        mutableStateOf(BleAdvertiseStatus.IDLE)
     }
     var bleScanStatus by remember {
         mutableStateOf(BleScanStatus.IDLE)
@@ -172,13 +186,15 @@ private fun rememberNearbyBleScanSessionState(): NearbyBleScanSessionState {
         context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
     }
 
-    DisposableEffect(lifecycleOwner, bleScanner) {
+    DisposableEffect(lifecycleOwner, bleAdvertiser, bleScanner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 isScreenVisible = true
                 refreshBluetoothStatus()
             } else if (event == Lifecycle.Event.ON_STOP) {
                 isScreenVisible = false
+                bleAdvertiser.stop()
+                bleAdvertiseStatus = BleAdvertiseStatus.STOPPED
                 bleScanner.stop()
                 bleScanStatus = BleScanStatus.STOPPED
             }
@@ -192,6 +208,31 @@ private fun rememberNearbyBleScanSessionState(): NearbyBleScanSessionState {
     val shouldScan = bluetoothStatus.allRequiredGranted &&
         bluetoothStatus.isBluetoothEnabled == true &&
         isScreenVisible
+
+    val shouldAdvertise = bluetoothStatus.allRequiredGranted &&
+        bluetoothStatus.isBluetoothEnabled == true &&
+        isScreenVisible
+
+    DisposableEffect(bleAdvertiser, shouldAdvertise) {
+        if (shouldAdvertise) {
+            bleAdvertiseStatus = BleAdvertiseStatus.IDLE
+            bleAdvertiser.start(
+                listener = object : BleAdvertiser.Listener {
+                    override fun onStatusChanged(status: BleAdvertiseStatus) {
+                        bleAdvertiseStatus = status
+                    }
+                }
+            )
+        } else {
+            bleAdvertiser.stop()
+            bleAdvertiseStatus = BleAdvertiseStatus.STOPPED
+        }
+
+        onDispose {
+            bleAdvertiser.stop()
+            bleAdvertiseStatus = BleAdvertiseStatus.STOPPED
+        }
+    }
 
     DisposableEffect(bleScanner, shouldScan) {
         if (shouldScan) {
@@ -224,13 +265,40 @@ private fun rememberNearbyBleScanSessionState(): NearbyBleScanSessionState {
         }
     }
 
-    return NearbyBleScanSessionState(
+    return NearbyBleSessionState(
         bluetoothStatus = bluetoothStatus,
+        bleAdvertiseStatus = bleAdvertiseStatus,
         bleScanStatus = bleScanStatus,
         discoveredBleDevices = discoveredBleDevices,
         requestMissingPermissions = requestMissingPermissions,
         openBluetoothSettings = openBluetoothSettings
     )
+}
+
+@Composable
+private fun BleAdvertisingStatusCard(advertiseStatus: BleAdvertiseStatus) {
+    Card(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "BLE advertising",
+                style = MaterialTheme.typography.titleMedium
+            )
+            Text(
+                text = when (advertiseStatus) {
+                    BleAdvertiseStatus.ADVERTISING -> "Advertising: Active"
+                    BleAdvertiseStatus.IDLE -> "Advertising: Idle"
+                    BleAdvertiseStatus.STOPPED -> "Advertising: Stopped"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
 }
 
 @Composable
