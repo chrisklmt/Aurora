@@ -32,6 +32,7 @@ import gr.hua.aurora.ble.BleAdvertiseStatus
 import gr.hua.aurora.ble.BleAdvertiser
 import gr.hua.aurora.ble.BleAdvertiseRequest
 import gr.hua.aurora.ble.AndroidBleScanner
+import gr.hua.aurora.ble.BleDiscoveryPayload
 import gr.hua.aurora.ble.BleDiscoveredDevice
 import gr.hua.aurora.ble.BleScanStatus
 import gr.hua.aurora.ble.BleScanner
@@ -44,7 +45,8 @@ import java.util.UUID
 
 private val temporaryNearbyAdvertisePlaceholderServiceUuid: UUID =
     UUID.fromString("12345678-1234-1234-1234-1234567890ab")
-private val temporaryNearbyAdvertisePlaceholderPayload = byteArrayOf(0x00)
+private val temporaryNearbyAdvertisePlaceholderPayload =
+    BleDiscoveryPayload.current().toByteArray()
 
 private data class NearbyBleSessionState(
     val bluetoothStatus: BluetoothPermissionStatus,
