@@ -2,6 +2,7 @@ package gr.hua.aurora.ble
 
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGattServer
 import android.bluetooth.BluetoothGattServerCallback
 import android.bluetooth.BluetoothGattService
@@ -44,6 +45,61 @@ class AndroidBleGattServer(
                 val failureListener = activeListener
                 clearActiveServer(notifyStopped = false)
                 failureListener?.onStatusChanged(BleGattServerStatus.STOPPED)
+            }
+
+            override fun onCharacteristicReadRequest(
+                device: BluetoothDevice,
+                requestId: Int,
+                offset: Int,
+                characteristic: BluetoothGattCharacteristic
+            ) {
+                val server = startedServer ?: return
+                val isActiveSetup = activeServer === startedServer &&
+                    activeListener != null &&
+                    hasActiveServer
+                val isTransportCharacteristic =
+                    characteristic.uuid == BleGattProfile.transportCharacteristicUuid
+
+                if (!isActiveSetup || !isTransportCharacteristic) {
+                    try {
+                        server.sendResponse(
+                            device,
+                            requestId,
+                            BluetoothGatt.GATT_FAILURE,
+                            offset,
+                            null
+                        )
+                    } catch (_: SecurityException) {
+                    } catch (_: RuntimeException) {
+                    }
+                    return
+                }
+
+                val payload = BleGattTransportPayload.current().toByteArray()
+                val responseValue = when {
+                    offset < 0 -> null
+                    offset > payload.size -> null
+                    offset == payload.size -> byteArrayOf()
+                    offset == 0 -> payload
+                    else -> payload.copyOfRange(offset, payload.size)
+                }
+                val responseStatus = if (responseValue != null) {
+                    BluetoothGatt.GATT_SUCCESS
+                } else {
+                    BluetoothGatt.GATT_FAILURE
+                }
+
+                try {
+                    server.sendResponse(
+                        device,
+                        requestId,
+                        responseStatus,
+                        offset,
+                        responseValue
+                    )
+                } catch (_: SecurityException) {
+                } catch (_: RuntimeException) {
+                }
             }
         }
 
