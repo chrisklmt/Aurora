@@ -27,11 +27,14 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import gr.hua.aurora.ble.AndroidBleConnector
 import gr.hua.aurora.ble.AndroidBleAdvertiser
 import gr.hua.aurora.ble.BleAdvertiseStatus
 import gr.hua.aurora.ble.BleAdvertiser
 import gr.hua.aurora.ble.BleAdvertiseRequest
 import gr.hua.aurora.ble.AndroidBleScanner
+import gr.hua.aurora.ble.BleConnectionStatus
+import gr.hua.aurora.ble.BleConnector
 import gr.hua.aurora.ble.BleDiscoveryPayload
 import gr.hua.aurora.ble.BleDiscoveryService
 import gr.hua.aurora.ble.BleDiscoveredDevice
@@ -48,8 +51,12 @@ private val temporaryNearbyAdvertisePlaceholderPayload =
 private data class NearbyBleSessionState(
     val bluetoothStatus: BluetoothPermissionStatus,
     val bleAdvertiseStatus: BleAdvertiseStatus,
+    val bleConnectionStatus: BleConnectionStatus,
     val bleScanStatus: BleScanStatus,
+    val activeConnectionDeviceAddress: String?,
     val discoveredBleDevices: List<BleDiscoveredDevice>,
+    val connectToDevice: (String) -> Unit,
+    val disconnectDevice: () -> Unit,
     val requestMissingPermissions: () -> Unit,
     val openBluetoothSettings: () -> Unit
 )
@@ -83,8 +90,12 @@ fun NearbyDevicesScreen(
                 advertiseStatus = bleSessionState.bleAdvertiseStatus
             )
             DiscoveredBleDevicesCard(
+                connectionStatus = bleSessionState.bleConnectionStatus,
                 scanStatus = bleSessionState.bleScanStatus,
-                devices = bleSessionState.discoveredBleDevices
+                activeConnectionDeviceAddress = bleSessionState.activeConnectionDeviceAddress,
+                devices = bleSessionState.discoveredBleDevices,
+                onConnect = bleSessionState.connectToDevice,
+                onDisconnect = bleSessionState.disconnectDevice
             )
             Text(
                 text = "The sample nearby rows below still come from local preview state. They are separate from the live BLE scanner results above.",
@@ -148,6 +159,9 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
     val bleAdvertiser = remember(bluetoothAdapter) {
         AndroidBleAdvertiser(bluetoothAdapter)
     }
+    val bleConnector = remember(context, bluetoothAdapter) {
+        AndroidBleConnector(context, bluetoothAdapter)
+    }
     val bleScanner = remember(context) {
         AndroidBleScanner(bluetoothAdapter)
     }
@@ -166,8 +180,14 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
     var bleAdvertiseStatus by remember {
         mutableStateOf(BleAdvertiseStatus.IDLE)
     }
+    var bleConnectionStatus by remember {
+        mutableStateOf(BleConnectionStatus.IDLE)
+    }
     var bleScanStatus by remember {
         mutableStateOf(BleScanStatus.IDLE)
+    }
+    var activeConnectionDeviceAddress by remember {
+        mutableStateOf<String?>(null)
     }
     var discoveredBleDevices by remember {
         mutableStateOf(emptyList<BleDiscoveredDevice>())
@@ -197,7 +217,7 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
         context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
     }
 
-    DisposableEffect(lifecycleOwner, bleAdvertiser, bleScanner) {
+    DisposableEffect(lifecycleOwner, bleAdvertiser, bleConnector, bleScanner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 isScreenVisible = true
@@ -206,6 +226,9 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
                 isScreenVisible = false
                 bleAdvertiser.stop()
                 bleAdvertiseStatus = BleAdvertiseStatus.STOPPED
+                bleConnector.disconnect()
+                bleConnectionStatus = BleConnectionStatus.DISCONNECTED
+                activeConnectionDeviceAddress = null
                 bleScanner.stop()
                 bleScanStatus = BleScanStatus.STOPPED
             }
@@ -277,11 +300,43 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
         }
     }
 
+    DisposableEffect(bleConnector) {
+        onDispose {
+            bleConnector.disconnect()
+            bleConnectionStatus = BleConnectionStatus.DISCONNECTED
+            activeConnectionDeviceAddress = null
+        }
+    }
+
+    val connectToDevice: (String) -> Unit = { deviceAddress ->
+        activeConnectionDeviceAddress = deviceAddress
+        bleConnector.connect(
+            deviceAddress = deviceAddress,
+            listener = object : BleConnector.Listener {
+                override fun onStatusChanged(status: BleConnectionStatus) {
+                    bleConnectionStatus = status
+                    if (status == BleConnectionStatus.DISCONNECTED) {
+                        activeConnectionDeviceAddress = null
+                    }
+                }
+            }
+        )
+    }
+
+    val disconnectDevice: () -> Unit = {
+        bleConnector.disconnect()
+        activeConnectionDeviceAddress = null
+    }
+
     return NearbyBleSessionState(
         bluetoothStatus = bluetoothStatus,
         bleAdvertiseStatus = bleAdvertiseStatus,
+        bleConnectionStatus = bleConnectionStatus,
         bleScanStatus = bleScanStatus,
+        activeConnectionDeviceAddress = activeConnectionDeviceAddress,
         discoveredBleDevices = discoveredBleDevices,
+        connectToDevice = connectToDevice,
+        disconnectDevice = disconnectDevice,
         requestMissingPermissions = requestMissingPermissions,
         openBluetoothSettings = openBluetoothSettings
     )
@@ -315,8 +370,12 @@ private fun BleAdvertisingStatusCard(advertiseStatus: BleAdvertiseStatus) {
 
 @Composable
 private fun DiscoveredBleDevicesCard(
+    connectionStatus: BleConnectionStatus,
     scanStatus: BleScanStatus,
-    devices: List<BleDiscoveredDevice>
+    activeConnectionDeviceAddress: String?,
+    devices: List<BleDiscoveredDevice>,
+    onConnect: (String) -> Unit,
+    onDisconnect: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth()
@@ -329,11 +388,22 @@ private fun DiscoveredBleDevicesCard(
                 text = "Discovered BLE devices",
                 style = MaterialTheme.typography.titleMedium
             )
+            Text(
+                text = "BLE connection: ${connectionStatus.toUiLabel()}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
 
             when {
                 devices.isNotEmpty() -> {
                     devices.forEach { device ->
-                        BleDiscoveredDeviceRow(device)
+                        BleDiscoveredDeviceRow(
+                            device = device,
+                            connectionStatus = connectionStatus,
+                            activeConnectionDeviceAddress = activeConnectionDeviceAddress,
+                            onConnect = onConnect,
+                            onDisconnect = onDisconnect
+                        )
                     }
                 }
 
@@ -358,7 +428,21 @@ private fun DiscoveredBleDevicesCard(
 }
 
 @Composable
-private fun BleDiscoveredDeviceRow(device: BleDiscoveredDevice) {
+private fun BleDiscoveredDeviceRow(
+    device: BleDiscoveredDevice,
+    connectionStatus: BleConnectionStatus,
+    activeConnectionDeviceAddress: String?,
+    onConnect: (String) -> Unit,
+    onDisconnect: () -> Unit
+) {
+    val isActiveDevice = activeConnectionDeviceAddress == device.address
+    val hasActiveConnection = connectionStatus == BleConnectionStatus.CONNECTING ||
+        connectionStatus == BleConnectionStatus.CONNECTED
+    val showDisconnect = isActiveDevice && hasActiveConnection
+    val showConnect = device.hasAuroraDiscoveryPayload &&
+        !showDisconnect &&
+        (!hasActiveConnection || isActiveDevice)
+
     Column(
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
@@ -395,6 +479,20 @@ private fun BleDiscoveredDeviceRow(device: BleDiscoveredDevice) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        if (showConnect) {
+            Button(
+                onClick = { onConnect(device.address) }
+            ) {
+                Text("Connect")
+            }
+        }
+        if (showDisconnect) {
+            Button(
+                onClick = onDisconnect
+            ) {
+                Text("Disconnect")
+            }
+        }
     }
 }
 
@@ -472,5 +570,14 @@ private fun TransportType.toUiLabel(): String {
         TransportType.BLE -> "BLE"
         TransportType.WIFI_DIRECT -> "Wi-Fi Direct"
         TransportType.UNKNOWN -> "Unknown"
+    }
+}
+
+private fun BleConnectionStatus.toUiLabel(): String {
+    return when (this) {
+        BleConnectionStatus.IDLE -> "Idle"
+        BleConnectionStatus.CONNECTING -> "Connecting"
+        BleConnectionStatus.CONNECTED -> "Connected"
+        BleConnectionStatus.DISCONNECTED -> "Disconnected"
     }
 }
