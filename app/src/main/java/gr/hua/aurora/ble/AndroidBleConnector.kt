@@ -53,7 +53,22 @@ class AndroidBleConnector(
                     status == BluetoothGatt.GATT_SUCCESS &&
                     newState == BluetoothProfile.STATE_CONNECTED
                 ) {
-                    activeListener?.onStatusChanged(BleConnectionStatus.CONNECTED)
+                    val discoverListener = activeListener
+                    val didStartDiscovery = try {
+                        gatt.discoverServices()
+                    } catch (_: SecurityException) {
+                        false
+                    } catch (_: RuntimeException) {
+                        false
+                    }
+
+                    if (!didStartDiscovery) {
+                        cleanupActiveConnection(
+                            notifyDisconnected = false,
+                            requestDisconnect = true
+                        )
+                        discoverListener?.onStatusChanged(BleConnectionStatus.DISCONNECTED)
+                    }
                     return
                 }
 
@@ -61,6 +76,35 @@ class AndroidBleConnector(
                 cleanupActiveConnection(
                     notifyDisconnected = false,
                     requestDisconnect = false
+                )
+                disconnectListener?.onStatusChanged(BleConnectionStatus.DISCONNECTED)
+            }
+
+            override fun onServicesDiscovered(
+                gatt: BluetoothGatt,
+                status: Int
+            ) {
+                if (activeGatt !== gatt || activeListener == null) {
+                    return
+                }
+
+                val service = gatt.getService(BleGattProfile.serviceUuid)
+                val characteristic = service?.getCharacteristic(
+                    BleGattProfile.transportCharacteristicUuid
+                )
+                if (
+                    status == BluetoothGatt.GATT_SUCCESS &&
+                    service != null &&
+                    characteristic != null
+                ) {
+                    activeListener?.onStatusChanged(BleConnectionStatus.CONNECTED)
+                    return
+                }
+
+                val disconnectListener = activeListener
+                cleanupActiveConnection(
+                    notifyDisconnected = false,
+                    requestDisconnect = true
                 )
                 disconnectListener?.onStatusChanged(BleConnectionStatus.DISCONNECTED)
             }
