@@ -29,6 +29,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import gr.hua.aurora.ble.AndroidBleConnector
 import gr.hua.aurora.ble.AndroidBleAdvertiser
+import gr.hua.aurora.ble.AndroidBleGattServer
 import gr.hua.aurora.ble.BleAdvertiseStatus
 import gr.hua.aurora.ble.BleAdvertiser
 import gr.hua.aurora.ble.BleAdvertiseRequest
@@ -38,6 +39,8 @@ import gr.hua.aurora.ble.BleConnector
 import gr.hua.aurora.ble.BleDiscoveryPayload
 import gr.hua.aurora.ble.BleDiscoveryService
 import gr.hua.aurora.ble.BleDiscoveredDevice
+import gr.hua.aurora.ble.BleGattServer
+import gr.hua.aurora.ble.BleGattServerStatus
 import gr.hua.aurora.ble.BleScanStatus
 import gr.hua.aurora.ble.BleScanner
 import gr.hua.aurora.ble.BluetoothPermissionStatus
@@ -52,6 +55,7 @@ private data class NearbyBleSessionState(
     val bluetoothStatus: BluetoothPermissionStatus,
     val bleAdvertiseStatus: BleAdvertiseStatus,
     val bleConnectionStatus: BleConnectionStatus,
+    val bleGattServerStatus: BleGattServerStatus,
     val bleScanStatus: BleScanStatus,
     val activeConnectionDeviceAddress: String?,
     val discoveredBleDevices: List<BleDiscoveredDevice>,
@@ -88,6 +92,9 @@ fun NearbyDevicesScreen(
             )
             BleAdvertisingStatusCard(
                 advertiseStatus = bleSessionState.bleAdvertiseStatus
+            )
+            BleGattServerStatusCard(
+                gattServerStatus = bleSessionState.bleGattServerStatus
             )
             DiscoveredBleDevicesCard(
                 connectionStatus = bleSessionState.bleConnectionStatus,
@@ -153,8 +160,11 @@ fun NearbyDevicesScreen(
 private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val bluetoothAdapter = remember(context) {
-        context.getSystemService(BluetoothManager::class.java)?.adapter
+    val bluetoothManager = remember(context) {
+        context.getSystemService(BluetoothManager::class.java)
+    }
+    val bluetoothAdapter = remember(bluetoothManager) {
+        bluetoothManager?.adapter
     }
     val bleAdvertiser = remember(bluetoothAdapter) {
         AndroidBleAdvertiser(bluetoothAdapter)
@@ -162,7 +172,10 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
     val bleConnector = remember(context, bluetoothAdapter) {
         AndroidBleConnector(context, bluetoothAdapter)
     }
-    val bleScanner = remember(context) {
+    val bleGattServer = remember(context, bluetoothManager) {
+        AndroidBleGattServer(context, bluetoothManager)
+    }
+    val bleScanner = remember(bluetoothAdapter) {
         AndroidBleScanner(bluetoothAdapter)
     }
     val temporaryNearbyAdvertisePlaceholderRequest = remember {
@@ -182,6 +195,9 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
     }
     var bleConnectionStatus by remember {
         mutableStateOf(BleConnectionStatus.IDLE)
+    }
+    var bleGattServerStatus by remember {
+        mutableStateOf(BleGattServerStatus.IDLE)
     }
     var bleScanStatus by remember {
         mutableStateOf(BleScanStatus.IDLE)
@@ -217,7 +233,7 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
         context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
     }
 
-    DisposableEffect(lifecycleOwner, bleAdvertiser, bleConnector, bleScanner) {
+    DisposableEffect(lifecycleOwner, bleAdvertiser, bleConnector, bleGattServer, bleScanner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 isScreenVisible = true
@@ -229,6 +245,8 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
                 bleConnector.disconnect()
                 bleConnectionStatus = BleConnectionStatus.DISCONNECTED
                 activeConnectionDeviceAddress = null
+                bleGattServer.stop()
+                bleGattServerStatus = BleGattServerStatus.STOPPED
                 bleScanner.stop()
                 bleScanStatus = BleScanStatus.STOPPED
             }
@@ -244,6 +262,9 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
         isScreenVisible
 
     val shouldAdvertise = bluetoothStatus.allRequiredGranted &&
+        bluetoothStatus.isBluetoothEnabled == true &&
+        isScreenVisible
+    val shouldHostGattServer = bluetoothStatus.allRequiredGranted &&
         bluetoothStatus.isBluetoothEnabled == true &&
         isScreenVisible
 
@@ -266,6 +287,26 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
         onDispose {
             bleAdvertiser.stop()
             bleAdvertiseStatus = BleAdvertiseStatus.STOPPED
+        }
+    }
+
+    DisposableEffect(bleGattServer, shouldHostGattServer) {
+        if (shouldHostGattServer) {
+            bleGattServer.start(
+                listener = object : BleGattServer.Listener {
+                    override fun onStatusChanged(status: BleGattServerStatus) {
+                        bleGattServerStatus = status
+                    }
+                }
+            )
+        } else {
+            bleGattServer.stop()
+            bleGattServerStatus = BleGattServerStatus.STOPPED
+        }
+
+        onDispose {
+            bleGattServer.stop()
+            bleGattServerStatus = BleGattServerStatus.STOPPED
         }
     }
 
@@ -332,6 +373,7 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
         bluetoothStatus = bluetoothStatus,
         bleAdvertiseStatus = bleAdvertiseStatus,
         bleConnectionStatus = bleConnectionStatus,
+        bleGattServerStatus = bleGattServerStatus,
         bleScanStatus = bleScanStatus,
         activeConnectionDeviceAddress = activeConnectionDeviceAddress,
         discoveredBleDevices = discoveredBleDevices,
@@ -361,6 +403,28 @@ private fun BleAdvertisingStatusCard(advertiseStatus: BleAdvertiseStatus) {
                     BleAdvertiseStatus.IDLE -> "Advertising: Idle"
                     BleAdvertiseStatus.STOPPED -> "Advertising: Stopped"
                 },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun BleGattServerStatusCard(gattServerStatus: BleGattServerStatus) {
+    Card(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "BLE GATT server",
+                style = MaterialTheme.typography.titleMedium
+            )
+            Text(
+                text = "BLE GATT server: ${gattServerStatus.toUiLabel()}",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -579,5 +643,13 @@ private fun BleConnectionStatus.toUiLabel(): String {
         BleConnectionStatus.CONNECTING -> "Connecting"
         BleConnectionStatus.CONNECTED -> "Connected"
         BleConnectionStatus.DISCONNECTED -> "Disconnected"
+    }
+}
+
+private fun BleGattServerStatus.toUiLabel(): String {
+    return when (this) {
+        BleGattServerStatus.IDLE -> "Idle"
+        BleGattServerStatus.HOSTING -> "Hosting"
+        BleGattServerStatus.STOPPED -> "Stopped"
     }
 }
