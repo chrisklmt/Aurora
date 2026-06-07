@@ -168,7 +168,9 @@ private fun createTransportService(): BluetoothGattService {
 private fun createTransportCharacteristic(): BluetoothGattCharacteristic {
     return BluetoothGattCharacteristic(
         BleGattProfile.transportCharacteristicUuid,
-        BluetoothGattCharacteristic.PROPERTY_READ,
-        BluetoothGattCharacteristic.PERMISSION_READ
+        BluetoothGattCharacteristic.PROPERTY_READ or
+            BluetoothGattCharacteristic.PROPERTY_WRITE,
+        BluetoothGattCharacteristic.PERMISSION_READ or
+            BluetoothGattCharacteristic.PERMISSION_WRITE
     )
 }
