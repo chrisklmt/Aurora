@@ -23,10 +23,26 @@ class BleGattProfileTest {
     }
 
     @Test
-    fun serviceAndTransportCharacteristicUuidsAreDistinct() {
+    fun frameTransportCharacteristicUuidIsStable() {
+        assertEquals(
+            UUID.fromString("12345678-1234-1234-1234-1234567890ae"),
+            BleGattProfile.frameTransportCharacteristicUuid
+        )
+    }
+
+    @Test
+    fun gattProfileUuidsAreDistinct() {
         assertNotEquals(
             BleGattProfile.serviceUuid,
             BleGattProfile.transportCharacteristicUuid
+        )
+        assertNotEquals(
+            BleGattProfile.serviceUuid,
+            BleGattProfile.frameTransportCharacteristicUuid
+        )
+        assertNotEquals(
+            BleGattProfile.transportCharacteristicUuid,
+            BleGattProfile.frameTransportCharacteristicUuid
         )
     }
 
