@@ -122,7 +122,7 @@ class AndroidBleGattServer(
                     !preparedWrite &&
                     offset == 0 &&
                     isTransportCharacteristic &&
-                    BleGattTransportPayload.matchesCurrent(value)
+                    isSupportedTransportWriteValue(value)
                 ) {
                     BluetoothGatt.GATT_SUCCESS
                 } else {
@@ -207,6 +207,11 @@ private fun createTransportService(): BluetoothGattService {
     ).apply {
         addCharacteristic(createTransportCharacteristic())
     }
+}
+
+private fun isSupportedTransportWriteValue(value: ByteArray?): Boolean {
+    return BleGattTransportPayload.matchesCurrent(value) ||
+        BleGattTransportFrame.parse(value) != null
 }
 
 private fun createTransportCharacteristic(): BluetoothGattCharacteristic {
