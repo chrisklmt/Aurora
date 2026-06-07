@@ -12,12 +12,13 @@ import android.os.Build
 class AndroidBleConnector(
     context: Context,
     private val bluetoothAdapter: BluetoothAdapter?
-) : BleConnector, BleGattTransportReader, BleGattTransportWriter {
+) : BleConnector, BleGattTransportReader, BleGattTransportWriter, BleGattTransportFrameWriter {
     private val appContext = context.applicationContext
     private var activeGatt: BluetoothGatt? = null
     private var activeListener: BleConnector.Listener? = null
     private var pendingReadListener: BleGattTransportReader.Listener? = null
     private var pendingWriteListener: BleGattTransportWriter.Listener? = null
+    private var pendingFrameWriteListener: BleGattTransportFrameWriter.Listener? = null
     private var retainedTransportCharacteristic: BluetoothGattCharacteristic? = null
     private var hasActiveConnection = false
 
@@ -222,34 +223,53 @@ class AndroidBleConnector(
             listener.onWriteResult(BleGattTransportWriteResult.NotAvailable)
             return
         }
-        if (pendingWriteListener != null) {
+        if (hasPendingTransportWrite()) {
             listener.onWriteResult(BleGattTransportWriteResult.NotAvailable)
             return
         }
 
         pendingWriteListener = listener
         val payloadValue = payload.toByteArray()
-        val didStartWrite = try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                gatt.writeCharacteristic(
-                    characteristic,
-                    payloadValue,
-                    BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-                ) == BluetoothStatusCodes.SUCCESS
-            } else {
-                characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-                characteristic.value = payloadValue
-                gatt.writeCharacteristic(characteristic)
-            }
-        } catch (_: SecurityException) {
-            false
-        } catch (_: RuntimeException) {
-            false
-        }
+        val didStartWrite = startTransportCharacteristicWrite(
+            gatt = gatt,
+            characteristic = characteristic,
+            value = payloadValue
+        )
 
         if (!didStartWrite) {
             val writeListener = takePendingWriteListener()
             writeListener?.onWriteResult(BleGattTransportWriteResult.NotAvailable)
+        }
+    }
+
+    override fun write(
+        frame: BleGattTransportFrame,
+        listener: BleGattTransportFrameWriter.Listener
+    ) {
+        val gatt = activeGatt ?: run {
+            listener.onWriteResult(BleGattTransportFrameWriteResult.NotAvailable)
+            return
+        }
+        val characteristic = retainedTransportCharacteristic ?: run {
+            listener.onWriteResult(BleGattTransportFrameWriteResult.NotAvailable)
+            return
+        }
+        if (hasPendingTransportWrite()) {
+            listener.onWriteResult(BleGattTransportFrameWriteResult.NotAvailable)
+            return
+        }
+
+        pendingFrameWriteListener = listener
+        val frameValue = frame.toByteArray()
+        val didStartWrite = startTransportCharacteristicWrite(
+            gatt = gatt,
+            characteristic = characteristic,
+            value = frameValue
+        )
+
+        if (!didStartWrite) {
+            val frameWriteListener = takePendingFrameWriteListener()
+            frameWriteListener?.onWriteResult(BleGattTransportFrameWriteResult.NotAvailable)
         }
     }
 
@@ -288,14 +308,31 @@ class AndroidBleConnector(
             return
         }
 
-        val writeListener = takePendingWriteListener() ?: return
-        if (
+        val hasPendingMarkerWrite = pendingWriteListener != null
+        val hasPendingFrameWrite = pendingFrameWriteListener != null
+        if (!hasPendingMarkerWrite && !hasPendingFrameWrite) {
+            return
+        }
+
+        val didSucceed =
             characteristic.uuid == BleGattProfile.transportCharacteristicUuid &&
-            status == BluetoothGatt.GATT_SUCCESS
-        ) {
-            writeListener.onWriteResult(BleGattTransportWriteResult.Accepted)
+                status == BluetoothGatt.GATT_SUCCESS
+
+        if (hasPendingMarkerWrite) {
+            val writeListener = takePendingWriteListener() ?: return
+            if (didSucceed) {
+                writeListener.onWriteResult(BleGattTransportWriteResult.Accepted)
+            } else {
+                writeListener.onWriteResult(BleGattTransportWriteResult.NotAvailable)
+            }
+            return
+        }
+
+        val frameWriteListener = takePendingFrameWriteListener() ?: return
+        if (didSucceed) {
+            frameWriteListener.onWriteResult(BleGattTransportFrameWriteResult.Accepted)
         } else {
-            writeListener.onWriteResult(BleGattTransportWriteResult.NotAvailable)
+            frameWriteListener.onWriteResult(BleGattTransportFrameWriteResult.NotAvailable)
         }
     }
 
@@ -311,6 +348,7 @@ class AndroidBleConnector(
         activeListener = null
         pendingReadListener = null
         pendingWriteListener = null
+        pendingFrameWriteListener = null
         retainedTransportCharacteristic = null
         hasActiveConnection = false
 
@@ -345,5 +383,39 @@ class AndroidBleConnector(
         val listener = pendingWriteListener
         pendingWriteListener = null
         return listener
+    }
+
+    private fun takePendingFrameWriteListener(): BleGattTransportFrameWriter.Listener? {
+        val listener = pendingFrameWriteListener
+        pendingFrameWriteListener = null
+        return listener
+    }
+
+    private fun hasPendingTransportWrite(): Boolean {
+        return pendingWriteListener != null || pendingFrameWriteListener != null
+    }
+
+    private fun startTransportCharacteristicWrite(
+        gatt: BluetoothGatt,
+        characteristic: BluetoothGattCharacteristic,
+        value: ByteArray
+    ): Boolean {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                gatt.writeCharacteristic(
+                    characteristic,
+                    value,
+                    BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                ) == BluetoothStatusCodes.SUCCESS
+            } else {
+                characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                characteristic.value = value
+                gatt.writeCharacteristic(characteristic)
+            }
+        } catch (_: SecurityException) {
+            false
+        } catch (_: RuntimeException) {
+            false
+        }
     }
 }
