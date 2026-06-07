@@ -512,6 +512,7 @@ private fun DiscoveredBleDevicesCard(
                         BleDiscoveredDeviceRow(
                             device = device,
                             connectionStatus = connectionStatus,
+                            transportReadStatus = transportReadStatus,
                             activeConnectionDeviceAddress = activeConnectionDeviceAddress,
                             onConnect = onConnect,
                             onDisconnect = onDisconnect,
@@ -544,6 +545,7 @@ private fun DiscoveredBleDevicesCard(
 private fun BleDiscoveredDeviceRow(
     device: BleDiscoveredDevice,
     connectionStatus: BleConnectionStatus,
+    transportReadStatus: NearbyBleTransportReadStatus,
     activeConnectionDeviceAddress: String?,
     onConnect: (String) -> Unit,
     onDisconnect: () -> Unit,
@@ -555,6 +557,8 @@ private fun BleDiscoveredDeviceRow(
     val showDisconnect = isActiveDevice && hasActiveConnection
     val showReadTransportMarker =
         isActiveDevice && connectionStatus == BleConnectionStatus.CONNECTED
+    val isReadTransportMarkerEnabled =
+        transportReadStatus != NearbyBleTransportReadStatus.READING
     val showConnect = device.hasAuroraDiscoveryPayload &&
         !showDisconnect &&
         (!hasActiveConnection || isActiveDevice)
@@ -611,6 +615,7 @@ private fun BleDiscoveredDeviceRow(
         }
         if (showReadTransportMarker) {
             Button(
+                enabled = isReadTransportMarkerEnabled,
                 onClick = onReadTransportMarker
             ) {
                 Text("Read transport marker")
