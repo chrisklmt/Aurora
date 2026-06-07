@@ -4,17 +4,20 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothStatusCodes
 import android.bluetooth.BluetoothProfile
 import android.content.Context
+import android.os.Build
 
 class AndroidBleConnector(
     context: Context,
     private val bluetoothAdapter: BluetoothAdapter?
-) : BleConnector, BleGattTransportReader {
+) : BleConnector, BleGattTransportReader, BleGattTransportWriter {
     private val appContext = context.applicationContext
     private var activeGatt: BluetoothGatt? = null
     private var activeListener: BleConnector.Listener? = null
     private var pendingReadListener: BleGattTransportReader.Listener? = null
+    private var pendingWriteListener: BleGattTransportWriter.Listener? = null
     private var retainedTransportCharacteristic: BluetoothGattCharacteristic? = null
     private var hasActiveConnection = false
 
@@ -139,6 +142,18 @@ class AndroidBleConnector(
                     value = value
                 )
             }
+
+            override fun onCharacteristicWrite(
+                gatt: BluetoothGatt,
+                characteristic: BluetoothGattCharacteristic,
+                status: Int
+            ) {
+                handleCharacteristicWrite(
+                    gatt = gatt,
+                    characteristic = characteristic,
+                    status = status
+                )
+            }
         }
 
         listener.onStatusChanged(BleConnectionStatus.CONNECTING)
@@ -195,6 +210,49 @@ class AndroidBleConnector(
         }
     }
 
+    override fun write(
+        payload: BleGattTransportPayload,
+        listener: BleGattTransportWriter.Listener
+    ) {
+        val gatt = activeGatt ?: run {
+            listener.onWriteResult(BleGattTransportWriteResult.NotAvailable)
+            return
+        }
+        val characteristic = retainedTransportCharacteristic ?: run {
+            listener.onWriteResult(BleGattTransportWriteResult.NotAvailable)
+            return
+        }
+        if (pendingWriteListener != null) {
+            listener.onWriteResult(BleGattTransportWriteResult.NotAvailable)
+            return
+        }
+
+        pendingWriteListener = listener
+        val payloadValue = payload.toByteArray()
+        val didStartWrite = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                gatt.writeCharacteristic(
+                    characteristic,
+                    payloadValue,
+                    BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                ) == BluetoothStatusCodes.SUCCESS
+            } else {
+                characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                characteristic.value = payloadValue
+                gatt.writeCharacteristic(characteristic)
+            }
+        } catch (_: SecurityException) {
+            false
+        } catch (_: RuntimeException) {
+            false
+        }
+
+        if (!didStartWrite) {
+            val writeListener = takePendingWriteListener()
+            writeListener?.onWriteResult(BleGattTransportWriteResult.NotAvailable)
+        }
+    }
+
     override fun disconnect() {
         cleanupActiveConnection(notifyDisconnected = true, requestDisconnect = true)
     }
@@ -221,6 +279,26 @@ class AndroidBleConnector(
         }
     }
 
+    private fun handleCharacteristicWrite(
+        gatt: BluetoothGatt,
+        characteristic: BluetoothGattCharacteristic,
+        status: Int
+    ) {
+        if (activeGatt !== gatt) {
+            return
+        }
+
+        val writeListener = takePendingWriteListener() ?: return
+        if (
+            characteristic.uuid == BleGattProfile.transportCharacteristicUuid &&
+            status == BluetoothGatt.GATT_SUCCESS
+        ) {
+            writeListener.onWriteResult(BleGattTransportWriteResult.Accepted)
+        } else {
+            writeListener.onWriteResult(BleGattTransportWriteResult.NotAvailable)
+        }
+    }
+
     private fun cleanupActiveConnection(
         notifyDisconnected: Boolean,
         requestDisconnect: Boolean
@@ -232,6 +310,7 @@ class AndroidBleConnector(
         activeGatt = null
         activeListener = null
         pendingReadListener = null
+        pendingWriteListener = null
         retainedTransportCharacteristic = null
         hasActiveConnection = false
 
@@ -259,6 +338,12 @@ class AndroidBleConnector(
     private fun takePendingReadListener(): BleGattTransportReader.Listener? {
         val listener = pendingReadListener
         pendingReadListener = null
+        return listener
+    }
+
+    private fun takePendingWriteListener(): BleGattTransportWriter.Listener? {
+        val listener = pendingWriteListener
+        pendingWriteListener = null
         return listener
     }
 }
