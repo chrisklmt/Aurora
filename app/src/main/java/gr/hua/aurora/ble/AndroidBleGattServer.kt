@@ -206,6 +206,7 @@ private fun createTransportService(): BluetoothGattService {
         BluetoothGattService.SERVICE_TYPE_PRIMARY
     ).apply {
         addCharacteristic(createTransportCharacteristic())
+        addCharacteristic(createFrameTransportCharacteristic())
     }
 }
 
@@ -221,5 +222,13 @@ private fun createTransportCharacteristic(): BluetoothGattCharacteristic {
             BluetoothGattCharacteristic.PROPERTY_WRITE,
         BluetoothGattCharacteristic.PERMISSION_READ or
             BluetoothGattCharacteristic.PERMISSION_WRITE
+    )
+}
+
+private fun createFrameTransportCharacteristic(): BluetoothGattCharacteristic {
+    return BluetoothGattCharacteristic(
+        BleGattProfile.frameTransportCharacteristicUuid,
+        BluetoothGattCharacteristic.PROPERTY_READ,
+        BluetoothGattCharacteristic.PERMISSION_READ
     )
 }
