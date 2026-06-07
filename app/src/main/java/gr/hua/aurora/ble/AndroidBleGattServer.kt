@@ -57,10 +57,8 @@ class AndroidBleGattServer(
                 val isActiveSetup = activeServer === startedServer &&
                     activeListener != null &&
                     hasActiveServer
-                val isTransportCharacteristic =
-                    characteristic.uuid == BleGattProfile.transportCharacteristicUuid
 
-                if (!isActiveSetup || !isTransportCharacteristic) {
+                if (!isActiveSetup) {
                     try {
                         server.sendResponse(
                             device,
@@ -75,13 +73,9 @@ class AndroidBleGattServer(
                     return
                 }
 
-                val payload = BleGattTransportPayload.current().toByteArray()
-                val responseValue = when {
-                    offset < 0 -> null
-                    offset > payload.size -> null
-                    offset == payload.size -> byteArrayOf()
-                    offset == 0 -> payload
-                    else -> payload.copyOfRange(offset, payload.size)
+                val value = transportReadValueFor(characteristic)
+                val responseValue = value?.let { readValue ->
+                    responseValueForOffset(readValue, offset)
                 }
                 val responseStatus = if (responseValue != null) {
                     BluetoothGatt.GATT_SUCCESS
@@ -207,6 +201,28 @@ private fun createTransportService(): BluetoothGattService {
     ).apply {
         addCharacteristic(createTransportCharacteristic())
         addCharacteristic(createFrameTransportCharacteristic())
+    }
+}
+
+private fun transportReadValueFor(characteristic: BluetoothGattCharacteristic): ByteArray? {
+    return when (characteristic.uuid) {
+        BleGattProfile.transportCharacteristicUuid ->
+            BleGattTransportPayload.current().toByteArray()
+
+        BleGattProfile.frameTransportCharacteristicUuid ->
+            BleGattTransportFrame.create(body = byteArrayOf())?.toByteArray()
+
+        else -> null
+    }
+}
+
+private fun responseValueForOffset(value: ByteArray, offset: Int): ByteArray? {
+    return when {
+        offset < 0 -> null
+        offset > value.size -> null
+        offset == value.size -> byteArrayOf()
+        offset == 0 -> value
+        else -> value.copyOfRange(offset, value.size)
     }
 }
 
