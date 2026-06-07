@@ -612,10 +612,11 @@ private fun BleDiscoveredDeviceRow(
         isActiveDevice && connectionStatus == BleConnectionStatus.CONNECTED
     val showWriteTransportMarker =
         isActiveDevice && connectionStatus == BleConnectionStatus.CONNECTED
-    val isReadTransportMarkerEnabled =
-        transportReadStatus != NearbyBleTransportReadStatus.READING
-    val isWriteTransportMarkerEnabled =
-        transportWriteStatus != NearbyBleTransportWriteStatus.WRITING
+    val isTransportMarkerActionActive =
+        transportReadStatus == NearbyBleTransportReadStatus.READING ||
+            transportWriteStatus == NearbyBleTransportWriteStatus.WRITING
+    val isReadTransportMarkerEnabled = !isTransportMarkerActionActive
+    val isWriteTransportMarkerEnabled = !isTransportMarkerActionActive
     val showConnect = device.hasAuroraDiscoveryPayload &&
         !showDisconnect &&
         (!hasActiveConnection || isActiveDevice)
