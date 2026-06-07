@@ -101,6 +101,50 @@ class AndroidBleGattServer(
                 } catch (_: RuntimeException) {
                 }
             }
+
+            override fun onCharacteristicWriteRequest(
+                device: BluetoothDevice,
+                requestId: Int,
+                characteristic: BluetoothGattCharacteristic,
+                preparedWrite: Boolean,
+                responseNeeded: Boolean,
+                offset: Int,
+                value: ByteArray?
+            ) {
+                val server = startedServer ?: return
+                val isActiveSetup = activeServer === startedServer &&
+                    activeListener != null &&
+                    hasActiveServer
+                val isTransportCharacteristic =
+                    characteristic.uuid == BleGattProfile.transportCharacteristicUuid
+                val writeStatus = if (
+                    isActiveSetup &&
+                    !preparedWrite &&
+                    offset == 0 &&
+                    isTransportCharacteristic &&
+                    BleGattTransportPayload.matchesCurrent(value)
+                ) {
+                    BluetoothGatt.GATT_SUCCESS
+                } else {
+                    BluetoothGatt.GATT_FAILURE
+                }
+
+                if (!responseNeeded) {
+                    return
+                }
+
+                try {
+                    server.sendResponse(
+                        device,
+                        requestId,
+                        writeStatus,
+                        offset,
+                        null
+                    )
+                } catch (_: SecurityException) {
+                } catch (_: RuntimeException) {
+                }
+            }
         }
 
         try {
