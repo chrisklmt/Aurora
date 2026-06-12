@@ -25,6 +25,7 @@ class AndroidBleConnector(
     private var pendingWriteListener: BleGattTransportWriter.Listener? = null
     private var pendingFrameWriteListener: BleGattTransportFrameWriter.Listener? = null
     private var retainedTransportCharacteristic: BluetoothGattCharacteristic? = null
+    private var retainedFrameTransportCharacteristic: BluetoothGattCharacteristic? = null
     private var hasActiveConnection = false
 
     override fun connect(
@@ -104,12 +105,16 @@ class AndroidBleConnector(
                 val characteristic = service?.getCharacteristic(
                     BleGattProfile.transportCharacteristicUuid
                 )
+                val frameCharacteristic = service?.getCharacteristic(
+                    BleGattProfile.frameTransportCharacteristicUuid
+                )
                 if (
                     status == BluetoothGatt.GATT_SUCCESS &&
                     service != null &&
                     characteristic != null
                 ) {
                     retainedTransportCharacteristic = characteristic
+                    retainedFrameTransportCharacteristic = frameCharacteristic
                     activeListener?.onStatusChanged(BleConnectionStatus.CONNECTED)
                     return
                 }
@@ -218,7 +223,7 @@ class AndroidBleConnector(
             listener.onReadResult(BleGattTransportFrameReadResult.NotAvailable)
             return
         }
-        val characteristic = retainedTransportCharacteristic ?: run {
+        val characteristic = retainedFrameTransportCharacteristic ?: run {
             listener.onReadResult(BleGattTransportFrameReadResult.NotAvailable)
             return
         }
@@ -321,13 +326,16 @@ class AndroidBleConnector(
             return
         }
 
-        val didSucceed =
+        val markerReadDidSucceed =
             characteristic.uuid == BleGattProfile.transportCharacteristicUuid &&
+                status == BluetoothGatt.GATT_SUCCESS
+        val frameReadDidSucceed =
+            characteristic.uuid == BleGattProfile.frameTransportCharacteristicUuid &&
                 status == BluetoothGatt.GATT_SUCCESS
 
         if (hasPendingMarkerRead) {
             val readListener = takePendingReadListener() ?: return
-            if (didSucceed && BleGattTransportPayload.matchesCurrent(value)) {
+            if (markerReadDidSucceed && BleGattTransportPayload.matchesCurrent(value)) {
                 readListener.onReadResult(BleGattTransportReadResult.MarkerSeen)
             } else {
                 readListener.onReadResult(BleGattTransportReadResult.NotAvailable)
@@ -336,7 +344,7 @@ class AndroidBleConnector(
         }
 
         val frameReadListener = takePendingFrameReadListener() ?: return
-        val frame = if (didSucceed) BleGattTransportFrame.parse(value) else null
+        val frame = if (frameReadDidSucceed) BleGattTransportFrame.parse(value) else null
         if (frame != null) {
             frameReadListener.onReadResult(BleGattTransportFrameReadResult.FrameAvailable(frame))
         } else {
@@ -396,6 +404,7 @@ class AndroidBleConnector(
         pendingWriteListener = null
         pendingFrameWriteListener = null
         retainedTransportCharacteristic = null
+        retainedFrameTransportCharacteristic = null
         hasActiveConnection = false
 
         if (gatt != null) {
