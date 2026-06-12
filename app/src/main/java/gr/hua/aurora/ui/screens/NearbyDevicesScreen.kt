@@ -41,6 +41,8 @@ import gr.hua.aurora.ble.BleDiscoveryService
 import gr.hua.aurora.ble.BleDiscoveredDevice
 import gr.hua.aurora.ble.BleGattServer
 import gr.hua.aurora.ble.BleGattServerStatus
+import gr.hua.aurora.ble.BleGattTransportFrameReadResult
+import gr.hua.aurora.ble.BleGattTransportFrameReader
 import gr.hua.aurora.ble.BleGattTransportPayload
 import gr.hua.aurora.ble.BleGattTransportReadResult
 import gr.hua.aurora.ble.BleGattTransportReader
@@ -64,6 +66,13 @@ private enum class NearbyBleTransportReadStatus {
     NOT_AVAILABLE
 }
 
+private enum class NearbyBleTransportFrameReadStatus {
+    IDLE,
+    READING,
+    FRAME_AVAILABLE,
+    NOT_AVAILABLE
+}
+
 private enum class NearbyBleTransportWriteStatus {
     IDLE,
     WRITING,
@@ -77,6 +86,7 @@ private data class NearbyBleSessionState(
     val bleConnectionStatus: BleConnectionStatus,
     val bleGattServerStatus: BleGattServerStatus,
     val bleTransportReadStatus: NearbyBleTransportReadStatus,
+    val bleTransportFrameReadStatus: NearbyBleTransportFrameReadStatus,
     val bleTransportWriteStatus: NearbyBleTransportWriteStatus,
     val bleScanStatus: BleScanStatus,
     val activeConnectionDeviceAddress: String?,
@@ -84,6 +94,7 @@ private data class NearbyBleSessionState(
     val connectToDevice: (String) -> Unit,
     val disconnectDevice: () -> Unit,
     val readTransportMarker: () -> Unit,
+    val readTransportFrame: () -> Unit,
     val writeTransportMarker: () -> Unit,
     val requestMissingPermissions: () -> Unit,
     val openBluetoothSettings: () -> Unit
@@ -123,6 +134,7 @@ fun NearbyDevicesScreen(
             DiscoveredBleDevicesCard(
                 connectionStatus = bleSessionState.bleConnectionStatus,
                 transportReadStatus = bleSessionState.bleTransportReadStatus,
+                transportFrameReadStatus = bleSessionState.bleTransportFrameReadStatus,
                 transportWriteStatus = bleSessionState.bleTransportWriteStatus,
                 scanStatus = bleSessionState.bleScanStatus,
                 activeConnectionDeviceAddress = bleSessionState.activeConnectionDeviceAddress,
@@ -130,6 +142,7 @@ fun NearbyDevicesScreen(
                 onConnect = bleSessionState.connectToDevice,
                 onDisconnect = bleSessionState.disconnectDevice,
                 onReadTransportMarker = bleSessionState.readTransportMarker,
+                onReadTransportFrame = bleSessionState.readTransportFrame,
                 onWriteTransportMarker = bleSessionState.writeTransportMarker
             )
             Text(
@@ -201,6 +214,7 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
         AndroidBleConnector(context, bluetoothAdapter)
     }
     val bleTransportReader: BleGattTransportReader = bleConnector
+    val bleTransportFrameReader: BleGattTransportFrameReader = bleConnector
     val bleTransportWriter: BleGattTransportWriter = bleConnector
     val bleGattServer = remember(context, bluetoothManager) {
         AndroidBleGattServer(context, bluetoothManager)
@@ -231,6 +245,9 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
     }
     var bleTransportReadStatus by remember {
         mutableStateOf(NearbyBleTransportReadStatus.IDLE)
+    }
+    var bleTransportFrameReadStatus by remember {
+        mutableStateOf(NearbyBleTransportFrameReadStatus.IDLE)
     }
     var bleTransportWriteStatus by remember {
         mutableStateOf(NearbyBleTransportWriteStatus.IDLE)
@@ -282,6 +299,7 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
                 bleConnectionStatus = BleConnectionStatus.DISCONNECTED
                 activeConnectionDeviceAddress = null
                 bleTransportReadStatus = NearbyBleTransportReadStatus.IDLE
+                bleTransportFrameReadStatus = NearbyBleTransportFrameReadStatus.IDLE
                 bleTransportWriteStatus = NearbyBleTransportWriteStatus.IDLE
                 bleGattServer.stop()
                 bleGattServerStatus = BleGattServerStatus.STOPPED
@@ -385,6 +403,7 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
             bleConnectionStatus = BleConnectionStatus.DISCONNECTED
             activeConnectionDeviceAddress = null
             bleTransportReadStatus = NearbyBleTransportReadStatus.IDLE
+            bleTransportFrameReadStatus = NearbyBleTransportFrameReadStatus.IDLE
             bleTransportWriteStatus = NearbyBleTransportWriteStatus.IDLE
         }
     }
@@ -392,6 +411,7 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
     val connectToDevice: (String) -> Unit = { deviceAddress ->
         activeConnectionDeviceAddress = deviceAddress
         bleTransportReadStatus = NearbyBleTransportReadStatus.IDLE
+        bleTransportFrameReadStatus = NearbyBleTransportFrameReadStatus.IDLE
         bleTransportWriteStatus = NearbyBleTransportWriteStatus.IDLE
         bleConnector.connect(
             deviceAddress = deviceAddress,
@@ -401,6 +421,7 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
                     if (status == BleConnectionStatus.DISCONNECTED) {
                         activeConnectionDeviceAddress = null
                         bleTransportReadStatus = NearbyBleTransportReadStatus.IDLE
+                        bleTransportFrameReadStatus = NearbyBleTransportFrameReadStatus.IDLE
                         bleTransportWriteStatus = NearbyBleTransportWriteStatus.IDLE
                     }
                 }
@@ -412,6 +433,7 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
         bleConnector.disconnect()
         activeConnectionDeviceAddress = null
         bleTransportReadStatus = NearbyBleTransportReadStatus.IDLE
+        bleTransportFrameReadStatus = NearbyBleTransportFrameReadStatus.IDLE
         bleTransportWriteStatus = NearbyBleTransportWriteStatus.IDLE
     }
 
@@ -425,6 +447,22 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
                             NearbyBleTransportReadStatus.MARKER_SEEN
                         BleGattTransportReadResult.NotAvailable ->
                             NearbyBleTransportReadStatus.NOT_AVAILABLE
+                    }
+                }
+            }
+        )
+    }
+
+    val readTransportFrame: () -> Unit = {
+        bleTransportFrameReadStatus = NearbyBleTransportFrameReadStatus.READING
+        bleTransportFrameReader.read(
+            listener = object : BleGattTransportFrameReader.Listener {
+                override fun onReadResult(result: BleGattTransportFrameReadResult) {
+                    bleTransportFrameReadStatus = when (result) {
+                        is BleGattTransportFrameReadResult.FrameAvailable ->
+                            NearbyBleTransportFrameReadStatus.FRAME_AVAILABLE
+                        BleGattTransportFrameReadResult.NotAvailable ->
+                            NearbyBleTransportFrameReadStatus.NOT_AVAILABLE
                     }
                 }
             }
@@ -454,6 +492,7 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
         bleConnectionStatus = bleConnectionStatus,
         bleGattServerStatus = bleGattServerStatus,
         bleTransportReadStatus = bleTransportReadStatus,
+        bleTransportFrameReadStatus = bleTransportFrameReadStatus,
         bleTransportWriteStatus = bleTransportWriteStatus,
         bleScanStatus = bleScanStatus,
         activeConnectionDeviceAddress = activeConnectionDeviceAddress,
@@ -461,6 +500,7 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
         connectToDevice = connectToDevice,
         disconnectDevice = disconnectDevice,
         readTransportMarker = readTransportMarker,
+        readTransportFrame = readTransportFrame,
         writeTransportMarker = writeTransportMarker,
         requestMissingPermissions = requestMissingPermissions,
         openBluetoothSettings = openBluetoothSettings
@@ -519,6 +559,7 @@ private fun BleGattServerStatusCard(gattServerStatus: BleGattServerStatus) {
 private fun DiscoveredBleDevicesCard(
     connectionStatus: BleConnectionStatus,
     transportReadStatus: NearbyBleTransportReadStatus,
+    transportFrameReadStatus: NearbyBleTransportFrameReadStatus,
     transportWriteStatus: NearbyBleTransportWriteStatus,
     scanStatus: BleScanStatus,
     activeConnectionDeviceAddress: String?,
@@ -526,6 +567,7 @@ private fun DiscoveredBleDevicesCard(
     onConnect: (String) -> Unit,
     onDisconnect: () -> Unit,
     onReadTransportMarker: () -> Unit,
+    onReadTransportFrame: () -> Unit,
     onWriteTransportMarker: () -> Unit
 ) {
     Card(
@@ -550,6 +592,11 @@ private fun DiscoveredBleDevicesCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
+                text = "BLE transport frame read: ${transportFrameReadStatus.toUiLabel()}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
                 text = "BLE transport write: ${transportWriteStatus.toUiLabel()}",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -562,11 +609,13 @@ private fun DiscoveredBleDevicesCard(
                             device = device,
                             connectionStatus = connectionStatus,
                             transportReadStatus = transportReadStatus,
+                            transportFrameReadStatus = transportFrameReadStatus,
                             transportWriteStatus = transportWriteStatus,
                             activeConnectionDeviceAddress = activeConnectionDeviceAddress,
                             onConnect = onConnect,
                             onDisconnect = onDisconnect,
                             onReadTransportMarker = onReadTransportMarker,
+                            onReadTransportFrame = onReadTransportFrame,
                             onWriteTransportMarker = onWriteTransportMarker
                         )
                     }
@@ -597,11 +646,13 @@ private fun BleDiscoveredDeviceRow(
     device: BleDiscoveredDevice,
     connectionStatus: BleConnectionStatus,
     transportReadStatus: NearbyBleTransportReadStatus,
+    transportFrameReadStatus: NearbyBleTransportFrameReadStatus,
     transportWriteStatus: NearbyBleTransportWriteStatus,
     activeConnectionDeviceAddress: String?,
     onConnect: (String) -> Unit,
     onDisconnect: () -> Unit,
     onReadTransportMarker: () -> Unit,
+    onReadTransportFrame: () -> Unit,
     onWriteTransportMarker: () -> Unit
 ) {
     val isActiveDevice = activeConnectionDeviceAddress == device.address
@@ -610,13 +661,17 @@ private fun BleDiscoveredDeviceRow(
     val showDisconnect = isActiveDevice && hasActiveConnection
     val showReadTransportMarker =
         isActiveDevice && connectionStatus == BleConnectionStatus.CONNECTED
+    val showReadTransportFrame =
+        isActiveDevice && connectionStatus == BleConnectionStatus.CONNECTED
     val showWriteTransportMarker =
         isActiveDevice && connectionStatus == BleConnectionStatus.CONNECTED
-    val isTransportMarkerActionActive =
+    val isTransportActionActive =
         transportReadStatus == NearbyBleTransportReadStatus.READING ||
+            transportFrameReadStatus == NearbyBleTransportFrameReadStatus.READING ||
             transportWriteStatus == NearbyBleTransportWriteStatus.WRITING
-    val isReadTransportMarkerEnabled = !isTransportMarkerActionActive
-    val isWriteTransportMarkerEnabled = !isTransportMarkerActionActive
+    val isReadTransportMarkerEnabled = !isTransportActionActive
+    val isReadTransportFrameEnabled = !isTransportActionActive
+    val isWriteTransportMarkerEnabled = !isTransportActionActive
     val showConnect = device.hasAuroraDiscoveryPayload &&
         !showDisconnect &&
         (!hasActiveConnection || isActiveDevice)
@@ -677,6 +732,14 @@ private fun BleDiscoveredDeviceRow(
                 onClick = onReadTransportMarker
             ) {
                 Text("Read transport marker")
+            }
+        }
+        if (showReadTransportFrame) {
+            Button(
+                enabled = isReadTransportFrameEnabled,
+                onClick = onReadTransportFrame
+            ) {
+                Text("Read transport frame")
             }
         }
         if (showWriteTransportMarker) {
@@ -790,6 +853,15 @@ private fun NearbyBleTransportReadStatus.toUiLabel(): String {
         NearbyBleTransportReadStatus.READING -> "Reading"
         NearbyBleTransportReadStatus.MARKER_SEEN -> "Marker seen"
         NearbyBleTransportReadStatus.NOT_AVAILABLE -> "Not available"
+    }
+}
+
+private fun NearbyBleTransportFrameReadStatus.toUiLabel(): String {
+    return when (this) {
+        NearbyBleTransportFrameReadStatus.IDLE -> "Idle"
+        NearbyBleTransportFrameReadStatus.READING -> "Reading"
+        NearbyBleTransportFrameReadStatus.FRAME_AVAILABLE -> "Frame available"
+        NearbyBleTransportFrameReadStatus.NOT_AVAILABLE -> "Not available"
     }
 }
 
