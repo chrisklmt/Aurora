@@ -283,7 +283,7 @@ class AndroidBleConnector(
             listener.onWriteResult(BleGattTransportFrameWriteResult.NotAvailable)
             return
         }
-        val characteristic = retainedTransportCharacteristic ?: run {
+        val characteristic = retainedFrameTransportCharacteristic ?: run {
             listener.onWriteResult(BleGattTransportFrameWriteResult.NotAvailable)
             return
         }
@@ -367,13 +367,16 @@ class AndroidBleConnector(
             return
         }
 
-        val didSucceed =
+        val markerWriteDidSucceed =
             characteristic.uuid == BleGattProfile.transportCharacteristicUuid &&
+                status == BluetoothGatt.GATT_SUCCESS
+        val frameWriteDidSucceed =
+            characteristic.uuid == BleGattProfile.frameTransportCharacteristicUuid &&
                 status == BluetoothGatt.GATT_SUCCESS
 
         if (hasPendingMarkerWrite) {
             val writeListener = takePendingWriteListener() ?: return
-            if (didSucceed) {
+            if (markerWriteDidSucceed) {
                 writeListener.onWriteResult(BleGattTransportWriteResult.Accepted)
             } else {
                 writeListener.onWriteResult(BleGattTransportWriteResult.NotAvailable)
@@ -382,7 +385,7 @@ class AndroidBleConnector(
         }
 
         val frameWriteListener = takePendingFrameWriteListener() ?: return
-        if (didSucceed) {
+        if (frameWriteDidSucceed) {
             frameWriteListener.onWriteResult(BleGattTransportFrameWriteResult.Accepted)
         } else {
             frameWriteListener.onWriteResult(BleGattTransportFrameWriteResult.NotAvailable)
