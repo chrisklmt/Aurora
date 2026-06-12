@@ -244,7 +244,9 @@ private fun createTransportCharacteristic(): BluetoothGattCharacteristic {
 private fun createFrameTransportCharacteristic(): BluetoothGattCharacteristic {
     return BluetoothGattCharacteristic(
         BleGattProfile.frameTransportCharacteristicUuid,
-        BluetoothGattCharacteristic.PROPERTY_READ,
-        BluetoothGattCharacteristic.PERMISSION_READ
+        BluetoothGattCharacteristic.PROPERTY_READ or
+            BluetoothGattCharacteristic.PROPERTY_WRITE,
+        BluetoothGattCharacteristic.PERMISSION_READ or
+            BluetoothGattCharacteristic.PERMISSION_WRITE
     )
 }
