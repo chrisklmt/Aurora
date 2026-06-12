@@ -109,14 +109,14 @@ class AndroidBleGattServer(
                 val isActiveSetup = activeServer === startedServer &&
                     activeListener != null &&
                     hasActiveServer
-                val isTransportCharacteristic =
-                    characteristic.uuid == BleGattProfile.transportCharacteristicUuid
                 val writeStatus = if (
                     isActiveSetup &&
                     !preparedWrite &&
                     offset == 0 &&
-                    isTransportCharacteristic &&
-                    isSupportedTransportWriteValue(value)
+                    isSupportedCharacteristicWrite(
+                        characteristic = characteristic,
+                        value = value
+                    )
                 ) {
                     BluetoothGatt.GATT_SUCCESS
                 } else {
@@ -229,6 +229,21 @@ private fun responseValueForOffset(value: ByteArray, offset: Int): ByteArray? {
 private fun isSupportedTransportWriteValue(value: ByteArray?): Boolean {
     return BleGattTransportPayload.matchesCurrent(value) ||
         BleGattTransportFrame.parse(value) != null
+}
+
+private fun isSupportedCharacteristicWrite(
+    characteristic: BluetoothGattCharacteristic,
+    value: ByteArray?
+): Boolean {
+    return when (characteristic.uuid) {
+        BleGattProfile.transportCharacteristicUuid ->
+            isSupportedTransportWriteValue(value)
+
+        BleGattProfile.frameTransportCharacteristicUuid ->
+            BleGattTransportFrame.parse(value) != null
+
+        else -> false
+    }
 }
 
 private fun createTransportCharacteristic(): BluetoothGattCharacteristic {
