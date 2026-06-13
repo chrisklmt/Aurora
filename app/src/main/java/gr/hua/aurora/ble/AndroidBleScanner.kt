@@ -14,11 +14,17 @@ class AndroidBleScanner(
     private var activeScanner: BluetoothLeScanner? = null
     private var activeCallback: ScanCallback? = null
     private var activeListener: BleScanner.Listener? = null
+    private var diagnostics = BleScanDiagnostics()
     private var isScanning = false
+
+    fun currentDiagnostics(): BleScanDiagnostics {
+        return diagnostics
+    }
 
     override fun start(listener: BleScanner.Listener) {
         clearActiveScan(notifyStopped = false)
         aggregator.clear()
+        diagnostics = BleScanDiagnostics()
 
         val adapter = bluetoothAdapter ?: run {
             listener.onStatusChanged(BleScanStatus.STOPPED)
@@ -84,6 +90,7 @@ class AndroidBleScanner(
         activeListener = null
         isScanning = false
         aggregator.clear()
+        diagnostics = BleScanDiagnostics()
 
         if (shouldNotifyStopped) {
             listener?.onStatusChanged(BleScanStatus.STOPPED)
@@ -91,10 +98,33 @@ class AndroidBleScanner(
     }
 
     private fun emitAggregatedDeviceUpdate(result: ScanResult) {
-        val mappedDevice = result.toBleDiscoveredDevice()
-        if (mappedDevice.address.isBlank()) {
+        val address = result.safeDeviceAddress()
+        if (address.isBlank()) {
             return
         }
+        val name = result.safeDeviceName() ?: result.safeScanRecordDeviceName()
+        val discoveryServiceData = result.safeDiscoveryServiceData()
+        val hasAuroraDiscoveryPayload = BleDiscoveryPayload.matchesCurrent(discoveryServiceData)
+
+        diagnostics = diagnostics.record(
+            deviceName = name,
+            deviceAddress = address,
+            rssi = result.rssi,
+            hadDiscoveryServiceData = discoveryServiceData != null,
+            hadAuroraDiscoveryPayload = hasAuroraDiscoveryPayload
+        )
+
+        val mappedDevice = BleDiscoveredDevice(
+            address = address,
+            name = name,
+            rssi = result.rssi,
+            isConnectable = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                result.isConnectable
+            } else {
+                null
+            },
+            hasAuroraDiscoveryPayload = hasAuroraDiscoveryPayload
+        )
 
         val mergedDevice = aggregator
             .update(mappedDevice)
@@ -103,22 +133,6 @@ class AndroidBleScanner(
 
         activeListener?.onDeviceDiscovered(mergedDevice)
     }
-}
-
-private fun ScanResult.toBleDiscoveredDevice(): BleDiscoveredDevice {
-    return BleDiscoveredDevice(
-        address = safeDeviceAddress(),
-        name = safeDeviceName() ?: safeScanRecordDeviceName(),
-        rssi = rssi,
-        isConnectable = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            isConnectable
-        } else {
-            null
-        },
-        hasAuroraDiscoveryPayload = BleDiscoveryPayload.matchesCurrent(
-            safeDiscoveryServiceData()
-        )
-    )
 }
 
 private fun ScanResult.safeDeviceAddress(): String {

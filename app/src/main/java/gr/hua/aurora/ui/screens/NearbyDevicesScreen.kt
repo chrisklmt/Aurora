@@ -41,6 +41,7 @@ import gr.hua.aurora.ble.BleDiscoveryService
 import gr.hua.aurora.ble.BleDiscoveredDevice
 import gr.hua.aurora.ble.BleGattServer
 import gr.hua.aurora.ble.BleGattServerStatus
+import gr.hua.aurora.ble.BleScanDiagnostics
 import gr.hua.aurora.ble.BleGattTransportFrameReadResult
 import gr.hua.aurora.ble.BleGattTransportFrameReader
 import gr.hua.aurora.ble.BleGattTransportPayload
@@ -89,6 +90,7 @@ private data class NearbyBleSessionState(
     val bleTransportFrameReadStatus: NearbyBleTransportFrameReadStatus,
     val bleTransportWriteStatus: NearbyBleTransportWriteStatus,
     val bleScanStatus: BleScanStatus,
+    val bleScanDiagnostics: BleScanDiagnostics,
     val activeConnectionDeviceAddress: String?,
     val discoveredBleDevices: List<BleDiscoveredDevice>,
     val connectToDevice: (String) -> Unit,
@@ -137,6 +139,7 @@ fun NearbyDevicesScreen(
                 transportFrameReadStatus = bleSessionState.bleTransportFrameReadStatus,
                 transportWriteStatus = bleSessionState.bleTransportWriteStatus,
                 scanStatus = bleSessionState.bleScanStatus,
+                scanDiagnostics = bleSessionState.bleScanDiagnostics,
                 activeConnectionDeviceAddress = bleSessionState.activeConnectionDeviceAddress,
                 devices = bleSessionState.discoveredBleDevices,
                 onConnect = bleSessionState.connectToDevice,
@@ -255,6 +258,9 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
     var bleScanStatus by remember {
         mutableStateOf(BleScanStatus.IDLE)
     }
+    var bleScanDiagnostics by remember {
+        mutableStateOf(BleScanDiagnostics())
+    }
     var activeConnectionDeviceAddress by remember {
         mutableStateOf<String?>(null)
     }
@@ -305,6 +311,7 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
                 bleGattServerStatus = BleGattServerStatus.STOPPED
                 bleScanner.stop()
                 bleScanStatus = BleScanStatus.STOPPED
+                bleScanDiagnostics = BleScanDiagnostics()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -369,14 +376,17 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
     DisposableEffect(bleScanner, shouldScan) {
         if (shouldScan) {
             bleScanStatus = BleScanStatus.IDLE
+            bleScanDiagnostics = BleScanDiagnostics()
             discoveredBleDevices = emptyList()
             bleScanner.start(
                 listener = object : BleScanner.Listener {
                     override fun onStatusChanged(status: BleScanStatus) {
                         bleScanStatus = status
+                        bleScanDiagnostics = bleScanner.currentDiagnostics()
                     }
 
                     override fun onDeviceDiscovered(device: BleDiscoveredDevice) {
+                        bleScanDiagnostics = bleScanner.currentDiagnostics()
                         if (device.address.isBlank()) {
                             return
                         }
@@ -388,12 +398,14 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
         } else {
             bleScanner.stop()
             bleScanStatus = BleScanStatus.STOPPED
+            bleScanDiagnostics = BleScanDiagnostics()
             discoveredBleDevices = emptyList()
         }
 
         onDispose {
             bleScanner.stop()
             bleScanStatus = BleScanStatus.STOPPED
+            bleScanDiagnostics = BleScanDiagnostics()
         }
     }
 
@@ -495,6 +507,7 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
         bleTransportFrameReadStatus = bleTransportFrameReadStatus,
         bleTransportWriteStatus = bleTransportWriteStatus,
         bleScanStatus = bleScanStatus,
+        bleScanDiagnostics = bleScanDiagnostics,
         activeConnectionDeviceAddress = activeConnectionDeviceAddress,
         discoveredBleDevices = discoveredBleDevices,
         connectToDevice = connectToDevice,
@@ -562,6 +575,7 @@ private fun DiscoveredBleDevicesCard(
     transportFrameReadStatus: NearbyBleTransportFrameReadStatus,
     transportWriteStatus: NearbyBleTransportWriteStatus,
     scanStatus: BleScanStatus,
+    scanDiagnostics: BleScanDiagnostics,
     activeConnectionDeviceAddress: String?,
     devices: List<BleDiscoveredDevice>,
     onConnect: (String) -> Unit,
@@ -598,6 +612,35 @@ private fun DiscoveredBleDevicesCard(
             )
             Text(
                 text = "BLE transport write: ${transportWriteStatus.toUiLabel()}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "BLE scan raw results: ${scanDiagnostics.rawScanResultCount}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "BLE Aurora matches: ${scanDiagnostics.auroraDiscoveryMatchCount}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "Last BLE scan: ${scanDiagnostics.lastDeviceName.toBleScanText()} / " +
+                    "${scanDiagnostics.lastDeviceAddress.toBleScanText()} / " +
+                    "RSSI ${scanDiagnostics.lastRssi.toBleScanRssiText()}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "Last BLE discovery service data: " +
+                    scanDiagnostics.lastHadDiscoveryServiceData.toSeenText(),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "Last BLE Aurora marker: " +
+                    scanDiagnostics.lastHadAuroraDiscoveryPayload.toSeenText(),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -871,5 +914,21 @@ private fun NearbyBleTransportWriteStatus.toUiLabel(): String {
         NearbyBleTransportWriteStatus.WRITING -> "Writing"
         NearbyBleTransportWriteStatus.ACCEPTED -> "Accepted"
         NearbyBleTransportWriteStatus.NOT_AVAILABLE -> "Not available"
+    }
+}
+
+private fun String?.toBleScanText(): String {
+    return this?.takeIf { it.isNotBlank() } ?: "Unknown"
+}
+
+private fun Int?.toBleScanRssiText(): String {
+    return this?.toString() ?: "Unknown"
+}
+
+private fun Boolean.toSeenText(): String {
+    return if (this) {
+        "Seen"
+    } else {
+        "Not seen"
     }
 }
