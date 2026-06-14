@@ -42,7 +42,8 @@ object BluetoothPermissionStatusReader {
             linkedSetOf(
                 Manifest.permission.BLUETOOTH_SCAN,
                 Manifest.permission.BLUETOOTH_ADVERTISE,
-                Manifest.permission.BLUETOOTH_CONNECT
+                Manifest.permission.BLUETOOTH_CONNECT,
+                Manifest.permission.ACCESS_FINE_LOCATION
             )
         } else {
             setOf(Manifest.permission.ACCESS_FINE_LOCATION)

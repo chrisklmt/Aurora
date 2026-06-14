@@ -6,6 +6,9 @@ import android.bluetooth.le.AdvertiseData
 import android.bluetooth.le.AdvertiseSettings
 import android.bluetooth.le.BluetoothLeAdvertiser
 import android.os.ParcelUuid
+import android.util.Log
+
+private const val tag = "AuroraBleAdvertiser"
 
 class AndroidBleAdvertiser(
     private val bluetoothAdapter: BluetoothAdapter?
@@ -47,6 +50,7 @@ class AndroidBleAdvertiser(
 
                 val failureListener = activeListener
                 clearActiveAdvertising(notifyStopped = false)
+                Log.w(tag, "BLE advertising start failed: errorCode=$errorCode")
                 failureListener?.onStatusChanged(BleAdvertiseStatus.STOPPED)
             }
         }
@@ -56,15 +60,17 @@ class AndroidBleAdvertiser(
             activeCallback = callback
             activeListener = listener
             advertiser.startAdvertising(
-                createPlaceholderAdvertiseSettings(),
+                createAdvertiseSettings(),
                 createAdvertiseData(request),
                 callback
             )
-        } catch (_: SecurityException) {
+        } catch (securityException: SecurityException) {
             clearActiveAdvertising(notifyStopped = false)
+            Log.w(tag, "BLE advertising start failed with security exception", securityException)
             listener.onStatusChanged(BleAdvertiseStatus.STOPPED)
-        } catch (_: RuntimeException) {
+        } catch (runtimeException: RuntimeException) {
             clearActiveAdvertising(notifyStopped = false)
+            Log.w(tag, "BLE advertising start failed with runtime exception", runtimeException)
             listener.onStatusChanged(BleAdvertiseStatus.STOPPED)
         }
     }
@@ -98,17 +104,19 @@ class AndroidBleAdvertiser(
     }
 }
 
-private fun createPlaceholderAdvertiseSettings(): AdvertiseSettings {
+private fun createAdvertiseSettings(): AdvertiseSettings {
     return AdvertiseSettings.Builder()
-        .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_POWER)
-        .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_ULTRA_LOW)
-        .setConnectable(false)
+        .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
+        .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
+        .setConnectable(true)
         .build()
 }
 
 private fun createAdvertiseData(request: BleAdvertiseRequest): AdvertiseData {
     val serviceDataUuid = ParcelUuid(request.serviceUuid)
     return AdvertiseData.Builder()
+        // Το service data μένει στο primary packet γιατί ένα 128-bit UUID μαζί με
+        // 128-bit service data μπορεί να ξεπεράσει το legacy όριο των 31 bytes.
         .addServiceData(serviceDataUuid, request.payload)
         .setIncludeDeviceName(false)
         .setIncludeTxPowerLevel(false)

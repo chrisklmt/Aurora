@@ -8,12 +8,13 @@ import org.junit.Test
 
 class BluetoothPermissionStatusTest {
     @Test
-    fun api31AndAboveRequiresModernBluetoothPermissions() {
+    fun api31AndAboveRequiresModernBluetoothPermissionsAndFineLocation() {
         assertEquals(
             linkedSetOf(
                 Manifest.permission.BLUETOOTH_SCAN,
                 Manifest.permission.BLUETOOTH_ADVERTISE,
-                Manifest.permission.BLUETOOTH_CONNECT
+                Manifest.permission.BLUETOOTH_CONNECT,
+                Manifest.permission.ACCESS_FINE_LOCATION
             ),
             BluetoothPermissionStatusReader.requiredPermissionsForSdkInt(31)
         )

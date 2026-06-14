@@ -7,14 +7,15 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -110,6 +111,9 @@ fun NearbyDevicesScreen(
     onBack: () -> Unit
 ) {
     val bleSessionState = rememberNearbyBleSessionState()
+    var showPreviewRows by remember {
+        mutableStateOf(false)
+    }
 
     PlaceholderScreenScaffold(
         title = "Nearby Devices",
@@ -119,79 +123,113 @@ fun NearbyDevicesScreen(
         rightAction = AuroraTopBarAction.BACK,
         onRightActionClick = onBack
     ) {
-        Column(
+        LazyColumn(
+            contentPadding = PaddingValues(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            ReadinessStatusCard(
-                bluetoothStatus = bleSessionState.bluetoothStatus,
-                onGrantBluetoothAccess = bleSessionState.requestMissingPermissions,
-                onOpenBluetoothSettings = bleSessionState.openBluetoothSettings
-            )
-            BleAdvertisingStatusCard(
-                advertiseStatus = bleSessionState.bleAdvertiseStatus
-            )
-            BleGattServerStatusCard(
-                gattServerStatus = bleSessionState.bleGattServerStatus
-            )
-            DiscoveredBleDevicesCard(
-                connectionStatus = bleSessionState.bleConnectionStatus,
-                transportReadStatus = bleSessionState.bleTransportReadStatus,
-                transportFrameReadStatus = bleSessionState.bleTransportFrameReadStatus,
-                transportWriteStatus = bleSessionState.bleTransportWriteStatus,
-                scanStatus = bleSessionState.bleScanStatus,
-                scanDiagnostics = bleSessionState.bleScanDiagnostics,
-                activeConnectionDeviceAddress = bleSessionState.activeConnectionDeviceAddress,
-                devices = bleSessionState.discoveredBleDevices,
-                onConnect = bleSessionState.connectToDevice,
-                onDisconnect = bleSessionState.disconnectDevice,
-                onReadTransportMarker = bleSessionState.readTransportMarker,
-                onReadTransportFrame = bleSessionState.readTransportFrame,
-                onWriteTransportMarker = bleSessionState.writeTransportMarker
-            )
-            Text(
-                text = "The sample nearby rows below still come from local preview state. They are separate from the live BLE scanner results above.",
-                style = MaterialTheme.typography.bodyLarge
-            )
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                items(nearbyDevices) { device ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth()
+            item {
+                ReadinessStatusCard(
+                    bluetoothStatus = bleSessionState.bluetoothStatus,
+                    onGrantBluetoothAccess = bleSessionState.requestMissingPermissions,
+                    onOpenBluetoothSettings = bleSessionState.openBluetoothSettings
+                )
+            }
+            item {
+                DiscoveredBleDevicesCard(
+                    connectionStatus = bleSessionState.bleConnectionStatus,
+                    transportReadStatus = bleSessionState.bleTransportReadStatus,
+                    transportFrameReadStatus = bleSessionState.bleTransportFrameReadStatus,
+                    transportWriteStatus = bleSessionState.bleTransportWriteStatus,
+                    scanStatus = bleSessionState.bleScanStatus,
+                    scanDiagnostics = bleSessionState.bleScanDiagnostics,
+                    activeConnectionDeviceAddress = bleSessionState.activeConnectionDeviceAddress,
+                    devices = bleSessionState.discoveredBleDevices,
+                    onConnect = bleSessionState.connectToDevice,
+                    onDisconnect = bleSessionState.disconnectDevice,
+                    onReadTransportMarker = bleSessionState.readTransportMarker,
+                    onReadTransportFrame = bleSessionState.readTransportFrame,
+                    onWriteTransportMarker = bleSessionState.writeTransportMarker
+                )
+            }
+            item {
+                BleRuntimeStatusCard(
+                    advertiseStatus = bleSessionState.bleAdvertiseStatus,
+                    gattServerStatus = bleSessionState.bleGattServerStatus
+                )
+            }
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Column(
-                            modifier = Modifier.padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        Text(
+                            text = "Sample nearby rows",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            text = "These placeholder rows are separate from the live BLE scanner results above.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        TextButton(
+                            onClick = { showPreviewRows = !showPreviewRows }
                         ) {
                             Text(
-                                text = device.displayName,
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                            Text(
-                                text = device.detail,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                            Text(
-                                text = "Transport: ${device.transportType.toUiLabel()}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            if (!device.signalLabel.isNullOrBlank()) {
-                                Text(
-                                    text = "Signal: ${device.signalLabel}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Text(
-                                text = if (device.isConnectable) {
-                                    "Status: Connectable"
+                                if (showPreviewRows) {
+                                    "Hide sample rows"
                                 } else {
-                                    "Status: Preview only"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    "Show sample rows"
+                                }
                             )
+                        }
+                        if (showPreviewRows) {
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                nearbyDevices.forEach { device ->
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(14.dp),
+                                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Text(
+                                                text = device.displayName,
+                                                style = MaterialTheme.typography.titleMedium
+                                            )
+                                            Text(
+                                                text = device.detail,
+                                                style = MaterialTheme.typography.bodyMedium
+                                            )
+                                            Text(
+                                                text = "Transport: ${device.transportType.toUiLabel()}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            if (!device.signalLabel.isNullOrBlank()) {
+                                                Text(
+                                                    text = "Signal: ${device.signalLabel}",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                            Text(
+                                                text = if (device.isConnectable) {
+                                                    "Status: Connectable"
+                                                } else {
+                                                    "Status: Preview only"
+                                                },
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -521,7 +559,10 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
 }
 
 @Composable
-private fun BleAdvertisingStatusCard(advertiseStatus: BleAdvertiseStatus) {
+private fun BleRuntimeStatusCard(
+    advertiseStatus: BleAdvertiseStatus,
+    gattServerStatus: BleGattServerStatus
+) {
     Card(
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -530,37 +571,16 @@ private fun BleAdvertisingStatusCard(advertiseStatus: BleAdvertiseStatus) {
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(
-                text = "BLE advertising",
+                text = "BLE status",
                 style = MaterialTheme.typography.titleMedium
             )
             Text(
-                text = when (advertiseStatus) {
-                    BleAdvertiseStatus.ADVERTISING -> "Advertising: Active"
-                    BleAdvertiseStatus.IDLE -> "Advertising: Idle"
-                    BleAdvertiseStatus.STOPPED -> "Advertising: Stopped"
-                },
+                text = "Advertising: ${advertiseStatus.toUiLabel()}",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-        }
-    }
-}
-
-@Composable
-private fun BleGattServerStatusCard(gattServerStatus: BleGattServerStatus) {
-    Card(
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
             Text(
-                text = "BLE GATT server",
-                style = MaterialTheme.typography.titleMedium
-            )
-            Text(
-                text = "BLE GATT server: ${gattServerStatus.toUiLabel()}",
+                text = "GATT server: ${gattServerStatus.toUiLabel()}",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -584,6 +604,10 @@ private fun DiscoveredBleDevicesCard(
     onReadTransportFrame: () -> Unit,
     onWriteTransportMarker: () -> Unit
 ) {
+    var showDiagnostics by remember {
+        mutableStateOf(false)
+    }
+
     Card(
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -596,71 +620,31 @@ private fun DiscoveredBleDevicesCard(
                 style = MaterialTheme.typography.titleMedium
             )
             Text(
-                text = "BLE connection: ${connectionStatus.toUiLabel()}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "BLE transport read: ${transportReadStatus.toUiLabel()}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "BLE transport frame read: ${transportFrameReadStatus.toUiLabel()}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "BLE transport write: ${transportWriteStatus.toUiLabel()}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "BLE scan raw results: ${scanDiagnostics.rawScanResultCount}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "BLE Aurora matches: ${scanDiagnostics.auroraDiscoveryMatchCount}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "Last BLE scan: ${scanDiagnostics.lastDeviceName.toBleScanText()} / " +
-                    "${scanDiagnostics.lastDeviceAddress.toBleScanText()} / " +
-                    "RSSI ${scanDiagnostics.lastRssi.toBleScanRssiText()}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "Last BLE discovery service data: " +
-                    scanDiagnostics.lastHadDiscoveryServiceData.toSeenText(),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "Last BLE Aurora marker: " +
-                    scanDiagnostics.lastHadAuroraDiscoveryPayload.toSeenText(),
+                text = "Visible devices: ${devices.size}",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
             when {
                 devices.isNotEmpty() -> {
-                    devices.forEach { device ->
-                        BleDiscoveredDeviceRow(
-                            device = device,
-                            connectionStatus = connectionStatus,
-                            transportReadStatus = transportReadStatus,
-                            transportFrameReadStatus = transportFrameReadStatus,
-                            transportWriteStatus = transportWriteStatus,
-                            activeConnectionDeviceAddress = activeConnectionDeviceAddress,
-                            onConnect = onConnect,
-                            onDisconnect = onDisconnect,
-                            onReadTransportMarker = onReadTransportMarker,
-                            onReadTransportFrame = onReadTransportFrame,
-                            onWriteTransportMarker = onWriteTransportMarker
-                        )
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        devices.forEach { device ->
+                            BleDiscoveredDeviceRow(
+                                device = device,
+                                connectionStatus = connectionStatus,
+                                transportReadStatus = transportReadStatus,
+                                transportFrameReadStatus = transportFrameReadStatus,
+                                transportWriteStatus = transportWriteStatus,
+                                activeConnectionDeviceAddress = activeConnectionDeviceAddress,
+                                onConnect = onConnect,
+                                onDisconnect = onDisconnect,
+                                onReadTransportMarker = onReadTransportMarker,
+                                onReadTransportFrame = onReadTransportFrame,
+                                onWriteTransportMarker = onWriteTransportMarker
+                            )
+                        }
                     }
                 }
 
@@ -675,6 +659,79 @@ private fun DiscoveredBleDevicesCard(
                 else -> {
                     Text(
                         text = "Live BLE results will appear here when Bluetooth access is ready and this screen is active.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            TextButton(
+                onClick = { showDiagnostics = !showDiagnostics }
+            ) {
+                Text(
+                    if (showDiagnostics) {
+                        "Hide BLE diagnostics"
+                    } else {
+                        "Show BLE diagnostics"
+                    }
+                )
+            }
+
+            if (showDiagnostics) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "Scan: ${scanStatus.toUiLabel()}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "Connection: ${connectionStatus.toUiLabel()}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "Transport read: ${transportReadStatus.toUiLabel()}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "Transport frame read: ${transportFrameReadStatus.toUiLabel()}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "Transport write: ${transportWriteStatus.toUiLabel()}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "BLE scan raw results: ${scanDiagnostics.rawScanResultCount}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "BLE Aurora matches: ${scanDiagnostics.auroraDiscoveryMatchCount}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "Last BLE scan: ${scanDiagnostics.lastDeviceName.toBleScanText()} / " +
+                            "${scanDiagnostics.lastDeviceAddress.toBleScanText()} / " +
+                            "RSSI ${scanDiagnostics.lastRssi.toBleScanRssiText()}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "Last BLE discovery service data: " +
+                            scanDiagnostics.lastHadDiscoveryServiceData.toSeenText(),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "Last BLE Aurora marker: " +
+                            scanDiagnostics.lastHadAuroraDiscoveryPayload.toSeenText(),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -723,34 +780,30 @@ private fun BleDiscoveredDeviceRow(
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Text(
-            text = device.name ?: device.address,
+            text = device.name ?: "Unknown BLE device",
             style = MaterialTheme.typography.titleSmall
         )
         Text(
-            text = device.address,
+            text = "${device.address} | RSSI ${device.rssi.toBleScanRssiText()} dBm",
             style = MaterialTheme.typography.bodyMedium
         )
-        if (device.rssi != null) {
-            Text(
-                text = "Signal: ${device.rssi} dBm",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
         Text(
-            text = if (device.isConnectable == true) {
-                "Status: Connectable"
-            } else {
-                "Status: Seen only"
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            text = if (device.hasAuroraDiscoveryPayload) {
-                "Aurora discovery marker: Seen"
-            } else {
-                "Aurora discovery marker: Not seen"
+            text = buildString {
+                append(
+                    if (device.hasAuroraDiscoveryPayload) {
+                        "Aurora marker: Seen"
+                    } else {
+                        "Aurora marker: Not seen"
+                    }
+                )
+                append(" | ")
+                append(
+                    if (device.isConnectable == true) {
+                        "Connectable"
+                    } else {
+                        "Seen only"
+                    }
+                )
             },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -914,6 +967,22 @@ private fun NearbyBleTransportWriteStatus.toUiLabel(): String {
         NearbyBleTransportWriteStatus.WRITING -> "Writing"
         NearbyBleTransportWriteStatus.ACCEPTED -> "Accepted"
         NearbyBleTransportWriteStatus.NOT_AVAILABLE -> "Not available"
+    }
+}
+
+private fun BleAdvertiseStatus.toUiLabel(): String {
+    return when (this) {
+        BleAdvertiseStatus.ADVERTISING -> "Active"
+        BleAdvertiseStatus.IDLE -> "Idle"
+        BleAdvertiseStatus.STOPPED -> "Stopped"
+    }
+}
+
+private fun BleScanStatus.toUiLabel(): String {
+    return when (this) {
+        BleScanStatus.IDLE -> "Idle"
+        BleScanStatus.SCANNING -> "Scanning"
+        BleScanStatus.STOPPED -> "Stopped"
     }
 }
 
