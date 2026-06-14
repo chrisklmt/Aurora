@@ -104,7 +104,8 @@ class AndroidBleScanner(
         }
         val name = result.safeDeviceName() ?: result.safeScanRecordDeviceName()
         val discoveryServiceData = result.safeDiscoveryServiceData()
-        val hasAuroraDiscoveryPayload = BleDiscoveryPayload.matchesCurrent(discoveryServiceData)
+        val discoveryPayload = BleDiscoveryPayload.parse(discoveryServiceData)
+        val hasAuroraDiscoveryPayload = discoveryPayload != null
 
         diagnostics = diagnostics.record(
             deviceName = name,
@@ -123,12 +124,13 @@ class AndroidBleScanner(
             } else {
                 null
             },
-            hasAuroraDiscoveryPayload = hasAuroraDiscoveryPayload
+            hasAuroraDiscoveryPayload = hasAuroraDiscoveryPayload,
+            stablePeerId = discoveryPayload?.stablePeerId
         )
 
         val mergedDevice = aggregator
             .update(mappedDevice)
-            .firstOrNull { device -> device.address == mappedDevice.address }
+            .firstOrNull { device -> device.identityKey() == mappedDevice.identityKey() }
             ?: return
 
         activeListener?.onDeviceDiscovered(mergedDevice)

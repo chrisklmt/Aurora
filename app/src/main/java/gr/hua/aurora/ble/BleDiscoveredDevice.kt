@@ -5,5 +5,10 @@ data class BleDiscoveredDevice(
     val name: String?,
     val rssi: Int?,
     val isConnectable: Boolean?,
-    val hasAuroraDiscoveryPayload: Boolean
+    val hasAuroraDiscoveryPayload: Boolean,
+    val stablePeerId: BleStablePeerId? = null
 )
+
+internal fun BleDiscoveredDevice.identityKey(): String {
+    return stablePeerId?.toHexKey() ?: address.trim()
+}

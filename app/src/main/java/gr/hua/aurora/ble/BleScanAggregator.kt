@@ -1,30 +1,33 @@
 package gr.hua.aurora.ble
 
 class BleScanAggregator {
-    private val devicesByAddress = linkedMapOf<String, BleDiscoveredDevice>()
+    private val devicesByIdentityKey = linkedMapOf<String, BleDiscoveredDevice>()
 
     fun update(device: BleDiscoveredDevice): List<BleDiscoveredDevice> {
         val address = device.address.takeIf { it.isNotBlank() } ?: return snapshot()
-        val current = devicesByAddress[address]
-
-        devicesByAddress[address] = if (current == null) {
+        val normalizedDevice = if (address == device.address) {
             device
         } else {
-            BleDiscoveredDevice(
-                address = current.address,
-                name = device.name?.takeIf { it.isNotBlank() } ?: current.name,
-                rssi = device.rssi,
-                isConnectable = device.isConnectable ?: current.isConnectable,
-                hasAuroraDiscoveryPayload = current.hasAuroraDiscoveryPayload ||
-                    device.hasAuroraDiscoveryPayload
-            )
+            device.copy(address = address)
         }
+        val identityKey = normalizedDevice.identityKey()
+        val current = devicesByIdentityKey[identityKey]
+            ?: takeMigratedAddressMatchOrNull(normalizedDevice, identityKey)
+
+        if (normalizedDevice.stablePeerId != null) {
+            removeLegacyAddressMatches(normalizedDevice, identityKey)
+        }
+
+        devicesByIdentityKey[identityKey] = mergeDevice(
+            current = current,
+            device = normalizedDevice
+        )
 
         return snapshot()
     }
 
     fun snapshot(): List<BleDiscoveredDevice> {
-        return devicesByAddress.values
+        return devicesByIdentityKey.values
             .sortedWith(
                 compareByDescending<BleDiscoveredDevice> { it.rssi != null }
                     .thenByDescending { it.rssi }
@@ -33,6 +36,51 @@ class BleScanAggregator {
     }
 
     fun clear() {
-        devicesByAddress.clear()
+        devicesByIdentityKey.clear()
+    }
+
+    private fun takeMigratedAddressMatchOrNull(
+        device: BleDiscoveredDevice,
+        identityKey: String
+    ): BleDiscoveredDevice? {
+        if (device.stablePeerId == null) {
+            return null
+        }
+
+        return devicesByIdentityKey.entries.firstOrNull { entry ->
+            entry.key != identityKey && entry.value.address == device.address
+        }?.value
+    }
+
+    private fun removeLegacyAddressMatches(
+        device: BleDiscoveredDevice,
+        identityKey: String
+    ) {
+        val iterator = devicesByIdentityKey.entries.iterator()
+        while (iterator.hasNext()) {
+            val entry = iterator.next()
+            if (entry.key != identityKey && entry.value.address == device.address) {
+                iterator.remove()
+            }
+        }
+    }
+
+    private fun mergeDevice(
+        current: BleDiscoveredDevice?,
+        device: BleDiscoveredDevice
+    ): BleDiscoveredDevice {
+        if (current == null) {
+            return device
+        }
+
+        return BleDiscoveredDevice(
+            address = device.address,
+            name = device.name?.takeIf { it.isNotBlank() } ?: current.name,
+            rssi = device.rssi,
+            isConnectable = device.isConnectable ?: current.isConnectable,
+            hasAuroraDiscoveryPayload = current.hasAuroraDiscoveryPayload ||
+                device.hasAuroraDiscoveryPayload,
+            stablePeerId = device.stablePeerId ?: current.stablePeerId
+        )
     }
 }

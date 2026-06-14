@@ -103,6 +103,74 @@ class BleScanAggregatorTest {
     }
 
     @Test
+    fun sameStablePeerIdAcrossDifferentAddressesUpdatesExistingDevice() {
+        val aggregator = BleScanAggregator()
+        val stablePeerId = stablePeerId(
+            byteArrayOf(0x01, 0x23, 0x45, 0x67, 0x09, 0x11, 0x22, 0x33)
+        )
+
+        aggregator.update(
+            device(
+                address = "AA:01",
+                name = "Aurora",
+                rssi = -65,
+                isConnectable = false,
+                hasAuroraDiscoveryPayload = true,
+                stablePeerId = stablePeerId
+            )
+        )
+        val snapshot = aggregator.update(
+            device(
+                address = "AA:02",
+                name = null,
+                rssi = -40,
+                isConnectable = true,
+                hasAuroraDiscoveryPayload = true,
+                stablePeerId = stablePeerId
+            )
+        )
+
+        assertEquals(1, snapshot.size)
+        assertEquals("AA:02", snapshot.single().address)
+        assertEquals("Aurora", snapshot.single().name)
+        assertEquals(-40, snapshot.single().rssi)
+        assertEquals(true, snapshot.single().isConnectable)
+        assertEquals(true, snapshot.single().hasAuroraDiscoveryPayload)
+        assertEquals(stablePeerId, snapshot.single().stablePeerId)
+    }
+
+    @Test
+    fun stablePeerIdReplacesLegacyAddressEntryForSameAddress() {
+        val aggregator = BleScanAggregator()
+        val stablePeerId = stablePeerId(
+            byteArrayOf(0x55, 0x44, 0x33, 0x22, 0x11, 0x10, 0x20, 0x30)
+        )
+
+        aggregator.update(
+            device(
+                address = "AA:BB",
+                name = "Aurora",
+                rssi = -60,
+                hasAuroraDiscoveryPayload = true
+            )
+        )
+        val snapshot = aggregator.update(
+            device(
+                address = "AA:BB",
+                name = null,
+                rssi = -45,
+                stablePeerId = stablePeerId
+            )
+        )
+
+        assertEquals(1, snapshot.size)
+        assertEquals(stablePeerId, snapshot.single().stablePeerId)
+        assertEquals("AA:BB", snapshot.single().address)
+        assertEquals("Aurora", snapshot.single().name)
+        assertEquals(-45, snapshot.single().rssi)
+    }
+
+    @Test
     fun blankAddressIsIgnored() {
         val aggregator = BleScanAggregator()
 
@@ -152,14 +220,20 @@ class BleScanAggregatorTest {
         name: String? = null,
         rssi: Int? = null,
         isConnectable: Boolean? = null,
-        hasAuroraDiscoveryPayload: Boolean = false
+        hasAuroraDiscoveryPayload: Boolean = false,
+        stablePeerId: BleStablePeerId? = null
     ): BleDiscoveredDevice {
         return BleDiscoveredDevice(
             address = address,
             name = name,
             rssi = rssi,
             isConnectable = isConnectable,
-            hasAuroraDiscoveryPayload = hasAuroraDiscoveryPayload
+            hasAuroraDiscoveryPayload = hasAuroraDiscoveryPayload,
+            stablePeerId = stablePeerId
         )
+    }
+
+    private fun stablePeerId(bytes: ByteArray): BleStablePeerId {
+        return BleStablePeerId.fromBytes(bytes)
     }
 }

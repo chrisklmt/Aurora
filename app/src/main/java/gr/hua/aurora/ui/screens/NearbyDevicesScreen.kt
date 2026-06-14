@@ -48,18 +48,18 @@ import gr.hua.aurora.ble.BleGattTransportFrameReader
 import gr.hua.aurora.ble.BleGattTransportPayload
 import gr.hua.aurora.ble.BleGattTransportReadResult
 import gr.hua.aurora.ble.BleGattTransportReader
+import gr.hua.aurora.ble.BleStablePeerId
 import gr.hua.aurora.ble.BleGattTransportWriteResult
 import gr.hua.aurora.ble.BleGattTransportWriter
 import gr.hua.aurora.ble.BleScanStatus
 import gr.hua.aurora.ble.BleScanner
 import gr.hua.aurora.ble.BluetoothPermissionStatus
 import gr.hua.aurora.ble.BluetoothPermissionStatusReader
+import gr.hua.aurora.ble.identityKey
+import gr.hua.aurora.identity.AndroidKeystoreLocalAgreementPublicKey
 import gr.hua.aurora.model.NearbyDevicePreview
 import gr.hua.aurora.model.TransportType
 import gr.hua.aurora.ui.components.AuroraTopBarAction
-
-private val temporaryNearbyAdvertisePlaceholderPayload =
-    BleDiscoveryPayload.current().toByteArray()
 
 private enum class NearbyBleTransportReadStatus {
     IDLE,
@@ -263,10 +263,17 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
     val bleScanner = remember(bluetoothAdapter) {
         AndroidBleScanner(bluetoothAdapter)
     }
-    val temporaryNearbyAdvertisePlaceholderRequest = remember {
+    val advertisedStablePeerId = remember {
+        runCatching {
+            BleStablePeerId.deriveFromPublicKeyBytes(
+                AndroidKeystoreLocalAgreementPublicKey.ensureAgreementPublicKeyBytes()
+            )
+        }.getOrNull()
+    }
+    val temporaryNearbyAdvertisePlaceholderRequest = remember(advertisedStablePeerId) {
         BleAdvertiseRequest(
             serviceUuid = BleDiscoveryService.serviceUuid,
-            payload = temporaryNearbyAdvertisePlaceholderPayload
+            payload = BleDiscoveryPayload.current(advertisedStablePeerId).toByteArray()
         )
     }
     var bluetoothStatus by remember(context) {
@@ -909,8 +916,22 @@ private fun List<BleDiscoveredDevice>.upsertBleDevice(
     device: BleDiscoveredDevice
 ): List<BleDiscoveredDevice> {
     val address = device.address.takeIf { it.isNotBlank() } ?: return this
+    val normalizedDevice = if (address == device.address) {
+        device
+    } else {
+        device.copy(address = address)
+    }
+    val identityKey = normalizedDevice.identityKey()
 
-    return (filterNot { existingDevice -> existingDevice.address == address } + device)
+    return (filterNot { existingDevice ->
+        when {
+            normalizedDevice.stablePeerId != null ->
+                existingDevice.identityKey() == identityKey ||
+                    existingDevice.address == address
+
+            else -> existingDevice.identityKey() == identityKey
+        }
+    } + normalizedDevice)
         .sortedWith(
             compareByDescending<BleDiscoveredDevice> { it.rssi != null }
                 .thenByDescending { it.rssi }

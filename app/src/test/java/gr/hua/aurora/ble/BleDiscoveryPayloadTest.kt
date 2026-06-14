@@ -9,6 +9,9 @@ import java.util.UUID
 
 class BleDiscoveryPayloadTest {
     private val serviceUuid = UUID.fromString("12345678-1234-1234-1234-1234567890ab")
+    private val stablePeerId = BleStablePeerId.fromBytes(
+        byteArrayOf(0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x7F)
+    )
 
     @Test
     fun currentPayloadMatchesCurrent() {
@@ -58,6 +61,30 @@ class BleDiscoveryPayloadTest {
     }
 
     @Test
+    fun payloadWithStablePeerIdMatchesCurrent() {
+        val payload = BleDiscoveryPayload.current(stablePeerId)
+
+        assertTrue(BleDiscoveryPayload.matchesCurrent(payload.toByteArray()))
+    }
+
+    @Test
+    fun legacyPayloadParsesWithoutStablePeerId() {
+        val payload = BleDiscoveryPayload.parse(byteArrayOf(0x01, 0x01))
+
+        assertEquals(null, payload?.stablePeerId)
+        assertArrayEquals(byteArrayOf(0x01, 0x01), payload?.toByteArray())
+    }
+
+    @Test
+    fun payloadWithStablePeerIdParsesExpectedFields() {
+        val payload = BleDiscoveryPayload.current(stablePeerId)
+        val parsed = BleDiscoveryPayload.parse(payload.toByteArray())
+
+        assertEquals(stablePeerId, parsed?.stablePeerId)
+        assertArrayEquals(payload.toByteArray(), parsed?.toByteArray())
+    }
+
+    @Test
     fun toByteArrayReturnsDefensiveCopy() {
         val payload = BleDiscoveryPayload.current()
 
@@ -89,6 +116,18 @@ class BleDiscoveryPayloadTest {
         )
 
         assertArrayEquals(byteArrayOf(0x01, 0x01), request.payload)
+    }
+
+    @Test
+    fun payloadWithStablePeerIdFitsBleAdvertiseRequestLimit() {
+        val payload = BleDiscoveryPayload.current(stablePeerId)
+
+        val request = BleAdvertiseRequest(
+            serviceUuid = serviceUuid,
+            payload = payload.toByteArray()
+        )
+
+        assertArrayEquals(payload.toByteArray(), request.payload)
     }
 
     @Test

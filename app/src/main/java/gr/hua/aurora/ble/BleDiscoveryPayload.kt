@@ -2,9 +2,13 @@ package gr.hua.aurora.ble
 
 private const val currentBleDiscoveryPayloadVersion: Byte = 0x01
 private const val currentBleDiscoveryPayloadKind: Byte = 0x01
+private const val legacyBleDiscoveryPayloadSizeBytes = 2
+private const val stablePeerIdBleDiscoveryPayloadSizeBytes =
+    legacyBleDiscoveryPayloadSizeBytes + BleStablePeerId.sizeBytes
 
 class BleDiscoveryPayload private constructor(
-    private val bytes: ByteArray
+    private val bytes: ByteArray,
+    val stablePeerId: BleStablePeerId?
 ) {
     fun toByteArray(): ByteArray {
         return bytes.copyOf()
@@ -26,21 +30,59 @@ class BleDiscoveryPayload private constructor(
     }
 
     companion object {
-        fun current(): BleDiscoveryPayload {
+        fun current(stablePeerId: BleStablePeerId? = null): BleDiscoveryPayload {
             return BleDiscoveryPayload(
-                currentBytes()
+                currentBytes(stablePeerId),
+                stablePeerId
+            )
+        }
+
+        fun parse(bytes: ByteArray?): BleDiscoveryPayload? {
+            val copiedBytes = bytes?.copyOf() ?: return null
+            if (copiedBytes.size != legacyBleDiscoveryPayloadSizeBytes &&
+                copiedBytes.size != stablePeerIdBleDiscoveryPayloadSizeBytes
+            ) {
+                return null
+            }
+
+            if (copiedBytes[0] != currentBleDiscoveryPayloadVersion ||
+                copiedBytes[1] != currentBleDiscoveryPayloadKind
+            ) {
+                return null
+            }
+
+            val stablePeerId = if (copiedBytes.size == legacyBleDiscoveryPayloadSizeBytes) {
+                null
+            } else {
+                BleStablePeerId.fromBytes(
+                    copiedBytes.copyOfRange(
+                        legacyBleDiscoveryPayloadSizeBytes,
+                        stablePeerIdBleDiscoveryPayloadSizeBytes
+                    )
+                )
+            }
+
+            return BleDiscoveryPayload(
+                bytes = copiedBytes,
+                stablePeerId = stablePeerId
             )
         }
 
         fun matchesCurrent(bytes: ByteArray?): Boolean {
-            return bytes?.contentEquals(currentBytes()) == true
+            return parse(bytes) != null
         }
 
-        private fun currentBytes(): ByteArray {
-            return byteArrayOf(
+        private fun currentBytes(stablePeerId: BleStablePeerId?): ByteArray {
+            val markerBytes = byteArrayOf(
                 currentBleDiscoveryPayloadVersion,
                 currentBleDiscoveryPayloadKind
             )
+
+            return if (stablePeerId == null) {
+                markerBytes
+            } else {
+                markerBytes + stablePeerId.toByteArray()
+            }
         }
     }
 }
