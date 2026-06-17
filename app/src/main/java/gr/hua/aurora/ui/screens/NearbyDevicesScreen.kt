@@ -59,7 +59,10 @@ import gr.hua.aurora.ble.discovery.identityKey
 import gr.hua.aurora.identity.AndroidKeystoreLocalAgreementPublicKey
 import gr.hua.aurora.model.NearbyDevicePreview
 import gr.hua.aurora.model.TransportType
+import gr.hua.aurora.state.AuroraAvailabilityPreference
+import gr.hua.aurora.ui.components.AuroraAvailabilityIndicator
 import gr.hua.aurora.ui.components.AuroraTopBarAction
+import gr.hua.aurora.ui.components.buildAuroraAvailabilityUiState
 
 private enum class NearbyBleTransportReadStatus {
     IDLE,
@@ -107,17 +110,27 @@ private data class NearbyBleSessionState(
 fun NearbyDevicesScreen(
     nearbyDevices: List<NearbyDevicePreview>,
     currentUsername: String,
+    desiredAvailability: AuroraAvailabilityPreference,
     onResetLocalData: () -> Unit,
     onBack: () -> Unit
 ) {
     val bleSessionState = rememberNearbyBleSessionState()
+    val availabilityState = remember(desiredAvailability, bleSessionState.bluetoothStatus) {
+        buildAuroraAvailabilityUiState(
+            desiredAvailability = desiredAvailability,
+            bluetoothStatus = bleSessionState.bluetoothStatus
+        )
+    }
     var showPreviewRows by remember {
         mutableStateOf(false)
     }
 
     PlaceholderScreenScaffold(
         title = "Nearby Devices",
-        subtitle = "Discovery placeholder",
+        subtitle = null,
+        subtitleContent = {
+            AuroraAvailabilityIndicator(uiState = availabilityState)
+        },
         username = currentUsername,
         onUsernameTripleTap = onResetLocalData,
         rightAction = AuroraTopBarAction.BACK,

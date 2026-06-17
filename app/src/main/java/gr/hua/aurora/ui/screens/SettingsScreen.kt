@@ -3,12 +3,15 @@ package gr.hua.aurora.ui.screens
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -92,6 +95,7 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            HorizontalDivider()
             Text(
                 text = "Global Chat",
                 style = MaterialTheme.typography.titleMedium
@@ -125,6 +129,7 @@ fun SettingsScreen(
                     onCheckedChange = onUseCustomUsernameInGlobalChatChange
                 )
             }
+            HorizontalDivider()
             // Το UI καλεί το κεντρικό local reset path ώστε το ίδιο flow να καλύπτει σταδιακά όσα τοπικά δεδομένα προστεθούν.
             Text(
                 text = "Local data",

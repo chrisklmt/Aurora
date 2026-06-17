@@ -14,6 +14,7 @@ class AuroraStateHolderTest {
         val state = SampleAuroraState.create(generatedUsername = "PIAIUFN1")
 
         assertTrue(state.useCustomUsernameInGlobalChat)
+        assertEquals(AuroraAvailabilityPreference.ONLINE, state.desiredAvailability)
     }
 
     @Test
@@ -99,7 +100,8 @@ class AuroraStateHolderTest {
             store = store,
             generatedUsername = "PIAIUFN1",
             customUsername = "John",
-            useCustomUsernameInGlobalChat = false
+            useCustomUsernameInGlobalChat = false,
+            desiredAvailability = AuroraAvailabilityPreference.OFFLINE
         )
 
         holder.resetLocalData()
@@ -107,21 +109,41 @@ class AuroraStateHolderTest {
         assertTrue(GeneratedUsername.matchesFormat(holder.uiState.generatedUsername))
         assertNull(holder.uiState.customUsername)
         assertTrue(holder.uiState.useCustomUsernameInGlobalChat)
+        assertEquals(AuroraAvailabilityPreference.OFFLINE, holder.uiState.desiredAvailability)
         assertEquals(holder.uiState.generatedUsername, store.generatedUsername)
         assertEquals(1, store.clearCalls)
+    }
+
+    @Test
+    fun desiredAvailabilityCanBeUpdatedWithoutChangingProfileState() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1",
+            customUsername = "John",
+            useCustomUsernameInGlobalChat = false
+        )
+
+        holder.updateDesiredAvailability(AuroraAvailabilityPreference.OFFLINE)
+
+        assertEquals(AuroraAvailabilityPreference.OFFLINE, holder.uiState.desiredAvailability)
+        assertEquals("John", holder.uiState.customUsername)
+        assertEquals("PIAIUFN1", holder.uiState.generatedUsername)
+        assertEquals(false, holder.uiState.useCustomUsernameInGlobalChat)
     }
 
     private fun createHolder(
         store: FakeProfileStore,
         generatedUsername: String,
         customUsername: String? = null,
-        useCustomUsernameInGlobalChat: Boolean = true
+        useCustomUsernameInGlobalChat: Boolean = true,
+        desiredAvailability: AuroraAvailabilityPreference = AuroraAvailabilityPreference.ONLINE
     ): AuroraStateHolder {
         return AuroraStateHolder(
             initialState = SampleAuroraState.create(
                 generatedUsername = generatedUsername,
                 customUsername = customUsername,
-                useCustomUsernameInGlobalChat = useCustomUsernameInGlobalChat
+                useCustomUsernameInGlobalChat = useCustomUsernameInGlobalChat,
+                desiredAvailability = desiredAvailability
             ),
             localProfileStore = store
         )

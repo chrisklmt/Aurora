@@ -16,7 +16,8 @@ import androidx.compose.ui.unit.dp
 @Composable
 internal fun PlaceholderScreenScaffold(
     title: String,
-    subtitle: String,
+    subtitle: String? = null,
+    subtitleContent: (@Composable () -> Unit)? = null,
     username: String? = null,
     onUsernameTripleTap: (() -> Unit)? = null,
     rightAction: AuroraTopBarAction = AuroraTopBarAction.NONE,
@@ -28,6 +29,7 @@ internal fun PlaceholderScreenScaffold(
             AuroraTopBar(
                 title = title,
                 subtitle = subtitle,
+                subtitleContent = subtitleContent,
                 username = username,
                 onUsernameTripleTap = onUsernameTripleTap,
                 rightAction = rightAction,

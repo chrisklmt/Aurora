@@ -5,6 +5,7 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import gr.hua.aurora.state.AuroraAvailabilityPreference
 import gr.hua.aurora.state.AuroraStateHolder
 import gr.hua.aurora.ui.screens.ContactsScreen
 import gr.hua.aurora.ui.screens.GlobalChatScreen
@@ -46,6 +47,10 @@ fun NavGraph(
                 },
                 onOpenNearby = { navController.navigate(Routes.NEARBY) },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                desiredAvailability = uiState.desiredAvailability,
+                onDesiredAvailabilityChange = { preference: AuroraAvailabilityPreference ->
+                    stateHolder.updateDesiredAvailability(preference)
+                },
                 onSendMessage = stateHolder::sendGlobalPreviewMessage,
                 onResetLocalData = stateHolder::resetLocalData
             )
@@ -55,6 +60,7 @@ fun NavGraph(
             ContactsScreen(
                 contacts = uiState.contacts,
                 currentUsername = uiState.privateProfileUsername,
+                desiredAvailability = uiState.desiredAvailability,
                 onResetLocalData = stateHolder::resetLocalData,
                 onBack = onNavigateBackOrGlobal
             )
@@ -79,6 +85,7 @@ fun NavGraph(
             NearbyDevicesScreen(
                 nearbyDevices = uiState.nearbyDevices,
                 currentUsername = uiState.privateProfileUsername,
+                desiredAvailability = uiState.desiredAvailability,
                 onResetLocalData = stateHolder::resetLocalData,
                 onBack = onNavigateBackOrGlobal
             )

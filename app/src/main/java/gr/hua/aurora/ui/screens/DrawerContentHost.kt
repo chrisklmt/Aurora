@@ -1,7 +1,7 @@
 package gr.hua.aurora.ui.screens
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -13,22 +13,35 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import gr.hua.aurora.state.AuroraAvailabilityPreference
+import gr.hua.aurora.ui.components.AuroraAvailabilitySummary
+import gr.hua.aurora.ui.components.rememberAuroraAvailabilityUiState
 
 private val drawerWidth = 248.dp
 private val drawerInnerEdgeShape = RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp)
 
 @Composable
 fun DrawerContentHost(
+    desiredAvailability: AuroraAvailabilityPreference,
+    onDesiredAvailabilityChange: (AuroraAvailabilityPreference) -> Unit,
     onOpenContacts: () -> Unit,
     onOpenNearby: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Το drawer εκθέτει μόνο callbacks ώστε να μείνει ανεξάρτητο από συγκεκριμένο navigation implementation.
+    val availabilityState = rememberAuroraAvailabilityUiState(desiredAvailability)
+    val onAvailabilityPreferenceChange: (AuroraAvailabilityPreference) -> Unit = { preference ->
+        onDesiredAvailabilityChange(preference)
+        if (preference == AuroraAvailabilityPreference.ONLINE) {
+            availabilityState.refresh()
+        }
+    }
+
     ModalDrawerSheet(
         modifier = modifier.width(drawerWidth),
         drawerShape = drawerInnerEdgeShape
@@ -40,19 +53,39 @@ fun DrawerContentHost(
             style = MaterialTheme.typography.titleMedium
         )
         Spacer(Modifier.height(10.dp))
+        AuroraAvailabilitySummary(
+            uiState = availabilityState.uiState,
+            modifier = Modifier.padding(horizontal = 14.dp),
+            onClick = availabilityState.refresh,
+            trailingContent = {
+                Switch(
+                    checked = desiredAvailability == AuroraAvailabilityPreference.ONLINE,
+                    onCheckedChange = { isOnline ->
+                        onAvailabilityPreferenceChange(
+                            if (isOnline) {
+                                AuroraAvailabilityPreference.ONLINE
+                            } else {
+                                AuroraAvailabilityPreference.OFFLINE
+                            }
+                        )
+                    }
+                )
+            }
+        )
+        Spacer(Modifier.height(10.dp))
         Column(
             modifier = Modifier.padding(horizontal = 14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            DrawerActionPill(
+            DrawerNavigationItem(
                 label = "Settings",
                 onClick = onOpenSettings
             )
-            DrawerActionPill(
+            DrawerNavigationItem(
                 label = "Contacts",
                 onClick = onOpenContacts
             )
-            DrawerActionPill(
+            DrawerNavigationItem(
                 label = "Nearby Devices",
                 onClick = onOpenNearby
             )
@@ -62,12 +95,13 @@ fun DrawerContentHost(
 }
 
 @Composable
-private fun DrawerActionPill(
+private fun DrawerNavigationItem(
     label: String,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Surface(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(22.dp),

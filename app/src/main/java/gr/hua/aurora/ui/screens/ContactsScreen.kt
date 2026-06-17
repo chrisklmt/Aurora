@@ -13,18 +13,27 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import gr.hua.aurora.model.ContactPreview
+import gr.hua.aurora.state.AuroraAvailabilityPreference
+import gr.hua.aurora.ui.components.AuroraAvailabilityIndicator
 import gr.hua.aurora.ui.components.AuroraTopBarAction
+import gr.hua.aurora.ui.components.rememberAuroraAvailabilityUiState
 
 @Composable
 fun ContactsScreen(
     contacts: List<ContactPreview>,
     currentUsername: String,
+    desiredAvailability: AuroraAvailabilityPreference,
     onResetLocalData: () -> Unit,
     onBack: () -> Unit
 ) {
+    val availabilityState = rememberAuroraAvailabilityUiState(desiredAvailability)
+
     PlaceholderScreenScaffold(
         title = "Contacts",
-        subtitle = "UI placeholder",
+        subtitle = null,
+        subtitleContent = {
+            AuroraAvailabilityIndicator(uiState = availabilityState.uiState)
+        },
         username = currentUsername,
         onUsernameTripleTap = onResetLocalData,
         rightAction = AuroraTopBarAction.BACK,

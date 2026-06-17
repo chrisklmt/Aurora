@@ -11,7 +11,8 @@ object SampleAuroraState {
     fun create(
         generatedUsername: String,
         customUsername: String? = null,
-        useCustomUsernameInGlobalChat: Boolean = true
+        useCustomUsernameInGlobalChat: Boolean = true,
+        desiredAvailability: AuroraAvailabilityPreference = AuroraAvailabilityPreference.ONLINE
     ): AuroraUiState {
         val now = System.currentTimeMillis()
         val resolvedGeneratedUsername = generatedUsername.trim()
@@ -144,7 +145,8 @@ object SampleAuroraState {
             ),
             generatedUsername = resolvedGeneratedUsername,
             customUsername = resolvedCustomUsername,
-            useCustomUsernameInGlobalChat = useCustomUsernameInGlobalChat
+            useCustomUsernameInGlobalChat = useCustomUsernameInGlobalChat,
+            desiredAvailability = desiredAvailability
         )
     }
 }

@@ -9,10 +9,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import gr.hua.aurora.model.ChatMessage
+import gr.hua.aurora.state.AuroraAvailabilityPreference
+import gr.hua.aurora.ui.components.AuroraAvailabilityIndicator
 import gr.hua.aurora.ui.components.AuroraTopBarAction
 import gr.hua.aurora.ui.components.ChatScaffold
-import gr.hua.aurora.ui.components.TransportStatusCard
-import gr.hua.aurora.ui.components.TransportStatusTone
+import gr.hua.aurora.ui.components.rememberAuroraAvailabilityUiState
 import gr.hua.aurora.ui.components.toMessageListItem
 import kotlinx.coroutines.launch
 
@@ -23,12 +24,15 @@ fun GlobalChatScreen(
     onOpenContacts: () -> Unit,
     onOpenNearby: () -> Unit,
     onOpenSettings: () -> Unit,
+    desiredAvailability: AuroraAvailabilityPreference,
+    onDesiredAvailabilityChange: (AuroraAvailabilityPreference) -> Unit,
     onSendMessage: (String) -> Unit,
     onResetLocalData: () -> Unit
 ) {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val mappedMessages = messages.map { it.toMessageListItem() }
+    val availabilityState = rememberAuroraAvailabilityUiState(desiredAvailability)
 
     // Χρησιμοποιούμε τοπικά RTL μόνο για το drawer container ώστε το panel να ανοίγει από δεξιά
     // χωρίς να αλλάζει η κατεύθυνση στο υπόλοιπο chat UI.
@@ -38,6 +42,8 @@ fun GlobalChatScreen(
             drawerContent = {
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                     DrawerContentHost(
+                        desiredAvailability = desiredAvailability,
+                        onDesiredAvailabilityChange = onDesiredAvailabilityChange,
                         onOpenContacts = {
                             scope.launch {
                                 drawerState.close()
@@ -63,7 +69,10 @@ fun GlobalChatScreen(
             CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                 ChatScaffold(
                     title = "Global Chat",
-                    subtitle = "UI components preview",
+                    subtitle = null,
+                    topBarSubtitleContent = {
+                        AuroraAvailabilityIndicator(uiState = availabilityState.uiState)
+                    },
                     messages = mappedMessages,
                     topBarUsername = currentUsername,
                     onTopBarUsernameTripleTap = onResetLocalData,
@@ -71,15 +80,7 @@ fun GlobalChatScreen(
                     onTopBarRightAction = {
                         scope.launch { drawerState.open() }
                     },
-                    composerHint = "Write a preview message",
-                    bodyTop = {
-                        TransportStatusCard(
-                            summary = "Visual-only status",
-                            detail = "This card is a UI placeholder and is not connected to real transport state.",
-                            tone = TransportStatusTone.NEUTRAL,
-                            note = "Nearby communication will be wired in later stages."
-                        )
-                    },
+                    composerHint = "Write a message",
                     onSend = onSendMessage
                 )
             }

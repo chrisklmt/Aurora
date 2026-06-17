@@ -31,6 +31,7 @@ fun AuroraTopBar(
     title: String,
     modifier: Modifier = Modifier,
     subtitle: String? = null,
+    subtitleContent: (@Composable () -> Unit)? = null,
     username: String? = null,
     onUsernameTripleTap: (() -> Unit)? = null,
     rightAction: AuroraTopBarAction = AuroraTopBarAction.NONE,
@@ -78,7 +79,9 @@ fun AuroraTopBar(
                             textAlign = TextAlign.Center,
                             maxLines = 1
                         )
-                        if (!subtitle.isNullOrBlank()) {
+                        if (subtitleContent != null) {
+                            subtitleContent()
+                        } else if (!subtitle.isNullOrBlank()) {
                             Text(
                                 text = subtitle,
                                 style = MaterialTheme.typography.labelMedium,

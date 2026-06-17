@@ -24,6 +24,7 @@ fun ChatScaffold(
     onSend: (String) -> Unit,
     modifier: Modifier = Modifier,
     subtitle: String? = null,
+    topBarSubtitleContent: (@Composable () -> Unit)? = null,
     topBarUsername: String? = null,
     onTopBarUsernameTripleTap: (() -> Unit)? = null,
     topBarRightAction: AuroraTopBarAction = AuroraTopBarAction.NONE,
@@ -40,6 +41,7 @@ fun ChatScaffold(
             AuroraTopBar(
                 title = title,
                 subtitle = subtitle,
+                subtitleContent = topBarSubtitleContent,
                 username = topBarUsername,
                 onUsernameTripleTap = onTopBarUsernameTripleTap,
                 rightAction = topBarRightAction,

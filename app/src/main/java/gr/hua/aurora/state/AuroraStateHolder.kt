@@ -36,7 +36,8 @@ class AuroraStateHolder(
             privateMessagesByPeerId = uiState.privateMessagesByPeerId,
             generatedUsername = uiState.generatedUsername,
             customUsername = uiState.customUsername,
-            useCustomUsernameInGlobalChat = uiState.useCustomUsernameInGlobalChat
+            useCustomUsernameInGlobalChat = uiState.useCustomUsernameInGlobalChat,
+            desiredAvailability = uiState.desiredAvailability
         )
     }
 
@@ -57,7 +58,8 @@ class AuroraStateHolder(
             privateMessagesByPeerId = uiState.privateMessagesByPeerId + (peerId to updatedMessages),
             generatedUsername = uiState.generatedUsername,
             customUsername = uiState.customUsername,
-            useCustomUsernameInGlobalChat = uiState.useCustomUsernameInGlobalChat
+            useCustomUsernameInGlobalChat = uiState.useCustomUsernameInGlobalChat,
+            desiredAvailability = uiState.desiredAvailability
         )
     }
 
@@ -72,7 +74,8 @@ class AuroraStateHolder(
             privateMessagesByPeerId = uiState.privateMessagesByPeerId,
             generatedUsername = uiState.generatedUsername,
             customUsername = sanitizedUsername,
-            useCustomUsernameInGlobalChat = uiState.useCustomUsernameInGlobalChat
+            useCustomUsernameInGlobalChat = uiState.useCustomUsernameInGlobalChat,
+            desiredAvailability = uiState.desiredAvailability
         )
 
         localProfileStore.saveCustomUsername(sanitizedUsername)
@@ -86,10 +89,15 @@ class AuroraStateHolder(
             privateMessagesByPeerId = uiState.privateMessagesByPeerId,
             generatedUsername = uiState.generatedUsername,
             customUsername = uiState.customUsername,
-            useCustomUsernameInGlobalChat = enabled
+            useCustomUsernameInGlobalChat = enabled,
+            desiredAvailability = uiState.desiredAvailability
         )
 
         localProfileStore.saveUseCustomUsernameInGlobalChat(enabled)
+    }
+
+    fun updateDesiredAvailability(preference: AuroraAvailabilityPreference) {
+        uiState = uiState.copy(desiredAvailability = preference)
     }
 
     fun resetLocalData() {
@@ -99,7 +107,8 @@ class AuroraStateHolder(
         uiState = SampleAuroraState.create(
             generatedUsername = freshGeneratedUsername,
             customUsername = null,
-            useCustomUsernameInGlobalChat = true
+            useCustomUsernameInGlobalChat = true,
+            desiredAvailability = uiState.desiredAvailability
         )
     }
 
