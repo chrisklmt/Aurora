@@ -1,7 +1,9 @@
 package gr.hua.aurora.ui.screens
 
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -33,6 +35,11 @@ fun GlobalChatScreen(
     val scope = rememberCoroutineScope()
     val mappedMessages = messages.map { it.toMessageListItem() }
     val availabilityState = rememberAuroraAvailabilityUiState(desiredAvailability)
+    val localMessagingNote = if (desiredAvailability == AuroraAvailabilityPreference.OFFLINE) {
+        "Offline: messages stay on this device."
+    } else {
+        "Messages are saved locally until mesh delivery is connected."
+    }
 
     // Χρησιμοποιούμε τοπικά RTL μόνο για το drawer container ώστε το panel να ανοίγει από δεξιά
     // χωρίς να αλλάζει η κατεύθυνση στο υπόλοιπο chat UI.
@@ -81,6 +88,13 @@ fun GlobalChatScreen(
                         scope.launch { drawerState.open() }
                     },
                     composerHint = "Write a message",
+                    bodyTop = {
+                        Text(
+                            text = localMessagingNote,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    },
                     onSend = onSendMessage
                 )
             }

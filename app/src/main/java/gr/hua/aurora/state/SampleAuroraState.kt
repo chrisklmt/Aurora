@@ -83,7 +83,7 @@ object SampleAuroraState {
                     senderName = "Aurora",
                     text = "The global chat layout is now rendered with reusable Compose components.",
                     createdAtMillis = now - 8 * 60_000L,
-                    status = MessageStatus.DELIVERED,
+                    status = MessageStatus.LOCAL_ONLY,
                     isOutgoing = false
                 ),
                 ChatMessage(
@@ -93,7 +93,7 @@ object SampleAuroraState {
                     senderName = globalChatUsername,
                     text = "This screen now uses local in-memory state without real transport logic.",
                     createdAtMillis = now - 6 * 60_000L,
-                    status = MessageStatus.SENT,
+                    status = MessageStatus.LOCAL_ONLY,
                     isOutgoing = true
                 ),
                 ChatMessage(
@@ -103,7 +103,7 @@ object SampleAuroraState {
                     senderName = "Aurora",
                     text = "Nearby, settings, and contacts remain UI-only in this stage.",
                     createdAtMillis = now - 4 * 60_000L,
-                    status = MessageStatus.DELIVERED,
+                    status = MessageStatus.LOCAL_ONLY,
                     isOutgoing = false
                 )
             ),
@@ -116,7 +116,7 @@ object SampleAuroraState {
                         senderName = "Alex",
                         text = "This private conversation is backed by local preview state.",
                         createdAtMillis = now - 9 * 60_000L,
-                        status = MessageStatus.DELIVERED,
+                        status = MessageStatus.LOCAL_ONLY,
                         isOutgoing = false
                     ),
                     ChatMessage(
@@ -126,7 +126,7 @@ object SampleAuroraState {
                         senderName = privateProfileUsername,
                         text = "The screen layout is ready before real peer communication is added.",
                         createdAtMillis = now - 7 * 60_000L,
-                        status = MessageStatus.SENT,
+                        status = MessageStatus.LOCAL_ONLY,
                         isOutgoing = true
                     )
                 ),
@@ -138,7 +138,7 @@ object SampleAuroraState {
                         senderName = "Maria",
                         text = "This thread exists only in local memory for UI wiring.",
                         createdAtMillis = now - 5 * 60_000L,
-                        status = MessageStatus.QUEUED,
+                        status = MessageStatus.LOCAL_ONLY,
                         isOutgoing = false
                     )
                 )

@@ -25,6 +25,7 @@ private fun MessageStatus.toPreviewStatusLabel(): String {
     return when (this) {
         MessageStatus.DRAFT -> "Draft"
         MessageStatus.QUEUED -> "Queued"
+        MessageStatus.LOCAL_ONLY -> "Local only"
         MessageStatus.SENT -> "Sent"
         MessageStatus.DELIVERED -> "Delivered"
         MessageStatus.FAILED -> "Failed"

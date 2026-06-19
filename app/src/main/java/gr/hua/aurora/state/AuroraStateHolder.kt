@@ -134,7 +134,7 @@ class AuroraStateHolder(
             senderName = senderName,
             text = text,
             createdAtMillis = now,
-            status = MessageStatus.SENT,
+            status = MessageStatus.LOCAL_ONLY,
             isOutgoing = true
         )
     }

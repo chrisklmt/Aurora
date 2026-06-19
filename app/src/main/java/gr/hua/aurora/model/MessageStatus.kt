@@ -4,6 +4,7 @@ package gr.hua.aurora.model
 enum class MessageStatus {
     DRAFT,
     QUEUED,
+    LOCAL_ONLY,
     SENT,
     DELIVERED,
     FAILED

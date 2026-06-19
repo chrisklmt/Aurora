@@ -3,7 +3,9 @@ package gr.hua.aurora.state
 import gr.hua.aurora.data.GeneratedUsername
 import gr.hua.aurora.data.LocalProfileSettings
 import gr.hua.aurora.data.LocalProfileSettingsStore
+import gr.hua.aurora.model.MessageStatus
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -61,6 +63,25 @@ class AuroraStateHolderTest {
 
         assertEquals("John", holder.uiState.globalChatUsername)
         assertEquals("John", holder.uiState.globalMessages.last().senderName)
+    }
+
+    @Test
+    fun globalSendAppendsLocalOnlyMessage() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1"
+        )
+        val initialCount = holder.uiState.globalMessages.size
+
+        holder.sendGlobalPreviewMessage(" hello local ")
+
+        val appendedMessage = holder.uiState.globalMessages.last()
+        assertEquals(initialCount + 1, holder.uiState.globalMessages.size)
+        assertEquals("hello local", appendedMessage.text)
+        assertTrue(appendedMessage.isOutgoing)
+        assertEquals(MessageStatus.LOCAL_ONLY, appendedMessage.status)
+        assertNotEquals(MessageStatus.SENT, appendedMessage.status)
+        assertNotEquals(MessageStatus.DELIVERED, appendedMessage.status)
     }
 
     @Test
