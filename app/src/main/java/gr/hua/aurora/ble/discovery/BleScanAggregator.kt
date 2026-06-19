@@ -1,9 +1,23 @@
 package gr.hua.aurora.ble.discovery
 
 class BleScanAggregator {
-    private val devicesByIdentityKey = linkedMapOf<String, BleDiscoveredDevice>()
+    companion object {
+        const val STALE_PEER_TIMEOUT_MS = 12_000L
+        const val STALE_PEER_PRUNE_INTERVAL_MS = 3_000L
+    }
 
-    fun update(device: BleDiscoveredDevice): List<BleDiscoveredDevice> {
+    private data class ObservedBleDevice(
+        val device: BleDiscoveredDevice,
+        val lastSeenAtMs: Long
+    )
+
+    private val devicesByIdentityKey = linkedMapOf<String, ObservedBleDevice>()
+
+    fun update(
+        device: BleDiscoveredDevice,
+        nowMs: Long = System.currentTimeMillis()
+    ): List<BleDiscoveredDevice> {
+        removeStaleEntries(nowMs)
         val address = device.address.takeIf { it.isNotBlank() } ?: return snapshot()
         val normalizedDevice = if (address == device.address) {
             device
@@ -11,27 +25,32 @@ class BleScanAggregator {
             device.copy(address = address)
         }
         val identityKey = normalizedDevice.identityKey()
-        val current = devicesByIdentityKey[identityKey]
+        val current = devicesByIdentityKey[identityKey]?.device
             ?: takeMigratedAddressMatchOrNull(normalizedDevice, identityKey)
 
         if (normalizedDevice.stablePeerId != null) {
             removeLegacyAddressMatches(normalizedDevice, identityKey)
         }
 
-        devicesByIdentityKey[identityKey] = mergeDevice(
-            current = current,
-            device = normalizedDevice
+        devicesByIdentityKey[identityKey] = ObservedBleDevice(
+            device = mergeDevice(
+                current = current,
+                device = normalizedDevice
+            ),
+            lastSeenAtMs = nowMs
         )
 
         return snapshot()
     }
 
+    fun prune(nowMs: Long = System.currentTimeMillis()): List<BleDiscoveredDevice> {
+        removeStaleEntries(nowMs)
+        return snapshot()
+    }
+
     fun snapshot(): List<BleDiscoveredDevice> {
         return devicesByIdentityKey.values
-            .sortedWith(
-                compareByDescending<BleDiscoveredDevice> { it.rssi != null }
-                    .thenByDescending { it.rssi }
-            )
+            .map(ObservedBleDevice::device)
             .toList()
     }
 
@@ -48,8 +67,8 @@ class BleScanAggregator {
         }
 
         return devicesByIdentityKey.entries.firstOrNull { entry ->
-            entry.key != identityKey && entry.value.address == device.address
-        }?.value
+            entry.key != identityKey && entry.value.device.address == device.address
+        }?.value?.device
     }
 
     private fun removeLegacyAddressMatches(
@@ -59,7 +78,17 @@ class BleScanAggregator {
         val iterator = devicesByIdentityKey.entries.iterator()
         while (iterator.hasNext()) {
             val entry = iterator.next()
-            if (entry.key != identityKey && entry.value.address == device.address) {
+            if (entry.key != identityKey && entry.value.device.address == device.address) {
+                iterator.remove()
+            }
+        }
+    }
+
+    private fun removeStaleEntries(nowMs: Long) {
+        val iterator = devicesByIdentityKey.entries.iterator()
+        while (iterator.hasNext()) {
+            val entry = iterator.next()
+            if (nowMs - entry.value.lastSeenAtMs >= STALE_PEER_TIMEOUT_MS) {
                 iterator.remove()
             }
         }

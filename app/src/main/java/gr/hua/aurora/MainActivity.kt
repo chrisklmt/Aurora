@@ -7,6 +7,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.navigation.compose.rememberNavController
 import gr.hua.aurora.data.LocalProfileStore
 import gr.hua.aurora.navigation.NavGraph
+import gr.hua.aurora.state.rememberAuroraBleRuntimeState
 import gr.hua.aurora.state.rememberAuroraStateHolder
 import gr.hua.aurora.ui.theme.AuroraTheme
 
@@ -19,9 +20,13 @@ class MainActivity : ComponentActivity() {
             AuroraTheme {
                 val navController = rememberNavController()
                 val stateHolder = rememberAuroraStateHolder(localProfileStore)
+                val bleRuntimeState = rememberAuroraBleRuntimeState(
+                    desiredAvailability = stateHolder.uiState.desiredAvailability
+                )
                 NavGraph(
                     navController = navController,
-                    stateHolder = stateHolder
+                    stateHolder = stateHolder,
+                    bleRuntimeState = bleRuntimeState
                 )
             }
         }

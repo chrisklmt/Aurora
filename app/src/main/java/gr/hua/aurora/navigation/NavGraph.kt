@@ -6,6 +6,7 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import gr.hua.aurora.state.AuroraAvailabilityPreference
+import gr.hua.aurora.state.AuroraBleRuntimeState
 import gr.hua.aurora.state.AuroraStateHolder
 import gr.hua.aurora.ui.screens.ContactsScreen
 import gr.hua.aurora.ui.screens.GlobalChatScreen
@@ -17,6 +18,7 @@ import gr.hua.aurora.ui.screens.SettingsScreen
 fun NavGraph(
     navController: NavHostController,
     stateHolder: AuroraStateHolder,
+    bleRuntimeState: AuroraBleRuntimeState,
     modifier: Modifier = Modifier
 ) {
     val uiState = stateHolder.uiState
@@ -86,6 +88,8 @@ fun NavGraph(
                 nearbyDevices = uiState.nearbyDevices,
                 currentUsername = uiState.privateProfileUsername,
                 desiredAvailability = uiState.desiredAvailability,
+                bleAdvertiseStatus = bleRuntimeState.bleAdvertiseStatus,
+                bleGattServerStatus = bleRuntimeState.bleGattServerStatus,
                 onResetLocalData = stateHolder::resetLocalData,
                 onBack = onNavigateBackOrGlobal
             )

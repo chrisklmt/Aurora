@@ -3,6 +3,7 @@ package gr.hua.aurora.ui.screens
 import android.bluetooth.BluetoothManager
 import android.content.Intent
 import android.provider.Settings
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -18,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -29,18 +31,12 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import gr.hua.aurora.ble.connection.AndroidBleConnector
-import gr.hua.aurora.ble.advertise.AndroidBleAdvertiser
-import gr.hua.aurora.ble.gatt.AndroidBleGattServer
 import gr.hua.aurora.ble.advertise.BleAdvertiseStatus
-import gr.hua.aurora.ble.advertise.BleAdvertiser
-import gr.hua.aurora.ble.advertise.BleAdvertiseRequest
 import gr.hua.aurora.ble.discovery.AndroidBleScanner
 import gr.hua.aurora.ble.connection.BleConnectionStatus
 import gr.hua.aurora.ble.connection.BleConnector
-import gr.hua.aurora.ble.discovery.BleDiscoveryPayload
-import gr.hua.aurora.ble.discovery.BleDiscoveryService
 import gr.hua.aurora.ble.discovery.BleDiscoveredDevice
-import gr.hua.aurora.ble.gatt.BleGattServer
+import gr.hua.aurora.ble.discovery.BleScanAggregator
 import gr.hua.aurora.ble.gatt.BleGattServerStatus
 import gr.hua.aurora.ble.discovery.BleScanDiagnostics
 import gr.hua.aurora.ble.transport.BleGattTransportFrameReadResult
@@ -48,21 +44,21 @@ import gr.hua.aurora.ble.transport.BleGattTransportFrameReader
 import gr.hua.aurora.ble.transport.BleGattTransportPayload
 import gr.hua.aurora.ble.transport.BleGattTransportReadResult
 import gr.hua.aurora.ble.transport.BleGattTransportReader
-import gr.hua.aurora.ble.discovery.BleStablePeerId
 import gr.hua.aurora.ble.transport.BleGattTransportWriteResult
 import gr.hua.aurora.ble.transport.BleGattTransportWriter
 import gr.hua.aurora.ble.discovery.BleScanStatus
 import gr.hua.aurora.ble.discovery.BleScanner
 import gr.hua.aurora.ble.permissions.BluetoothPermissionStatus
 import gr.hua.aurora.ble.permissions.BluetoothPermissionStatusReader
-import gr.hua.aurora.ble.discovery.identityKey
-import gr.hua.aurora.identity.AndroidKeystoreLocalAgreementPublicKey
 import gr.hua.aurora.model.NearbyDevicePreview
 import gr.hua.aurora.model.TransportType
 import gr.hua.aurora.state.AuroraAvailabilityPreference
 import gr.hua.aurora.ui.components.AuroraAvailabilityIndicator
 import gr.hua.aurora.ui.components.AuroraTopBarAction
 import gr.hua.aurora.ui.components.buildAuroraAvailabilityUiState
+import kotlinx.coroutines.delay
+
+private const val nearbyDevicesLogTag = "NearbyDevicesScreen"
 
 private enum class NearbyBleTransportReadStatus {
     IDLE,
@@ -87,9 +83,7 @@ private enum class NearbyBleTransportWriteStatus {
 
 private data class NearbyBleSessionState(
     val bluetoothStatus: BluetoothPermissionStatus,
-    val bleAdvertiseStatus: BleAdvertiseStatus,
     val bleConnectionStatus: BleConnectionStatus,
-    val bleGattServerStatus: BleGattServerStatus,
     val bleTransportReadStatus: NearbyBleTransportReadStatus,
     val bleTransportFrameReadStatus: NearbyBleTransportFrameReadStatus,
     val bleTransportWriteStatus: NearbyBleTransportWriteStatus,
@@ -103,7 +97,8 @@ private data class NearbyBleSessionState(
     val readTransportFrame: () -> Unit,
     val writeTransportMarker: () -> Unit,
     val requestMissingPermissions: () -> Unit,
-    val openBluetoothSettings: () -> Unit
+    val openBluetoothSettings: () -> Unit,
+    val openLocationSettings: () -> Unit
 )
 
 @Composable
@@ -111,10 +106,14 @@ fun NearbyDevicesScreen(
     nearbyDevices: List<NearbyDevicePreview>,
     currentUsername: String,
     desiredAvailability: AuroraAvailabilityPreference,
+    bleAdvertiseStatus: BleAdvertiseStatus,
+    bleGattServerStatus: BleGattServerStatus,
     onResetLocalData: () -> Unit,
     onBack: () -> Unit
 ) {
-    val bleSessionState = rememberNearbyBleSessionState()
+    val bleSessionState = rememberNearbyBleSessionState(
+        desiredAvailability = desiredAvailability
+    )
     val availabilityState = remember(desiredAvailability, bleSessionState.bluetoothStatus) {
         buildAuroraAvailabilityUiState(
             desiredAvailability = desiredAvailability,
@@ -144,7 +143,8 @@ fun NearbyDevicesScreen(
                 ReadinessStatusCard(
                     bluetoothStatus = bleSessionState.bluetoothStatus,
                     onGrantBluetoothAccess = bleSessionState.requestMissingPermissions,
-                    onOpenBluetoothSettings = bleSessionState.openBluetoothSettings
+                    onOpenBluetoothSettings = bleSessionState.openBluetoothSettings,
+                    onOpenLocationSettings = bleSessionState.openLocationSettings
                 )
             }
             item {
@@ -155,6 +155,8 @@ fun NearbyDevicesScreen(
                     transportWriteStatus = bleSessionState.bleTransportWriteStatus,
                     scanStatus = bleSessionState.bleScanStatus,
                     scanDiagnostics = bleSessionState.bleScanDiagnostics,
+                    isDiscoveryPausedByAvailability =
+                        desiredAvailability == AuroraAvailabilityPreference.OFFLINE,
                     activeConnectionDeviceAddress = bleSessionState.activeConnectionDeviceAddress,
                     devices = bleSessionState.discoveredBleDevices,
                     onConnect = bleSessionState.connectToDevice,
@@ -166,8 +168,8 @@ fun NearbyDevicesScreen(
             }
             item {
                 BleRuntimeStatusCard(
-                    advertiseStatus = bleSessionState.bleAdvertiseStatus,
-                    gattServerStatus = bleSessionState.bleGattServerStatus
+                    advertiseStatus = bleAdvertiseStatus,
+                    gattServerStatus = bleGattServerStatus
                 )
             }
             item {
@@ -252,7 +254,9 @@ fun NearbyDevicesScreen(
 }
 
 @Composable
-private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
+private fun rememberNearbyBleSessionState(
+    desiredAvailability: AuroraAvailabilityPreference
+): NearbyBleSessionState {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val bluetoothManager = remember(context) {
@@ -261,33 +265,17 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
     val bluetoothAdapter = remember(bluetoothManager) {
         bluetoothManager?.adapter
     }
-    val bleAdvertiser = remember(bluetoothAdapter) {
-        AndroidBleAdvertiser(bluetoothAdapter)
-    }
     val bleConnector = remember(context, bluetoothAdapter) {
         AndroidBleConnector(context, bluetoothAdapter)
     }
     val bleTransportReader: BleGattTransportReader = bleConnector
     val bleTransportFrameReader: BleGattTransportFrameReader = bleConnector
     val bleTransportWriter: BleGattTransportWriter = bleConnector
-    val bleGattServer = remember(context, bluetoothManager) {
-        AndroidBleGattServer(context, bluetoothManager)
-    }
     val bleScanner = remember(bluetoothAdapter) {
         AndroidBleScanner(bluetoothAdapter)
     }
-    val advertisedStablePeerId = remember {
-        runCatching {
-            BleStablePeerId.deriveFromPublicKeyBytes(
-                AndroidKeystoreLocalAgreementPublicKey.ensureAgreementPublicKeyBytes()
-            )
-        }.getOrNull()
-    }
-    val temporaryNearbyAdvertisePlaceholderRequest = remember(advertisedStablePeerId) {
-        BleAdvertiseRequest(
-            serviceUuid = BleDiscoveryService.serviceUuid,
-            payload = BleDiscoveryPayload.current(advertisedStablePeerId).toByteArray()
-        )
+    val discoveredBleDevicesAggregator = remember {
+        BleScanAggregator()
     }
     var bluetoothStatus by remember(context) {
         mutableStateOf(BluetoothPermissionStatusReader.read(context))
@@ -295,14 +283,8 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
     var isScreenVisible by remember(lifecycleOwner) {
         mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
     }
-    var bleAdvertiseStatus by remember {
-        mutableStateOf(BleAdvertiseStatus.IDLE)
-    }
     var bleConnectionStatus by remember {
         mutableStateOf(BleConnectionStatus.IDLE)
-    }
-    var bleGattServerStatus by remember {
-        mutableStateOf(BleGattServerStatus.IDLE)
     }
     var bleTransportReadStatus by remember {
         mutableStateOf(NearbyBleTransportReadStatus.IDLE)
@@ -325,6 +307,11 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
     var discoveredBleDevices by remember {
         mutableStateOf(emptyList<BleDiscoveredDevice>())
     }
+    val availabilityUiState = buildAuroraAvailabilityUiState(
+        desiredAvailability = desiredAvailability,
+        bluetoothStatus = bluetoothStatus
+    )
+    val isAvailabilityOnline = availabilityUiState.isOnline
 
     val refreshBluetoothStatus: () -> Unit = {
         bluetoothStatus = BluetoothPermissionStatusReader.read(context)
@@ -350,26 +337,28 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
         context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
     }
 
-    DisposableEffect(lifecycleOwner, bleAdvertiser, bleConnector, bleGattServer, bleScanner) {
+    val openLocationSettings: () -> Unit = {
+        context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+    }
+
+    DisposableEffect(lifecycleOwner, bleConnector, bleScanner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 isScreenVisible = true
                 refreshBluetoothStatus()
             } else if (event == Lifecycle.Event.ON_STOP) {
                 isScreenVisible = false
-                bleAdvertiser.stop()
-                bleAdvertiseStatus = BleAdvertiseStatus.STOPPED
                 bleConnector.disconnect()
                 bleConnectionStatus = BleConnectionStatus.DISCONNECTED
                 activeConnectionDeviceAddress = null
                 bleTransportReadStatus = NearbyBleTransportReadStatus.IDLE
                 bleTransportFrameReadStatus = NearbyBleTransportFrameReadStatus.IDLE
                 bleTransportWriteStatus = NearbyBleTransportWriteStatus.IDLE
-                bleGattServer.stop()
-                bleGattServerStatus = BleGattServerStatus.STOPPED
                 bleScanner.stop()
+                discoveredBleDevicesAggregator.clear()
                 bleScanStatus = BleScanStatus.STOPPED
                 bleScanDiagnostics = BleScanDiagnostics()
+                discoveredBleDevices = emptyList()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -378,61 +367,24 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
         }
     }
 
-    val shouldScan = bluetoothStatus.allRequiredGranted &&
-        bluetoothStatus.isBluetoothEnabled == true &&
-        isScreenVisible
+    val shouldScan = isAvailabilityOnline && isScreenVisible
 
-    val shouldAdvertise = bluetoothStatus.allRequiredGranted &&
-        bluetoothStatus.isBluetoothEnabled == true &&
-        isScreenVisible
-    val shouldHostGattServer = bluetoothStatus.allRequiredGranted &&
-        bluetoothStatus.isBluetoothEnabled == true &&
-        isScreenVisible
-
-    DisposableEffect(bleAdvertiser, shouldAdvertise) {
-        if (shouldAdvertise) {
-            bleAdvertiseStatus = BleAdvertiseStatus.IDLE
-            bleAdvertiser.start(
-                request = temporaryNearbyAdvertisePlaceholderRequest,
-                listener = object : BleAdvertiser.Listener {
-                    override fun onStatusChanged(status: BleAdvertiseStatus) {
-                        bleAdvertiseStatus = status
-                    }
-                }
-            )
-        } else {
-            bleAdvertiser.stop()
-            bleAdvertiseStatus = BleAdvertiseStatus.STOPPED
-        }
-
-        onDispose {
-            bleAdvertiser.stop()
-            bleAdvertiseStatus = BleAdvertiseStatus.STOPPED
-        }
-    }
-
-    DisposableEffect(bleGattServer, shouldHostGattServer) {
-        if (shouldHostGattServer) {
-            bleGattServer.start(
-                listener = object : BleGattServer.Listener {
-                    override fun onStatusChanged(status: BleGattServerStatus) {
-                        bleGattServerStatus = status
-                    }
-                }
-            )
-        } else {
-            bleGattServer.stop()
-            bleGattServerStatus = BleGattServerStatus.STOPPED
-        }
-
-        onDispose {
-            bleGattServer.stop()
-            bleGattServerStatus = BleGattServerStatus.STOPPED
-        }
+    LaunchedEffect(
+        desiredAvailability,
+        bluetoothStatus,
+        isScreenVisible,
+        availabilityUiState,
+        shouldScan
+    ) {
+        Log.d(
+            nearbyDevicesLogTag,
+            "BLE gating: desired=$desiredAvailability effectiveOnline=${availabilityUiState.isOnline} reason=${availabilityUiState.reasonText ?: "none"} screenVisible=$isScreenVisible readinessComplete=${bluetoothStatus.isReadinessComplete} bluetoothEnabled=${bluetoothStatus.isBluetoothEnabled} locationEnabled=${bluetoothStatus.isLocationEnabled} missingPermissions=${bluetoothStatus.missingPermissions.size} shouldScan=$shouldScan"
+        )
     }
 
     DisposableEffect(bleScanner, shouldScan) {
         if (shouldScan) {
+            discoveredBleDevicesAggregator.clear()
             bleScanStatus = BleScanStatus.IDLE
             bleScanDiagnostics = BleScanDiagnostics()
             discoveredBleDevices = emptyList()
@@ -441,6 +393,10 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
                     override fun onStatusChanged(status: BleScanStatus) {
                         bleScanStatus = status
                         bleScanDiagnostics = bleScanner.currentDiagnostics()
+                        Log.d(
+                            nearbyDevicesLogTag,
+                            "BLE scanner status: $status raw=${bleScanDiagnostics.rawScanResultCount} matches=${bleScanDiagnostics.auroraDiscoveryMatchCount}"
+                        )
                     }
 
                     override fun onDeviceDiscovered(device: BleDiscoveredDevice) {
@@ -448,22 +404,49 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
                         if (device.address.isBlank()) {
                             return
                         }
+                        if (!device.hasAuroraDiscoveryPayload) {
+                            Log.d(
+                                nearbyDevicesLogTag,
+                                "BLE raw device kept in diagnostics only: address=${device.address}"
+                            )
+                            return
+                        }
 
-                        discoveredBleDevices = discoveredBleDevices.upsertBleDevice(device)
+                        val updatedDevices = discoveredBleDevicesAggregator.update(device)
+                        discoveredBleDevices = updatedDevices
+                        Log.d(
+                            nearbyDevicesLogTag,
+                            "BLE device surfaced: visible=${updatedDevices.size} address=${device.address} aurora=${device.hasAuroraDiscoveryPayload}"
+                        )
                     }
                 }
             )
         } else {
             bleScanner.stop()
+            discoveredBleDevicesAggregator.clear()
             bleScanStatus = BleScanStatus.STOPPED
             bleScanDiagnostics = BleScanDiagnostics()
             discoveredBleDevices = emptyList()
+            Log.d(nearbyDevicesLogTag, "BLE scanner stopped by gating")
         }
 
         onDispose {
             bleScanner.stop()
+            discoveredBleDevicesAggregator.clear()
             bleScanStatus = BleScanStatus.STOPPED
             bleScanDiagnostics = BleScanDiagnostics()
+            discoveredBleDevices = emptyList()
+        }
+    }
+
+    LaunchedEffect(shouldScan) {
+        if (!shouldScan) {
+            return@LaunchedEffect
+        }
+
+        while (true) {
+            delay(BleScanAggregator.STALE_PEER_PRUNE_INTERVAL_MS)
+            discoveredBleDevices = discoveredBleDevicesAggregator.prune()
         }
     }
 
@@ -475,6 +458,20 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
             bleTransportReadStatus = NearbyBleTransportReadStatus.IDLE
             bleTransportFrameReadStatus = NearbyBleTransportFrameReadStatus.IDLE
             bleTransportWriteStatus = NearbyBleTransportWriteStatus.IDLE
+        }
+    }
+
+    DisposableEffect(bleConnector, isAvailabilityOnline) {
+        if (!isAvailabilityOnline) {
+            bleConnector.disconnect()
+            bleConnectionStatus = BleConnectionStatus.DISCONNECTED
+            activeConnectionDeviceAddress = null
+            bleTransportReadStatus = NearbyBleTransportReadStatus.IDLE
+            bleTransportFrameReadStatus = NearbyBleTransportFrameReadStatus.IDLE
+            bleTransportWriteStatus = NearbyBleTransportWriteStatus.IDLE
+        }
+
+        onDispose {
         }
     }
 
@@ -558,9 +555,7 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
 
     return NearbyBleSessionState(
         bluetoothStatus = bluetoothStatus,
-        bleAdvertiseStatus = bleAdvertiseStatus,
         bleConnectionStatus = bleConnectionStatus,
-        bleGattServerStatus = bleGattServerStatus,
         bleTransportReadStatus = bleTransportReadStatus,
         bleTransportFrameReadStatus = bleTransportFrameReadStatus,
         bleTransportWriteStatus = bleTransportWriteStatus,
@@ -574,7 +569,8 @@ private fun rememberNearbyBleSessionState(): NearbyBleSessionState {
         readTransportFrame = readTransportFrame,
         writeTransportMarker = writeTransportMarker,
         requestMissingPermissions = requestMissingPermissions,
-        openBluetoothSettings = openBluetoothSettings
+        openBluetoothSettings = openBluetoothSettings,
+        openLocationSettings = openLocationSettings
     )
 }
 
@@ -616,6 +612,7 @@ private fun DiscoveredBleDevicesCard(
     transportWriteStatus: NearbyBleTransportWriteStatus,
     scanStatus: BleScanStatus,
     scanDiagnostics: BleScanDiagnostics,
+    isDiscoveryPausedByAvailability: Boolean,
     activeConnectionDeviceAddress: String?,
     devices: List<BleDiscoveredDevice>,
     onConnect: (String) -> Unit,
@@ -670,7 +667,14 @@ private fun DiscoveredBleDevicesCard(
 
                 scanStatus == BleScanStatus.SCANNING -> {
                     Text(
-                        text = "Scanning is active. Waiting for nearby BLE devices to appear.",
+                        text = if (
+                            scanDiagnostics.rawScanResultCount > 0 &&
+                            scanDiagnostics.auroraDiscoveryMatchCount == 0
+                        ) {
+                            "Scanning is active. Raw BLE devices are visible in diagnostics, but no Aurora peers match yet."
+                        } else {
+                            "Scanning is active. Waiting for nearby Aurora peers to appear."
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -678,7 +682,11 @@ private fun DiscoveredBleDevicesCard(
 
                 else -> {
                     Text(
-                        text = "Live BLE results will appear here when Bluetooth access is ready and this screen is active.",
+                        text = if (isDiscoveryPausedByAvailability) {
+                            "BLE discovery is paused while Aurora is Offline."
+                        } else {
+                            "Live Aurora peers will appear here when Bluetooth and Location/GPS readiness is complete and this screen is active."
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -873,7 +881,8 @@ private fun BleDiscoveredDeviceRow(
 private fun ReadinessStatusCard(
     bluetoothStatus: BluetoothPermissionStatus,
     onGrantBluetoothAccess: () -> Unit,
-    onOpenBluetoothSettings: () -> Unit
+    onOpenBluetoothSettings: () -> Unit,
+    onOpenLocationSettings: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth()
@@ -883,12 +892,21 @@ private fun ReadinessStatusCard(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(
+                text = if (bluetoothStatus.isReadinessComplete) {
+                    "Bluetooth + Location/GPS: Ready"
+                } else {
+                    "Bluetooth + Location/GPS: Incomplete"
+                },
+                style = MaterialTheme.typography.titleMedium
+            )
+            Text(
                 text = if (bluetoothStatus.allRequiredGranted) {
                     "Permissions: Ready"
                 } else {
                     "Permissions: Missing"
                 },
-                style = MaterialTheme.typography.titleMedium
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
                 text = when (bluetoothStatus.isBluetoothEnabled) {
@@ -899,13 +917,28 @@ private fun ReadinessStatusCard(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            Text(
+                text = when (bluetoothStatus.isLocationEnabled) {
+                    true -> "Location/GPS: Enabled"
+                    false -> "Location/GPS: Disabled"
+                    null -> "Location/GPS: Status unknown"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             if (!bluetoothStatus.allRequiredGranted) {
+                Text(
+                    text = "Aurora discovery needs Bluetooth and Location/GPS permissions before nearby peers can appear.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 Button(
                     onClick = onGrantBluetoothAccess
                 ) {
-                    Text("Grant Bluetooth access")
+                    Text("Grant Bluetooth and Location access")
                 }
-            } else if (bluetoothStatus.isBluetoothEnabled == false) {
+            }
+            if (bluetoothStatus.isBluetoothEnabled == false) {
                 Column(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -921,34 +954,24 @@ private fun ReadinessStatusCard(
                     }
                 }
             }
+            if (bluetoothStatus.isLocationEnabled == false) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Location/GPS is off right now. Discovery will stay inactive until Location/GPS is enabled.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Button(
+                        onClick = onOpenLocationSettings
+                    ) {
+                        Text("Open Location settings")
+                    }
+                }
+            }
         }
     }
-}
-
-private fun List<BleDiscoveredDevice>.upsertBleDevice(
-    device: BleDiscoveredDevice
-): List<BleDiscoveredDevice> {
-    val address = device.address.takeIf { it.isNotBlank() } ?: return this
-    val normalizedDevice = if (address == device.address) {
-        device
-    } else {
-        device.copy(address = address)
-    }
-    val identityKey = normalizedDevice.identityKey()
-
-    return (filterNot { existingDevice ->
-        when {
-            normalizedDevice.stablePeerId != null ->
-                existingDevice.identityKey() == identityKey ||
-                    existingDevice.address == address
-
-            else -> existingDevice.identityKey() == identityKey
-        }
-    } + normalizedDevice)
-        .sortedWith(
-            compareByDescending<BleDiscoveredDevice> { it.rssi != null }
-                .thenByDescending { it.rssi }
-        )
 }
 
 private fun TransportType.toUiLabel(): String {

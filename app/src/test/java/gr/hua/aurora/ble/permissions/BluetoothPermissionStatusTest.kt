@@ -33,7 +33,8 @@ class BluetoothPermissionStatusTest {
         val status = BluetoothPermissionStatus(
             requiredPermissions = setOf(Manifest.permission.ACCESS_FINE_LOCATION),
             missingPermissions = emptySet(),
-            isBluetoothEnabled = null
+            isBluetoothEnabled = null,
+            isLocationEnabled = null
         )
 
         assertTrue(status.allRequiredGranted)
@@ -44,9 +45,59 @@ class BluetoothPermissionStatusTest {
         val status = BluetoothPermissionStatus(
             requiredPermissions = setOf(Manifest.permission.ACCESS_FINE_LOCATION),
             missingPermissions = setOf(Manifest.permission.ACCESS_FINE_LOCATION),
-            isBluetoothEnabled = null
+            isBluetoothEnabled = null,
+            isLocationEnabled = null
         )
 
         assertFalse(status.allRequiredGranted)
+    }
+
+    @Test
+    fun readinessCompleteIsTrueWhenPermissionsBluetoothAndLocationAreReady() {
+        val status = BluetoothPermissionStatus(
+            requiredPermissions = setOf(Manifest.permission.ACCESS_FINE_LOCATION),
+            missingPermissions = emptySet(),
+            isBluetoothEnabled = true,
+            isLocationEnabled = true
+        )
+
+        assertTrue(status.isReadinessComplete)
+    }
+
+    @Test
+    fun readinessCompleteIsFalseWhenLocationServicesAreDisabled() {
+        val status = BluetoothPermissionStatus(
+            requiredPermissions = setOf(Manifest.permission.ACCESS_FINE_LOCATION),
+            missingPermissions = emptySet(),
+            isBluetoothEnabled = true,
+            isLocationEnabled = false
+        )
+
+        assertFalse(status.isReadinessComplete)
+    }
+
+    @Test
+    fun readinessCompleteIsFalseWhenBluetoothIsDisabled() {
+        val status = BluetoothPermissionStatus(
+            requiredPermissions = setOf(Manifest.permission.ACCESS_FINE_LOCATION),
+            missingPermissions = emptySet(),
+            isBluetoothEnabled = false,
+            isLocationEnabled = true
+        )
+
+        assertFalse(status.isReadinessComplete)
+    }
+
+    @Test
+    fun missingLocationPermissionIsReported() {
+        val status = BluetoothPermissionStatus(
+            requiredPermissions = setOf(Manifest.permission.ACCESS_FINE_LOCATION),
+            missingPermissions = setOf(Manifest.permission.ACCESS_FINE_LOCATION),
+            isBluetoothEnabled = true,
+            isLocationEnabled = true
+        )
+
+        assertTrue(status.hasMissingLocationPermission)
+        assertFalse(status.hasMissingBluetoothPermission)
     }
 }

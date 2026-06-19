@@ -181,16 +181,17 @@ class BleScanAggregatorTest {
     }
 
     @Test
-    fun snapshotSortsStrongestRssiFirstAndNullLast() {
+    fun snapshotKeepsStableInsertionOrderAcrossRssiUpdates() {
         val aggregator = BleScanAggregator()
 
         aggregator.update(device(address = "AA:01", rssi = -80))
         aggregator.update(device(address = "AA:02", rssi = null))
         aggregator.update(device(address = "AA:03", rssi = -35))
         aggregator.update(device(address = "AA:04", rssi = -60))
+        aggregator.update(device(address = "AA:02", rssi = -20))
 
         assertEquals(
-            listOf("AA:03", "AA:04", "AA:01", "AA:02"),
+            listOf("AA:01", "AA:02", "AA:03", "AA:04"),
             aggregator.snapshot().map { it.address }
         )
     }
@@ -213,6 +214,89 @@ class BleScanAggregatorTest {
         val snapshot = aggregator.update(device(address = "AA:02", rssi = -30))
 
         assertEquals(snapshot, aggregator.snapshot())
+    }
+
+    @Test
+    fun deviceRemainsBeforeExpiry() {
+        val aggregator = BleScanAggregator()
+
+        aggregator.update(
+            device(address = "AA:BB", rssi = -50),
+            nowMs = 1_000L
+        )
+        val snapshot = aggregator.prune(
+            nowMs = 1_000L + BleScanAggregator.STALE_PEER_TIMEOUT_MS - 1L
+        )
+
+        assertEquals(1, snapshot.size)
+        assertEquals("AA:BB", snapshot.single().address)
+    }
+
+    @Test
+    fun deviceExpiresAfterTimeout() {
+        val aggregator = BleScanAggregator()
+
+        aggregator.update(
+            device(address = "AA:BB", rssi = -50),
+            nowMs = 1_000L
+        )
+        val snapshot = aggregator.prune(
+            nowMs = 1_000L + BleScanAggregator.STALE_PEER_TIMEOUT_MS
+        )
+
+        assertTrue(snapshot.isEmpty())
+    }
+
+    @Test
+    fun rotatedAddressForSameStablePeerIdRefreshesLastSeen() {
+        val aggregator = BleScanAggregator()
+        val stablePeerId = stablePeerId(
+            byteArrayOf(0x09, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02)
+        )
+
+        aggregator.update(
+            device(
+                address = "AA:01",
+                rssi = -60,
+                stablePeerId = stablePeerId
+            ),
+            nowMs = 1_000L
+        )
+        aggregator.update(
+            device(
+                address = "AA:02",
+                rssi = -45,
+                stablePeerId = stablePeerId
+            ),
+            nowMs = 1_000L + BleScanAggregator.STALE_PEER_TIMEOUT_MS - 500L
+        )
+        val snapshot = aggregator.prune(
+            nowMs = 1_000L + BleScanAggregator.STALE_PEER_TIMEOUT_MS
+        )
+
+        assertEquals(1, snapshot.size)
+        assertEquals("AA:02", snapshot.single().address)
+        assertEquals(stablePeerId, snapshot.single().stablePeerId)
+    }
+
+    @Test
+    fun legacyAddressKeyedPeerExpiresByLastSeen() {
+        val aggregator = BleScanAggregator()
+
+        aggregator.update(
+            device(address = "AA:BB", hasAuroraDiscoveryPayload = true),
+            nowMs = 2_000L
+        )
+        aggregator.update(
+            device(address = "CC:DD", hasAuroraDiscoveryPayload = true),
+            nowMs = 2_000L + BleScanAggregator.STALE_PEER_TIMEOUT_MS - 100L
+        )
+        val snapshot = aggregator.prune(
+            nowMs = 2_000L + BleScanAggregator.STALE_PEER_TIMEOUT_MS + 1L
+        )
+
+        assertEquals(1, snapshot.size)
+        assertEquals("CC:DD", snapshot.single().address)
     }
 
     private fun device(

@@ -1,6 +1,5 @@
 package gr.hua.aurora.ui.components
 
-import android.Manifest
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -127,7 +126,7 @@ fun AuroraAvailabilitySummary(
     trailingContent: (@Composable RowScope.() -> Unit)? = null
 ) {
     val displayText = if (!uiState.reasonText.isNullOrBlank()) {
-        "${uiState.statusLabel} • ${uiState.reasonText}"
+        "${uiState.statusLabel} - ${uiState.reasonText}"
     } else {
         uiState.statusLabel
     }
@@ -221,25 +220,24 @@ private fun AvailabilityDot(
 private fun availabilityReasonText(
     bluetoothStatus: BluetoothPermissionStatus
 ): String? {
-    val hasMissingBluetoothPermission = bluetoothStatus.missingPermissions.any { permission ->
-        permission == Manifest.permission.BLUETOOTH_SCAN ||
-            permission == Manifest.permission.BLUETOOTH_ADVERTISE ||
-            permission == Manifest.permission.BLUETOOTH_CONNECT
-    }
-    val hasMissingLocationPermission =
-        Manifest.permission.ACCESS_FINE_LOCATION in bluetoothStatus.missingPermissions
-
     val reasonParts = buildList {
         if (bluetoothStatus.isBluetoothEnabled == false) {
             add("Bluetooth disabled")
         }
-        if (hasMissingBluetoothPermission) {
+        if (bluetoothStatus.hasMissingBluetoothPermission) {
             add("Bluetooth permission missing")
         }
-        if (hasMissingLocationPermission) {
-            add("Location permission missing")
+        if (bluetoothStatus.hasMissingLocationPermission) {
+            add("Location/GPS permission missing")
         }
-        if (bluetoothStatus.isBluetoothEnabled == null && bluetoothStatus.missingPermissions.isEmpty()) {
+        if (bluetoothStatus.isLocationEnabled == false) {
+            add("Location/GPS disabled")
+        }
+        if (
+            bluetoothStatus.isBluetoothEnabled == null &&
+            bluetoothStatus.isLocationEnabled == null &&
+            bluetoothStatus.missingPermissions.isEmpty()
+        ) {
             add("Readiness unavailable")
         }
     }
