@@ -4,14 +4,15 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import gr.hua.aurora.ui.components.AuroraTopBar
-import gr.hua.aurora.ui.components.AuroraTopBarAction
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import gr.hua.aurora.ui.components.AuroraTopBar
+import gr.hua.aurora.ui.components.AuroraTopBarAction
 
 @Composable
 internal fun PlaceholderScreenScaffold(
@@ -42,14 +43,21 @@ internal fun PlaceholderScreenScaffold(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            // Προσωρινό placeholder μέχρι να προστεθεί σταδιακά η πραγματική λογική UI/ViewModel.
             Text(
                 text = "This screen is a temporary skeleton for the navigation baseline.",
-                style = MaterialTheme.typography.bodyMedium
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            content()
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)
+            )
+            Column(
+                verticalArrangement = Arrangement.spacedBy(18.dp)
+            ) {
+                content()
+            }
         }
     }
 }
