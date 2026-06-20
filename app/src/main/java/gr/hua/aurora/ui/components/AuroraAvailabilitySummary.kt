@@ -17,22 +17,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import gr.hua.aurora.ble.permissions.BluetoothPermissionStatus
-import gr.hua.aurora.ble.permissions.BluetoothPermissionStatusReader
+import gr.hua.aurora.ble.permissions.rememberBluetoothPermissionStatusState
 import gr.hua.aurora.state.AuroraAvailabilityPreference
 
 private val availabilityOnlineColor = Color(0xFF2E7D32)
@@ -54,36 +45,14 @@ data class RememberedAuroraAvailabilityUiState(
 fun rememberAuroraAvailabilityUiState(
     desiredAvailability: AuroraAvailabilityPreference
 ): RememberedAuroraAvailabilityUiState {
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    var bluetoothStatus by remember(context) {
-        mutableStateOf(BluetoothPermissionStatusReader.read(context))
-    }
-    val refresh = remember(context) {
-        {
-            bluetoothStatus = BluetoothPermissionStatusReader.read(context)
-        }
-    }
-
-    DisposableEffect(lifecycleOwner, refresh) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                refresh()
-            }
-        }
-
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
-    }
+    val bluetoothStatusState = rememberBluetoothPermissionStatusState()
 
     return RememberedAuroraAvailabilityUiState(
         uiState = buildAuroraAvailabilityUiState(
             desiredAvailability = desiredAvailability,
-            bluetoothStatus = bluetoothStatus
+            bluetoothStatus = bluetoothStatusState.status
         ),
-        refresh = refresh
+        refresh = bluetoothStatusState.refresh
     )
 }
 

@@ -50,6 +50,7 @@ import gr.hua.aurora.ble.discovery.BleScanStatus
 import gr.hua.aurora.ble.discovery.BleScanner
 import gr.hua.aurora.ble.permissions.BluetoothPermissionStatus
 import gr.hua.aurora.ble.permissions.BluetoothPermissionStatusReader
+import gr.hua.aurora.ble.permissions.rememberBluetoothPermissionStatusState
 import gr.hua.aurora.model.NearbyDevicePreview
 import gr.hua.aurora.model.TransportType
 import gr.hua.aurora.state.AuroraAvailabilityPreference
@@ -277,9 +278,8 @@ private fun rememberNearbyBleSessionState(
     val discoveredBleDevicesAggregator = remember {
         BleScanAggregator()
     }
-    var bluetoothStatus by remember(context) {
-        mutableStateOf(BluetoothPermissionStatusReader.read(context))
-    }
+    val bluetoothStatusState = rememberBluetoothPermissionStatusState()
+    val bluetoothStatus = bluetoothStatusState.status
     var isScreenVisible by remember(lifecycleOwner) {
         mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
     }
@@ -313,9 +313,7 @@ private fun rememberNearbyBleSessionState(
     )
     val isAvailabilityOnline = availabilityUiState.isOnline
 
-    val refreshBluetoothStatus: () -> Unit = {
-        bluetoothStatus = BluetoothPermissionStatusReader.read(context)
-    }
+    val refreshBluetoothStatus = bluetoothStatusState.refresh
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -325,11 +323,12 @@ private fun rememberNearbyBleSessionState(
 
     val requestMissingPermissions: () -> Unit = {
         val currentStatus = BluetoothPermissionStatusReader.read(context)
-        bluetoothStatus = currentStatus
         if (currentStatus.missingPermissions.isNotEmpty()) {
             permissionLauncher.launch(
                 currentStatus.missingPermissions.toTypedArray()
             )
+        } else {
+            refreshBluetoothStatus()
         }
     }
 
@@ -345,7 +344,6 @@ private fun rememberNearbyBleSessionState(
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 isScreenVisible = true
-                refreshBluetoothStatus()
             } else if (event == Lifecycle.Event.ON_STOP) {
                 isScreenVisible = false
                 bleConnector.disconnect()

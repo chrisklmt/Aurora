@@ -1,6 +1,7 @@
 package gr.hua.aurora
 
 import android.Manifest
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
@@ -41,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import gr.hua.aurora.ble.permissions.BluetoothPermissionStatus
 import gr.hua.aurora.ble.permissions.BluetoothPermissionStatusReader
+import gr.hua.aurora.ble.permissions.bluetoothReadinessIntentFilter
 import gr.hua.aurora.ui.theme.AuroraTheme
 
 internal enum class SplashGate {
@@ -54,6 +56,12 @@ internal enum class SplashGate {
 class SplashActivity : ComponentActivity() {
     private var splashGate by mutableStateOf(SplashGate.Loading)
     private var hasNavigatedToMain = false
+    private var isReadinessReceiverRegistered = false
+    private val readinessReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            evaluateStartupGate(autoRequestPermissions = false)
+        }
+    }
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -100,6 +108,16 @@ class SplashActivity : ComponentActivity() {
         }
 
         evaluateStartupGate(autoRequestPermissions = true)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        registerReadinessReceiverIfNeeded()
+    }
+
+    override fun onStop() {
+        unregisterReadinessReceiverIfNeeded()
+        super.onStop()
     }
 
     override fun onResume() {
@@ -149,6 +167,27 @@ class SplashActivity : ComponentActivity() {
             overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
             finish()
         }, minDurationMs)
+    }
+
+    private fun registerReadinessReceiverIfNeeded() {
+        if (isReadinessReceiverRegistered) return
+
+        ContextCompat.registerReceiver(
+            applicationContext,
+            readinessReceiver,
+            bluetoothReadinessIntentFilter(),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        isReadinessReceiverRegistered = true
+    }
+
+    private fun unregisterReadinessReceiverIfNeeded() {
+        if (!isReadinessReceiverRegistered) return
+
+        runCatching {
+            applicationContext.unregisterReceiver(readinessReceiver)
+        }
+        isReadinessReceiverRegistered = false
     }
 }
 

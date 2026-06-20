@@ -45,6 +45,23 @@ class AuroraAvailabilitySummaryTest {
     }
 
     @Test
+    fun bluetoothDisabledKeepsAvailabilityOffline() {
+        val uiState = buildAuroraAvailabilityUiState(
+            desiredAvailability = AuroraAvailabilityPreference.ONLINE,
+            bluetoothStatus = BluetoothPermissionStatus(
+                requiredPermissions = setOf(Manifest.permission.ACCESS_FINE_LOCATION),
+                missingPermissions = emptySet(),
+                isBluetoothEnabled = false,
+                isLocationEnabled = true
+            )
+        )
+
+        assertFalse(uiState.isOnline)
+        assertEquals("Offline", uiState.statusLabel)
+        assertEquals("Bluetooth disabled", uiState.reasonText)
+    }
+
+    @Test
     fun userPreferenceOfflineStaysOfflineWithoutReadinessReason() {
         val uiState = buildAuroraAvailabilityUiState(
             desiredAvailability = AuroraAvailabilityPreference.OFFLINE,

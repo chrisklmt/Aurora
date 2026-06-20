@@ -23,8 +23,12 @@ import gr.hua.aurora.ble.discovery.BleStablePeerId
 import gr.hua.aurora.ble.gatt.AndroidBleGattServer
 import gr.hua.aurora.ble.gatt.BleGattServer
 import gr.hua.aurora.ble.gatt.BleGattServerStatus
+import gr.hua.aurora.ble.noop.NoOpBleTransportSender
 import gr.hua.aurora.ble.permissions.BluetoothPermissionStatus
-import gr.hua.aurora.ble.permissions.BluetoothPermissionStatusReader
+import gr.hua.aurora.ble.permissions.rememberBluetoothPermissionStatusState
+import gr.hua.aurora.ble.transport.AndroidBleTransportSender
+import gr.hua.aurora.ble.transport.BleGattTransportFrameWriter
+import gr.hua.aurora.ble.transport.BleTransportSender
 import gr.hua.aurora.identity.AndroidKeystoreLocalAgreementPublicKey
 import gr.hua.aurora.ui.components.buildAuroraAvailabilityUiState
 
@@ -32,7 +36,8 @@ private const val auroraBleRuntimeLogTag = "AuroraBleRuntime"
 
 data class AuroraBleRuntimeState(
     val bleAdvertiseStatus: BleAdvertiseStatus,
-    val bleGattServerStatus: BleGattServerStatus
+    val bleGattServerStatus: BleGattServerStatus,
+    val bleTransportSender: BleTransportSender
 )
 
 internal fun shouldRunAuroraBleRuntime(
@@ -48,7 +53,8 @@ internal fun shouldRunAuroraBleRuntime(
 
 @Composable
 fun rememberAuroraBleRuntimeState(
-    desiredAvailability: AuroraAvailabilityPreference
+    desiredAvailability: AuroraAvailabilityPreference,
+    transportFrameWriter: BleGattTransportFrameWriter? = null
 ): AuroraBleRuntimeState {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -77,8 +83,10 @@ fun rememberAuroraBleRuntimeState(
             payload = BleDiscoveryPayload.current(advertisedStablePeerId).toByteArray()
         )
     }
-    var bluetoothStatus by remember(context) {
-        mutableStateOf(BluetoothPermissionStatusReader.read(context))
+    val bluetoothStatusState = rememberBluetoothPermissionStatusState()
+    val bluetoothStatus = bluetoothStatusState.status
+    val bleTransportSender = remember(transportFrameWriter) {
+        createAuroraBleTransportSender(transportFrameWriter)
     }
     var isAppVisible by remember(lifecycleOwner) {
         mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
@@ -94,15 +102,10 @@ fun rememberAuroraBleRuntimeState(
         bluetoothStatus = bluetoothStatus,
         isAppVisible = isAppVisible
     )
-    val refreshBluetoothStatus: () -> Unit = {
-        bluetoothStatus = BluetoothPermissionStatusReader.read(context)
-    }
-
     DisposableEffect(lifecycleOwner, bleAdvertiser, bleGattServer) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 isAppVisible = true
-                refreshBluetoothStatus()
             } else if (event == Lifecycle.Event.ON_STOP) {
                 isAppVisible = false
                 bleAdvertiser.stop()
@@ -180,6 +183,17 @@ fun rememberAuroraBleRuntimeState(
 
     return AuroraBleRuntimeState(
         bleAdvertiseStatus = bleAdvertiseStatus,
-        bleGattServerStatus = bleGattServerStatus
+        bleGattServerStatus = bleGattServerStatus,
+        bleTransportSender = bleTransportSender
     )
+}
+
+internal fun createAuroraBleTransportSender(
+    transportFrameWriter: BleGattTransportFrameWriter?
+): BleTransportSender {
+    return if (transportFrameWriter == null) {
+        NoOpBleTransportSender()
+    } else {
+        AndroidBleTransportSender(transportFrameWriter)
+    }
 }

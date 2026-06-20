@@ -71,6 +71,21 @@ class SplashActivityGateTest {
     }
 
     @Test
+    fun bluetoothGateHasPriorityWhenBluetoothAndLocationAreBothDisabled() {
+        val gate = resolveSplashGate(
+            bluetoothStatus = BluetoothPermissionStatus(
+                requiredPermissions = setOf(Manifest.permission.ACCESS_FINE_LOCATION),
+                missingPermissions = emptySet(),
+                isBluetoothEnabled = false,
+                isLocationEnabled = false
+            )
+        )
+
+        assertEquals(SplashGate.NeedsBluetooth, gate)
+        assertTrue(shouldOfferContinueAnyway(gate))
+    }
+
+    @Test
     fun completeReadinessAllowsReadyGate() {
         val gate = resolveSplashGate(
             bluetoothStatus = BluetoothPermissionStatus(
