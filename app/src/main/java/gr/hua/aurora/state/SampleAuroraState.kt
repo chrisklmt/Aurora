@@ -4,6 +4,7 @@ import gr.hua.aurora.model.ChatMessage
 import gr.hua.aurora.model.ContactPreview
 import gr.hua.aurora.model.MessageStatus
 import gr.hua.aurora.model.NearbyDevicePreview
+import gr.hua.aurora.model.OutgoingChatMessage
 import gr.hua.aurora.model.TransportType
 
 object SampleAuroraState {
@@ -107,6 +108,7 @@ object SampleAuroraState {
                     isOutgoing = false
                 )
             ),
+            pendingOutgoingMessages = emptyList<OutgoingChatMessage>(),
             privateMessagesByPeerId = mapOf(
                 "alex" to listOf(
                     ChatMessage(

@@ -11,6 +11,9 @@ import gr.hua.aurora.data.LocalProfileSettingsStore
 import gr.hua.aurora.data.LocalProfileStore
 import gr.hua.aurora.model.ChatMessage
 import gr.hua.aurora.model.MessageStatus
+import gr.hua.aurora.model.OutgoingChatMessage
+import gr.hua.aurora.protocol.OutgoingMessageFrameBuilder
+import gr.hua.aurora.protocol.OutgoingMessageFrameDraft
 
 class AuroraStateHolder(
     initialState: AuroraUiState,
@@ -24,14 +27,18 @@ class AuroraStateHolder(
     fun sendGlobalPreviewMessage(text: String) {
         val sanitizedText = text.trim()
         if (sanitizedText.isEmpty()) return
+        val outgoingMessage = createOutgoingMessage(
+            threadId = "global",
+            senderName = uiState.globalChatUsername,
+            text = sanitizedText
+        )
 
         uiState = AuroraUiState(
             contacts = uiState.contacts,
             nearbyDevices = uiState.nearbyDevices,
-            globalMessages = uiState.globalMessages + createOutgoingMessage(
-                threadId = "global",
-                senderName = uiState.globalChatUsername,
-                text = sanitizedText
+            globalMessages = uiState.globalMessages + outgoingMessage,
+            pendingOutgoingMessages = uiState.pendingOutgoingMessages + createQueuedOutgoingChatMessage(
+                message = outgoingMessage
             ),
             privateMessagesByPeerId = uiState.privateMessagesByPeerId,
             generatedUsername = uiState.generatedUsername,
@@ -55,6 +62,7 @@ class AuroraStateHolder(
             contacts = uiState.contacts,
             nearbyDevices = uiState.nearbyDevices,
             globalMessages = uiState.globalMessages,
+            pendingOutgoingMessages = uiState.pendingOutgoingMessages,
             privateMessagesByPeerId = uiState.privateMessagesByPeerId + (peerId to updatedMessages),
             generatedUsername = uiState.generatedUsername,
             customUsername = uiState.customUsername,
@@ -71,6 +79,7 @@ class AuroraStateHolder(
             contacts = uiState.contacts,
             nearbyDevices = uiState.nearbyDevices,
             globalMessages = uiState.globalMessages,
+            pendingOutgoingMessages = uiState.pendingOutgoingMessages,
             privateMessagesByPeerId = uiState.privateMessagesByPeerId,
             generatedUsername = uiState.generatedUsername,
             customUsername = sanitizedUsername,
@@ -86,6 +95,7 @@ class AuroraStateHolder(
             contacts = uiState.contacts,
             nearbyDevices = uiState.nearbyDevices,
             globalMessages = uiState.globalMessages,
+            pendingOutgoingMessages = uiState.pendingOutgoingMessages,
             privateMessagesByPeerId = uiState.privateMessagesByPeerId,
             generatedUsername = uiState.generatedUsername,
             customUsername = uiState.customUsername,
@@ -120,6 +130,14 @@ class AuroraStateHolder(
         return uiState.contacts.firstOrNull { it.id == peerId }?.displayName ?: peerId
     }
 
+    fun pendingOutgoingMessagesForThread(threadId: String): List<OutgoingChatMessage> {
+        return uiState.pendingOutgoingMessages.filter { it.threadId == threadId }
+    }
+
+    fun pendingOutgoingMessageFrameDraftsForThread(threadId: String): List<OutgoingMessageFrameDraft> {
+        return pendingOutgoingMessagesForThread(threadId).map(OutgoingMessageFrameBuilder::build)
+    }
+
     private fun createOutgoingMessage(
         threadId: String,
         senderName: String,
@@ -136,6 +154,18 @@ class AuroraStateHolder(
             createdAtMillis = now,
             status = MessageStatus.LOCAL_ONLY,
             isOutgoing = true
+        )
+    }
+
+    private fun createQueuedOutgoingChatMessage(
+        message: ChatMessage
+    ): OutgoingChatMessage {
+        return OutgoingChatMessage(
+            messageId = message.id,
+            threadId = message.threadId,
+            userText = message.text,
+            createdAtMillis = message.createdAtMillis,
+            status = MessageStatus.QUEUED
         )
     }
 
