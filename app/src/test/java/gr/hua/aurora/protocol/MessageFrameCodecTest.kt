@@ -40,6 +40,20 @@ class MessageFrameCodecTest {
     }
 
     @Test
+    fun identityExchangeFrameRoundTripPreservesData() {
+        val frame = PeerIdentityExchangeMessage(
+            peerId = "peer-identity",
+            publicAgreementKeyBytes = validPublicKeyBytes(),
+            createdAtMillis = 1_715_901_111L
+        ).toMessageFrame()
+
+        val encoded = MessageFrameCodec.encode(frame)
+        val decoded = MessageFrameCodec.decode(encoded)
+
+        assertEquals(frame, decoded)
+    }
+
+    @Test
     fun invalidFrameInputFails() {
         assertThrows(IllegalArgumentException::class.java) {
             MessageFrameCodec.decode("bad|frame")
@@ -62,5 +76,12 @@ class MessageFrameCodecTest {
         val decoded = MessageFrameCodec.decode(encoded)
 
         assertEquals(frame, decoded)
+    }
+
+    private fun validPublicKeyBytes(): ByteArray {
+        val generator = java.security.KeyPairGenerator.getInstance("EC")
+        generator.initialize(java.security.spec.ECGenParameterSpec("secp256r1"))
+        val publicKey = generator.generateKeyPair().public as java.security.interfaces.ECPublicKey
+        return gr.hua.aurora.crypto.Sec1PublicKeyEncoding.encodeUncompressed(publicKey)
     }
 }

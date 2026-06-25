@@ -13,7 +13,7 @@ fun ChatMessage.toMessageListItem(): MessageListItem {
         text = text,
         isOutgoing = isOutgoing,
         timestampLabel = createdAtMillis.toPreviewTimeLabel(),
-        supportingLabel = status.toPreviewStatusLabel()
+        supportingLabel = status.toPreviewStatusLabel(isOutgoing = isOutgoing)
     )
 }
 
@@ -21,11 +21,18 @@ private fun Long.toPreviewTimeLabel(): String {
     return SimpleDateFormat("HH:mm", Locale.US).format(Date(this))
 }
 
-private fun MessageStatus.toPreviewStatusLabel(): String {
+private fun MessageStatus.toPreviewStatusLabel(
+    isOutgoing: Boolean
+): String? {
+    if (!isOutgoing) {
+        return null
+    }
+
     return when (this) {
         MessageStatus.DRAFT -> "Draft"
-        MessageStatus.QUEUED -> "Queued"
-        MessageStatus.LOCAL_ONLY -> "Local only"
+        MessageStatus.RECEIVED -> null
+        MessageStatus.QUEUED,
+        MessageStatus.LOCAL_ONLY -> "Pending"
         MessageStatus.SENT -> "Sent"
         MessageStatus.DELIVERED -> "Delivered"
         MessageStatus.FAILED -> "Failed"

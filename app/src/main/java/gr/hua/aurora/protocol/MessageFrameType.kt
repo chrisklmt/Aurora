@@ -4,5 +4,6 @@ package gr.hua.aurora.protocol
 enum class MessageFrameType {
     GLOBAL_TEXT,
     PRIVATE_TEXT,
+    IDENTITY_EXCHANGE,
     CONTROL
 }
