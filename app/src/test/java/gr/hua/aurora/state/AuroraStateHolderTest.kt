@@ -3,7 +3,9 @@ package gr.hua.aurora.state
 import gr.hua.aurora.data.GeneratedUsername
 import gr.hua.aurora.data.LocalProfileSettings
 import gr.hua.aurora.data.LocalProfileSettingsStore
+import gr.hua.aurora.model.AuroraContact
 import gr.hua.aurora.model.MessageStatus
+import gr.hua.aurora.protocol.GlobalMeshDeliveryResult
 import gr.hua.aurora.protocol.MessageFrameType
 import gr.hua.aurora.protocol.OutgoingMessageFrameResolver
 import org.junit.Assert.assertEquals
@@ -18,7 +20,9 @@ class AuroraStateHolderTest {
         val state = SampleAuroraState.create(generatedUsername = "PIAIUFN1")
 
         assertTrue(state.useCustomUsernameInGlobalChat)
+        assertEquals(false, state.isDebugModeEnabled)
         assertEquals(AuroraAvailabilityPreference.ONLINE, state.desiredAvailability)
+        assertTrue(state.globalMessages.isEmpty())
     }
 
     @Test
@@ -68,7 +72,7 @@ class AuroraStateHolderTest {
     }
 
     @Test
-    fun globalSendAppendsLocalOnlyMessage() {
+    fun globalSendAppendsPendingMessage() {
         val holder = createHolder(
             store = FakeProfileStore(),
             generatedUsername = "PIAIUFN1"
@@ -81,8 +85,7 @@ class AuroraStateHolderTest {
         assertEquals(initialCount + 1, holder.uiState.globalMessages.size)
         assertEquals("hello local", appendedMessage.text)
         assertTrue(appendedMessage.isOutgoing)
-        assertEquals(MessageStatus.LOCAL_ONLY, appendedMessage.status)
-        assertNotEquals(MessageStatus.SENT, appendedMessage.status)
+        assertEquals(MessageStatus.QUEUED, appendedMessage.status)
         assertNotEquals(MessageStatus.DELIVERED, appendedMessage.status)
     }
 
@@ -105,6 +108,244 @@ class AuroraStateHolderTest {
         assertEquals(MessageStatus.QUEUED, queuedMessage.status)
         assertNotEquals(MessageStatus.SENT, queuedMessage.status)
         assertNotEquals(MessageStatus.DELIVERED, queuedMessage.status)
+    }
+
+    @Test
+    fun queuedGlobalMeshDeliveryPromotesVisibleGlobalMessageToSent() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1"
+        )
+
+        val queuedMessage = requireNotNull(holder.sendGlobalPreviewMessage("queue for transport"))
+
+        holder.handleGlobalMeshDeliveryResult(
+            messageId = queuedMessage.messageId,
+            result = GlobalMeshDeliveryResult.QueuedToActivePeer("peer-123")
+        )
+
+        val visibleMessage = holder.uiState.globalMessages.last()
+        assertEquals(queuedMessage.messageId, visibleMessage.id)
+        assertEquals(MessageStatus.SENT, visibleMessage.status)
+        assertEquals(
+            GlobalMeshDeliveryResult.QueuedToActivePeer("peer-123"),
+            holder.uiState.globalMeshDeliveryResult
+        )
+        assertEquals(1, holder.uiState.pendingOutgoingMessages.size)
+        assertEquals(MessageStatus.QUEUED, holder.uiState.pendingOutgoingMessages.single().status)
+        assertNotEquals(MessageStatus.DELIVERED, visibleMessage.status)
+    }
+
+    @Test
+    fun missingSessionMeshDeliveryKeepsVisibleGlobalMessagePending() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1"
+        )
+
+        val queuedMessage = requireNotNull(holder.sendGlobalPreviewMessage("stay local"))
+
+        holder.handleGlobalMeshDeliveryResult(
+            messageId = queuedMessage.messageId,
+            result = GlobalMeshDeliveryResult.SenderUnavailable
+        )
+
+        val visibleMessage = holder.uiState.globalMessages.last()
+        assertEquals(MessageStatus.QUEUED, visibleMessage.status)
+        assertEquals(
+            GlobalMeshDeliveryResult.SenderUnavailable,
+            holder.uiState.globalMeshDeliveryResult
+        )
+        assertEquals(1, holder.uiState.pendingOutgoingMessages.size)
+        assertEquals(MessageStatus.QUEUED, holder.uiState.pendingOutgoingMessages.single().status)
+    }
+
+    @Test
+    fun noReachablePeerMeshDeliveryKeepsVisibleGlobalMessagePending() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1"
+        )
+
+        val queuedMessage = requireNotNull(holder.sendGlobalPreviewMessage("wait for peer"))
+
+        holder.handleGlobalMeshDeliveryResult(
+            messageId = queuedMessage.messageId,
+            result = GlobalMeshDeliveryResult.NoReachablePeers
+        )
+
+        val visibleMessage = holder.uiState.globalMessages.last()
+        assertEquals(MessageStatus.QUEUED, visibleMessage.status)
+        assertEquals(
+            GlobalMeshDeliveryResult.NoReachablePeers,
+            holder.uiState.globalMeshDeliveryResult
+        )
+        assertEquals(1, holder.uiState.pendingOutgoingMessages.size)
+        assertEquals(MessageStatus.QUEUED, holder.uiState.pendingOutgoingMessages.single().status)
+    }
+
+    @Test
+    fun failedMeshDeliveryMarksVisibleGlobalMessageFailedWithoutConsumingQueue() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1"
+        )
+
+        val queuedMessage = requireNotNull(holder.sendGlobalPreviewMessage("hard failure"))
+
+        holder.handleGlobalMeshDeliveryResult(
+            messageId = queuedMessage.messageId,
+            result = GlobalMeshDeliveryResult.Failed("writer unavailable")
+        )
+
+        assertEquals(MessageStatus.FAILED, holder.uiState.globalMessages.last().status)
+        assertEquals(1, holder.uiState.pendingOutgoingMessages.size)
+        assertEquals(MessageStatus.QUEUED, holder.uiState.pendingOutgoingMessages.single().status)
+        assertNotEquals(MessageStatus.DELIVERED, holder.uiState.globalMessages.last().status)
+    }
+
+    @Test
+    fun selectingSecurePeerUpdatesStateWithoutClearingMeshResult() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1"
+        )
+        val queuedMessage = requireNotNull(holder.sendGlobalPreviewMessage("select peer"))
+        holder.handleGlobalMeshDeliveryResult(
+            messageId = queuedMessage.messageId,
+            result = GlobalMeshDeliveryResult.NoReachablePeers
+        )
+
+        holder.selectSecurePeer(" peer-123 ")
+
+        assertEquals("peer-123", holder.uiState.selectedSecurePeerId)
+        assertEquals(
+            GlobalMeshDeliveryResult.NoReachablePeers,
+            holder.uiState.globalMeshDeliveryResult
+        )
+    }
+
+    @Test
+    fun clearingSecurePeerClearsSelectionWithoutClearingMeshResult() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1"
+        )
+        holder.selectSecurePeer("peer-123")
+        val queuedMessage = requireNotNull(holder.sendGlobalPreviewMessage("clear peer"))
+        holder.handleGlobalMeshDeliveryResult(
+            messageId = queuedMessage.messageId,
+            result = GlobalMeshDeliveryResult.SenderUnavailable
+        )
+
+        holder.clearSelectedSecurePeer()
+
+        assertNull(holder.uiState.selectedSecurePeerId)
+        assertEquals(
+            GlobalMeshDeliveryResult.SenderUnavailable,
+            holder.uiState.globalMeshDeliveryResult
+        )
+    }
+
+    @Test
+    fun addContactStoresItInStateWithMissingKeys() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1"
+        )
+
+        val contact = holder.addOrUpdateContact(
+            canonicalPeerId = "peer-123",
+            displayName = "Alex",
+            lastSeenMillis = 1234L,
+            hasSession = false
+        )
+
+        assertEquals(
+            AuroraContact(
+                canonicalPeerId = "peer-123",
+                displayName = "Alex",
+                createdAtMillis = contact.createdAtMillis,
+                lastSeenMillis = 1234L,
+                hasSession = false
+            ),
+            contact
+        )
+        assertEquals(listOf(contact), holder.uiState.contacts)
+        assertEquals("Alex", holder.displayNameForPeerId("peer-123"))
+    }
+
+    @Test
+    fun addingSameContactUpdatesInsteadOfDuplicating() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1"
+        )
+        val originalContact = holder.addOrUpdateContact(
+            canonicalPeerId = "peer-123",
+            displayName = "Alex",
+            lastSeenMillis = 1000L,
+            hasSession = false
+        )
+
+        val updatedContact = holder.addOrUpdateContact(
+            canonicalPeerId = "peer-123",
+            displayName = "Alexandra",
+            lastSeenMillis = 2000L,
+            hasSession = false
+        )
+
+        assertEquals(1, holder.uiState.contacts.size)
+        assertEquals(originalContact.createdAtMillis, updatedContact.createdAtMillis)
+        assertEquals("Alexandra", updatedContact.displayName)
+        assertEquals(2000L, updatedContact.lastSeenMillis)
+        assertEquals(false, updatedContact.hasSession)
+    }
+
+    @Test
+    fun keyExchangeSuccessPromotesExistingContactToReady() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1"
+        )
+        holder.addOrUpdateContact(
+            canonicalPeerId = "peer-123",
+            displayName = "Alex",
+            hasSession = false
+        )
+
+        val updatedContact = holder.addOrUpdateContact(
+            canonicalPeerId = "peer-123",
+            displayName = "Alex",
+            hasSession = true
+        )
+
+        assertTrue(updatedContact.hasSession)
+        assertTrue(holder.findContactByPeerId("peer-123")?.hasSession == true)
+    }
+
+    @Test
+    fun failedKeyExchangeDoesNotFakeReadyContact() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1"
+        )
+
+        val contact = holder.addOrUpdateContact(
+            canonicalPeerId = "peer-123",
+            displayName = "Alex",
+            hasSession = false
+        )
+
+        val updatedContact = holder.addOrUpdateContact(
+            canonicalPeerId = "peer-123",
+            displayName = "Alex",
+            hasSession = false
+        )
+
+        assertEquals(false, contact.hasSession)
+        assertEquals(false, updatedContact.hasSession)
+        assertEquals(false, holder.findContactByPeerId("peer-123")?.hasSession)
     }
 
     @Test
@@ -246,6 +487,21 @@ class AuroraStateHolderTest {
         assertEquals("John", holder.uiState.customUsername)
         assertEquals("PIAIUFN1", holder.uiState.generatedUsername)
         assertEquals(false, holder.uiState.useCustomUsernameInGlobalChat)
+    }
+
+    @Test
+    fun debugModeCanBeUpdatedWithoutChangingChatState() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1"
+        )
+        holder.sendGlobalPreviewMessage("hello")
+        val messageCountBefore = holder.uiState.globalMessages.size
+
+        holder.updateDebugMode(true)
+
+        assertTrue(holder.uiState.isDebugModeEnabled)
+        assertEquals(messageCountBefore, holder.uiState.globalMessages.size)
     }
 
     private fun createHolder(

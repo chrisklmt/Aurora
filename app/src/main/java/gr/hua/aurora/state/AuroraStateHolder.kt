@@ -9,9 +9,12 @@ import gr.hua.aurora.data.GeneratedUsername
 import gr.hua.aurora.data.LocalProfileSettings
 import gr.hua.aurora.data.LocalProfileSettingsStore
 import gr.hua.aurora.data.LocalProfileStore
+import gr.hua.aurora.model.AuroraContact
 import gr.hua.aurora.model.ChatMessage
 import gr.hua.aurora.model.MessageStatus
 import gr.hua.aurora.model.OutgoingChatMessage
+import gr.hua.aurora.protocol.GlobalMeshDeliveryResult
+import gr.hua.aurora.protocol.IncomingTransportMessage
 import gr.hua.aurora.protocol.OutgoingMessageFrameBuilder
 import gr.hua.aurora.protocol.OutgoingMessageFrameDraft
 
@@ -24,28 +27,35 @@ class AuroraStateHolder(
 
     // Οι helpers ενημερώνουν μόνο την τοπική Compose μνήμη ώστε το UI να δείχνει συνεκτικό,
     // χωρίς αποθήκευση μηνυμάτων, δικτύωση ή άλλη business orchestration.
-    fun sendGlobalPreviewMessage(text: String) {
+    fun sendGlobalPreviewMessage(text: String): OutgoingChatMessage? {
         val sanitizedText = text.trim()
-        if (sanitizedText.isEmpty()) return
+        if (sanitizedText.isEmpty()) return null
         val outgoingMessage = createOutgoingMessage(
             threadId = "global",
             senderName = uiState.globalChatUsername,
-            text = sanitizedText
+            text = sanitizedText,
+            status = MessageStatus.QUEUED
+        )
+        val queuedMessage = createQueuedOutgoingChatMessage(
+            message = outgoingMessage
         )
 
         uiState = AuroraUiState(
             contacts = uiState.contacts,
             nearbyDevices = uiState.nearbyDevices,
             globalMessages = uiState.globalMessages + outgoingMessage,
-            pendingOutgoingMessages = uiState.pendingOutgoingMessages + createQueuedOutgoingChatMessage(
-                message = outgoingMessage
-            ),
+            pendingOutgoingMessages = uiState.pendingOutgoingMessages + queuedMessage,
             privateMessagesByPeerId = uiState.privateMessagesByPeerId,
             generatedUsername = uiState.generatedUsername,
             customUsername = uiState.customUsername,
             useCustomUsernameInGlobalChat = uiState.useCustomUsernameInGlobalChat,
-            desiredAvailability = uiState.desiredAvailability
+            isDebugModeEnabled = uiState.isDebugModeEnabled,
+            desiredAvailability = uiState.desiredAvailability,
+            selectedSecurePeerId = uiState.selectedSecurePeerId,
+            globalMeshDeliveryResult = null
         )
+
+        return queuedMessage
     }
 
     fun sendPrivatePreviewMessage(peerId: String, text: String) {
@@ -55,7 +65,8 @@ class AuroraStateHolder(
         val updatedMessages = privateMessagesForPeerId(peerId) + createOutgoingMessage(
             threadId = "private:$peerId",
             senderName = uiState.privateProfileUsername,
-            text = sanitizedText
+            text = sanitizedText,
+            status = MessageStatus.LOCAL_ONLY
         )
 
         uiState = AuroraUiState(
@@ -67,7 +78,10 @@ class AuroraStateHolder(
             generatedUsername = uiState.generatedUsername,
             customUsername = uiState.customUsername,
             useCustomUsernameInGlobalChat = uiState.useCustomUsernameInGlobalChat,
-            desiredAvailability = uiState.desiredAvailability
+            isDebugModeEnabled = uiState.isDebugModeEnabled,
+            desiredAvailability = uiState.desiredAvailability,
+            selectedSecurePeerId = uiState.selectedSecurePeerId,
+            globalMeshDeliveryResult = uiState.globalMeshDeliveryResult
         )
     }
 
@@ -84,7 +98,10 @@ class AuroraStateHolder(
             generatedUsername = uiState.generatedUsername,
             customUsername = sanitizedUsername,
             useCustomUsernameInGlobalChat = uiState.useCustomUsernameInGlobalChat,
-            desiredAvailability = uiState.desiredAvailability
+            isDebugModeEnabled = uiState.isDebugModeEnabled,
+            desiredAvailability = uiState.desiredAvailability,
+            selectedSecurePeerId = uiState.selectedSecurePeerId,
+            globalMeshDeliveryResult = uiState.globalMeshDeliveryResult
         )
 
         localProfileStore.saveCustomUsername(sanitizedUsername)
@@ -100,14 +117,103 @@ class AuroraStateHolder(
             generatedUsername = uiState.generatedUsername,
             customUsername = uiState.customUsername,
             useCustomUsernameInGlobalChat = enabled,
-            desiredAvailability = uiState.desiredAvailability
+            isDebugModeEnabled = uiState.isDebugModeEnabled,
+            desiredAvailability = uiState.desiredAvailability,
+            selectedSecurePeerId = uiState.selectedSecurePeerId,
+            globalMeshDeliveryResult = uiState.globalMeshDeliveryResult
         )
 
         localProfileStore.saveUseCustomUsernameInGlobalChat(enabled)
     }
 
+    fun updateDebugMode(enabled: Boolean) {
+        uiState = uiState.copy(
+            isDebugModeEnabled = enabled
+        )
+    }
+
     fun updateDesiredAvailability(preference: AuroraAvailabilityPreference) {
         uiState = uiState.copy(desiredAvailability = preference)
+    }
+
+    fun selectSecurePeer(peerId: String) {
+        val sanitizedPeerId = peerId.trim()
+        if (sanitizedPeerId.isEmpty()) return
+
+        uiState = uiState.copy(
+            selectedSecurePeerId = sanitizedPeerId
+        )
+    }
+
+    fun clearSelectedSecurePeer() {
+        if (uiState.selectedSecurePeerId == null) return
+
+        uiState = uiState.copy(
+            selectedSecurePeerId = null
+        )
+    }
+
+    fun addOrUpdateContact(
+        canonicalPeerId: String,
+        displayName: String,
+        lastSeenMillis: Long? = null,
+        hasSession: Boolean = false
+    ): AuroraContact {
+        val sanitizedPeerId = canonicalPeerId.trim()
+        val sanitizedDisplayName = displayName.trim()
+        require(sanitizedPeerId.isNotEmpty()) {
+            "Aurora contact canonicalPeerId must not be blank."
+        }
+        require(sanitizedDisplayName.isNotEmpty()) {
+            "Aurora contact displayName must not be blank."
+        }
+
+        val existingContact = uiState.contacts.firstOrNull { it.canonicalPeerId == sanitizedPeerId }
+        val resolvedLastSeenMillis = lastSeenMillis ?: existingContact?.lastSeenMillis
+        val updatedContact = if (existingContact == null) {
+            AuroraContact(
+                canonicalPeerId = sanitizedPeerId,
+                displayName = sanitizedDisplayName,
+                createdAtMillis = System.currentTimeMillis(),
+                lastSeenMillis = resolvedLastSeenMillis,
+                hasSession = hasSession
+            )
+        } else {
+            existingContact.copy(
+                displayName = sanitizedDisplayName,
+                lastSeenMillis = resolvedLastSeenMillis,
+                hasSession = existingContact.hasSession || hasSession
+            )
+        }
+
+        if (existingContact != updatedContact) {
+            val updatedContacts = if (existingContact == null) {
+                uiState.contacts + updatedContact
+            } else {
+                uiState.contacts.map { contact ->
+                    if (contact.canonicalPeerId == sanitizedPeerId) {
+                        updatedContact
+                    } else {
+                        contact
+                    }
+                }
+            }.sortedWith(
+                compareByDescending<AuroraContact> { it.hasSession }
+                    .thenBy { it.displayName.lowercase() }
+            )
+
+            uiState = uiState.copy(
+                contacts = updatedContacts
+            )
+        }
+
+        return updatedContact
+    }
+
+    fun findContactByPeerId(peerId: String): AuroraContact? {
+        val sanitizedPeerId = peerId.trim()
+        if (sanitizedPeerId.isEmpty()) return null
+        return uiState.contacts.firstOrNull { it.canonicalPeerId == sanitizedPeerId }
     }
 
     fun resetLocalData() {
@@ -127,7 +233,7 @@ class AuroraStateHolder(
     }
 
     fun displayNameForPeerId(peerId: String): String {
-        return uiState.contacts.firstOrNull { it.id == peerId }?.displayName ?: peerId
+        return findContactByPeerId(peerId)?.displayName ?: peerId
     }
 
     fun pendingOutgoingMessagesForThread(threadId: String): List<OutgoingChatMessage> {
@@ -138,10 +244,43 @@ class AuroraStateHolder(
         return pendingOutgoingMessagesForThread(threadId).map(OutgoingMessageFrameBuilder::build)
     }
 
+    fun handleGlobalMeshDeliveryResult(
+        messageId: String,
+        result: GlobalMeshDeliveryResult
+    ) {
+        uiState = uiState.copy(
+            globalMessages = uiState.globalMessages.map { message ->
+                if (message.id == messageId && message.isOutgoing) {
+                    message.copy(
+                        status = visibleGlobalMessageStatusForMeshResult(
+                            currentStatus = message.status,
+                            result = result
+                        )
+                    )
+                } else {
+                    message
+                }
+            },
+            globalMeshDeliveryResult = result
+        )
+    }
+
+    fun ingestIncomingTransportMessage(
+        message: IncomingTransportMessage
+    ): IncomingMessageIngestionResult {
+        val outcome = IncomingChatMessageIngestor.ingest(
+            state = uiState,
+            message = message
+        )
+        uiState = outcome.updatedState
+        return outcome.result
+    }
+
     private fun createOutgoingMessage(
         threadId: String,
         senderName: String,
-        text: String
+        text: String,
+        status: MessageStatus
     ): ChatMessage {
         val now = System.currentTimeMillis()
 
@@ -152,7 +291,7 @@ class AuroraStateHolder(
             senderName = senderName,
             text = text,
             createdAtMillis = now,
-            status = MessageStatus.LOCAL_ONLY,
+            status = status,
             isOutgoing = true
         )
     }
@@ -174,28 +313,48 @@ class AuroraStateHolder(
     }
 }
 
+private fun visibleGlobalMessageStatusForMeshResult(
+    currentStatus: MessageStatus,
+    result: GlobalMeshDeliveryResult
+): MessageStatus {
+    return when (result) {
+        is GlobalMeshDeliveryResult.QueuedToActivePeer -> MessageStatus.SENT
+        GlobalMeshDeliveryResult.NoReachablePeers,
+        GlobalMeshDeliveryResult.SenderUnavailable,
+        is GlobalMeshDeliveryResult.ConnectOnSendFailed -> MessageStatus.QUEUED
+        is GlobalMeshDeliveryResult.Failed -> MessageStatus.FAILED
+        is GlobalMeshDeliveryResult.SkippedDuplicate,
+        is GlobalMeshDeliveryResult.SkippedSourcePeer,
+        is GlobalMeshDeliveryResult.SkippedTtlExpired -> currentStatus
+    }
+}
+
 @Composable
 fun rememberAuroraStateHolder(
     localProfileStore: LocalProfileStore
 ): AuroraStateHolder {
-    val profileSettings = remember(localProfileStore) {
-        ensureGeneratedUsername(
-            profileSettings = localProfileStore.loadProfileSettings(),
-            localProfileStore = localProfileStore
-        )
-    }
-
     return remember(localProfileStore) {
-        AuroraStateHolder(
-            initialState = SampleAuroraState.create(
-                generatedUsername = profileSettings.generatedUsername
-                    ?: error("generatedUsername must be resolved before state creation."),
-                customUsername = profileSettings.customUsername,
-                useCustomUsernameInGlobalChat = profileSettings.useCustomUsernameInGlobalChat
-            ),
-            localProfileStore = localProfileStore
-        )
+        createAuroraStateHolder(localProfileStore)
     }
+}
+
+fun createAuroraStateHolder(
+    localProfileStore: LocalProfileSettingsStore
+): AuroraStateHolder {
+    val profileSettings = ensureGeneratedUsername(
+        profileSettings = localProfileStore.loadProfileSettings(),
+        localProfileStore = localProfileStore
+    )
+
+    return AuroraStateHolder(
+        initialState = SampleAuroraState.create(
+            generatedUsername = profileSettings.generatedUsername
+                ?: error("generatedUsername must be resolved before state creation."),
+            customUsername = profileSettings.customUsername,
+            useCustomUsernameInGlobalChat = profileSettings.useCustomUsernameInGlobalChat
+        ),
+        localProfileStore = localProfileStore
+    )
 }
 
 private fun ensureGeneratedUsername(
