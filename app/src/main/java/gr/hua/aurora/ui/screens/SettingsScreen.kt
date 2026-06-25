@@ -3,10 +3,8 @@ package gr.hua.aurora.ui.screens
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.AlertDialog
@@ -35,14 +33,20 @@ fun SettingsScreen(
     currentUsername: String,
     generatedUsername: String,
     useCustomUsernameInGlobalChat: Boolean,
+    isDebugModeEnabled: Boolean,
     onUsernameChange: (String) -> Unit,
     onUseCustomUsernameInGlobalChatChange: (Boolean) -> Unit,
+    onDebugModeChange: (Boolean) -> Unit,
     onClearLocalData: () -> Unit,
     onBack: () -> Unit
 ) {
     var draftUsername by rememberSaveable(currentUsername) { mutableStateOf(currentUsername) }
     var showClearDialog by rememberSaveable { mutableStateOf(false) }
-    val currentGlobalChatUsername = if (useCustomUsernameInGlobalChat) currentUsername else generatedUsername
+    val currentGlobalChatUsername = if (useCustomUsernameInGlobalChat) {
+        currentUsername
+    } else {
+        generatedUsername
+    }
 
     Scaffold(
         topBar = {
@@ -60,7 +64,6 @@ fun SettingsScreen(
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Το username αποθηκεύεται μόνο ως απλή τοπική ρύθμιση και όχι ως ασφαλές ή ευαίσθητο μυστικό.
             Text(
                 text = "Local profile",
                 style = MaterialTheme.typography.titleMedium
@@ -130,7 +133,35 @@ fun SettingsScreen(
                 )
             }
             HorizontalDivider()
-            // Το UI καλεί το κεντρικό local reset path ώστε το ίδιο flow να καλύπτει σταδιακά όσα τοπικά δεδομένα προστεθούν.
+            Text(
+                text = "Debug Mode",
+                style = MaterialTheme.typography.titleMedium
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "Show BLE and mesh diagnostics",
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Text(
+                        text = "Enable detailed transport, peer, identity, and scan diagnostics in chat and nearby screens.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = isDebugModeEnabled,
+                    onCheckedChange = onDebugModeChange
+                )
+            }
+            HorizontalDivider()
             Text(
                 text = "Local data",
                 style = MaterialTheme.typography.titleMedium
