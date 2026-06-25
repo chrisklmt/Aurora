@@ -1,7 +1,7 @@
 package gr.hua.aurora.crypto
 
 import java.security.AlgorithmParameters
-import java.security.interfaces.ECPrivateKey
+import java.security.PrivateKey
 import java.security.interfaces.ECPublicKey
 import java.security.spec.ECFieldFp
 import java.security.spec.ECGenParameterSpec
@@ -13,10 +13,12 @@ object EcdhKeyAgreement {
     private const val curveName = "secp256r1"
 
     fun deriveSharedSecret(
-        privateKey: ECPrivateKey,
+        privateKey: PrivateKey,
         publicKey: ECPublicKey
     ): ByteArray {
-        requireExpectedCurve(privateKey.params, "privateKey")
+        require(privateKey.algorithm.equals("EC", ignoreCase = true)) {
+            "privateKey must use the EC algorithm."
+        }
         requireExpectedCurve(publicKey.params, "publicKey")
 
         val keyAgreement = KeyAgreement.getInstance(algorithm)

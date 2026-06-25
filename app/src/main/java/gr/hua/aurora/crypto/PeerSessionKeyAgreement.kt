@@ -1,10 +1,10 @@
 package gr.hua.aurora.crypto
 
-import java.security.interfaces.ECPrivateKey
+import java.security.PrivateKey
 
 object PeerSessionKeyAgreement {
     fun deriveSessionKey(
-        privateKey: ECPrivateKey,
+        privateKey: PrivateKey,
         peerPublicKeyBytes: ByteArray
     ): ByteArray {
         val peerPublicKey = Sec1PublicKeyEncoding.decodeUncompressed(peerPublicKeyBytes)
