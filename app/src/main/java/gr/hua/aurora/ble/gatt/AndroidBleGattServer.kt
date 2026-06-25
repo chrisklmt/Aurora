@@ -10,12 +10,19 @@ import android.bluetooth.BluetoothManager
 import android.content.Context
 import gr.hua.aurora.ble.transport.BleGattTransportFrame
 import gr.hua.aurora.ble.transport.BleGattTransportPayload
+import gr.hua.aurora.ble.transport.BleTransportFrameListener
+import android.util.Log
 import java.util.UUID
 
 class AndroidBleGattServer(
     context: Context,
-    private val bluetoothManager: BluetoothManager?
+    private val bluetoothManager: BluetoothManager?,
+    private val transportFrameListener: BleTransportFrameListener? = null
 ) : BleGattServer {
+    private companion object {
+        private const val TAG = "AndroidBleGattServer"
+    }
+
     private val appContext = context.applicationContext
     private var activeServer: BluetoothGattServer? = null
     private var activeListener: BleGattServer.Listener? = null
@@ -111,6 +118,16 @@ class AndroidBleGattServer(
                 val isActiveSetup = activeServer === startedServer &&
                     activeListener != null &&
                     hasActiveServer
+                val parsedFrame = transportFrameForCharacteristicWrite(
+                    characteristic = characteristic,
+                    value = value
+                )
+                logCharacteristicWrite(
+                    device = device,
+                    characteristic = characteristic,
+                    value = value,
+                    parsedFrame = parsedFrame
+                )
                 val writeStatus = if (
                     isActiveSetup &&
                     !preparedWrite &&
@@ -125,20 +142,25 @@ class AndroidBleGattServer(
                     BluetoothGatt.GATT_FAILURE
                 }
 
-                if (!responseNeeded) {
-                    return
+                if (responseNeeded) {
+                    try {
+                        server.sendResponse(
+                            device,
+                            requestId,
+                            writeStatus,
+                            offset,
+                            null
+                        )
+                    } catch (_: SecurityException) {
+                    } catch (_: RuntimeException) {
+                    }
                 }
 
-                try {
-                    server.sendResponse(
-                        device,
-                        requestId,
-                        writeStatus,
-                        offset,
-                        null
-                    )
-                } catch (_: SecurityException) {
-                } catch (_: RuntimeException) {
+                if (
+                    writeStatus == BluetoothGatt.GATT_SUCCESS &&
+                    parsedFrame != null
+                ) {
+                    transportFrameListener?.onFrameReceived(parsedFrame)
                 }
             }
         }
@@ -231,6 +253,52 @@ private fun responseValueForOffset(value: ByteArray, offset: Int): ByteArray? {
 private fun isSupportedTransportWriteValue(value: ByteArray?): Boolean {
     return BleGattTransportPayload.matchesCurrent(value) ||
         BleGattTransportFrame.parse(value) != null
+}
+
+private fun transportFrameForCharacteristicWrite(
+    characteristic: BluetoothGattCharacteristic,
+    value: ByteArray?
+): BleGattTransportFrame? {
+    return when (characteristic.uuid) {
+        BleGattProfile.transportCharacteristicUuid,
+        BleGattProfile.frameTransportCharacteristicUuid ->
+            BleGattTransportFrame.parse(value)
+
+        else -> null
+    }
+}
+
+private fun logCharacteristicWrite(
+    device: BluetoothDevice,
+    characteristic: BluetoothGattCharacteristic,
+    value: ByteArray?,
+    parsedFrame: BleGattTransportFrame?
+) {
+    if (characteristic.uuid == BleGattProfile.frameTransportCharacteristicUuid) {
+        Log.d(
+            "AndroidBleGattServer",
+            "BLE raw frame write received: address=${device.address} bytes=${value?.size ?: 0}"
+        )
+        if (parsedFrame != null) {
+            Log.d(
+                "AndroidBleGattServer",
+                "BLE frame decode success: address=${device.address} bodySize=${parsedFrame.bodyToByteArray().size}"
+            )
+        } else {
+            Log.w(
+                "AndroidBleGattServer",
+                "BLE frame decode failed: address=${device.address} bytes=${value?.size ?: 0}"
+            )
+        }
+    } else if (
+        characteristic.uuid == BleGattProfile.transportCharacteristicUuid &&
+        parsedFrame != null
+    ) {
+        Log.d(
+            "AndroidBleGattServer",
+            "BLE compatibility frame write received: address=${device.address} bytes=${value?.size ?: 0}"
+        )
+    }
 }
 
 private fun isSupportedCharacteristicWrite(
