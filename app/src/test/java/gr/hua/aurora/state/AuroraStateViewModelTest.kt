@@ -2,6 +2,7 @@ package gr.hua.aurora.state
 
 import gr.hua.aurora.data.LocalProfileSettings
 import gr.hua.aurora.data.LocalProfileSettingsStore
+import gr.hua.aurora.data.persistence.InMemoryAuroraPersistenceStore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.Test
@@ -10,7 +11,8 @@ class AuroraStateViewModelTest {
     @Test
     fun viewModelRetainsStateHolderMessagesAcrossRepeatedAccess() {
         val viewModel = AuroraStateViewModel(
-            localProfileStore = FakeProfileStore()
+            localProfileStore = FakeProfileStore(),
+            persistenceStore = InMemoryAuroraPersistenceStore()
         )
 
         val holder = viewModel.stateHolder

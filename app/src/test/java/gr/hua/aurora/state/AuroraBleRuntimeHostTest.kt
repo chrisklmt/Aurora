@@ -1,6 +1,7 @@
 package gr.hua.aurora.state
 
 import android.Manifest
+import gr.hua.aurora.ble.connection.BleConnectionStatus
 import gr.hua.aurora.ble.noop.NoOpBleTransportSender
 import gr.hua.aurora.ble.discovery.BleDiscoveredDevice
 import gr.hua.aurora.ble.permissions.BluetoothPermissionStatus
@@ -36,6 +37,7 @@ import gr.hua.aurora.protocol.OutgoingSessionMaterialProvider
 import gr.hua.aurora.protocol.OutgoingMessageSendEncryptionMaterial
 import gr.hua.aurora.protocol.PeerIdentityExchangeMessage
 import gr.hua.aurora.protocol.PeerIdentityExchangeHandlingResult
+import gr.hua.aurora.protocol.PeerIdentityExchangeSendResult
 import gr.hua.aurora.protocol.PrivateChatMessageSendResult
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -294,6 +296,7 @@ class AuroraBleRuntimeHostTest {
             submitPrivateEncryptedMessage(
                 message = privateMessage(targetPeerId),
                 senderPeerId = "sender-private",
+                senderUsername = "Alice",
                 transportSender = transportSender,
                 sessionMaterialProvider = FakeOutgoingSessionMaterialProvider(
                     materialByPeerId = mapOf(targetPeerId to material)
@@ -313,8 +316,11 @@ class AuroraBleRuntimeHostTest {
             plan = requireNotNull(transportSender.capturedPlan),
             material = material
         )
+        val decodedPayload = gr.hua.aurora.protocol.PrivateChatMessagePayloadCodec.decode(decodedFrame.payload)
         assertEquals(MessageFrameType.PRIVATE_TEXT, decodedFrame.type)
         assertEquals(targetPeerId, decodedFrame.recipientId)
+        assertEquals("Alice", decodedPayload.senderUsername)
+        assertEquals("hello $targetPeerId", decodedPayload.body)
     }
 
     @Test
@@ -332,6 +338,7 @@ class AuroraBleRuntimeHostTest {
             submitPrivateEncryptedMessage(
                 message = privateMessage(targetPeerId),
                 senderPeerId = "sender-private",
+                senderUsername = "Alice",
                 transportSender = transportSender,
                 sessionMaterialProvider = FakeOutgoingSessionMaterialProvider(
                     materialByPeerId = mapOf(targetPeerId to material)
@@ -365,6 +372,7 @@ class AuroraBleRuntimeHostTest {
             submitPrivateEncryptedMessage(
                 message = privateMessage(targetPeerId),
                 senderPeerId = "sender-private",
+                senderUsername = "Alice",
                 transportSender = transportSender,
                 sessionMaterialProvider = FakeOutgoingSessionMaterialProvider(
                     materialByPeerId = mapOf(targetPeerId to material)
@@ -402,6 +410,7 @@ class AuroraBleRuntimeHostTest {
             submitPrivateEncryptedMessage(
                 message = privateMessage(targetPeerId),
                 senderPeerId = "sender-private",
+                senderUsername = "Alice",
                 transportSender = transportSender,
                 sessionMaterialProvider = FakeOutgoingSessionMaterialProvider(
                     materialByPeerId = mapOf(targetPeerId to material)
@@ -441,6 +450,7 @@ class AuroraBleRuntimeHostTest {
             submitPrivateEncryptedMessage(
                 message = privateMessage(targetPeerId),
                 senderPeerId = "sender-private",
+                senderUsername = "Alice",
                 transportSender = transportSender,
                 sessionMaterialProvider = FakeOutgoingSessionMaterialProvider(
                     materialByPeerId = mapOf(targetPeerId to material)
@@ -459,6 +469,110 @@ class AuroraBleRuntimeHostTest {
         assertEquals(PrivateChatMessageSendResult.SubmittedLocally, result)
         assertEquals(1, transportSender.sendCallCount)
         assertEquals(targetPeerId, requireNotNull(transportSender.capturedPlan).targetPeerId)
+    }
+
+    @Test
+    fun contactSetupConnectsAndSubmitsIdentityExchangeThroughRealTransportPath() {
+        val device = reachableAuroraPeer(
+            address = "AA:BB:CC:00:00:0A",
+            stableIdHex = "c032547611223344"
+        )
+        val publicKeyBytes = senderPublicKeyBytes()
+        val sender = RecordingTransportSender(BleTransportSendResult.QueuedLocally)
+
+        val result = runSuspending {
+            connectAndExchangeIdentityWithPeer(
+                device = device,
+                transportSender = sender,
+                bleConnectionStatus = BleConnectionStatus.IDLE,
+                activeTransportPeerId = null,
+                activeTransportDeviceAddress = null,
+                connectToReachablePeer = {
+                    PublicMeshConnectOnSendResult.Connected(peerId = runtimeReachablePeerId(it))
+                },
+                localIdentityMaterial = RuntimePeerIdentityExchangePublicMaterial(
+                    peerId = "local-peer",
+                    publicAgreementKeyBytes = publicKeyBytes
+                )
+            )
+        }
+
+        assertEquals(PeerIdentityExchangeSendResult.SubmittedLocally, result)
+        assertEquals(1, sender.sendCallCount)
+        val decodedFrame = decodePlaintextFrame(requireNotNull(sender.capturedPlan))
+        assertEquals(MessageFrameType.IDENTITY_EXCHANGE, decodedFrame.type)
+        assertEquals("local-peer", decodedFrame.senderId)
+        assertEquals("c032547611223344", decodedFrame.recipientId)
+    }
+
+    @Test
+    fun contactSetupFailureKeepsIdentityExchangeExplicitlyUnavailable() {
+        val device = reachableAuroraPeer(
+            address = "AA:BB:CC:00:00:0B",
+            stableIdHex = "d032547611223344"
+        )
+        val sender = RecordingTransportSender(BleTransportSendResult.QueuedLocally)
+
+        val result = runSuspending {
+            connectAndExchangeIdentityWithPeer(
+                device = device,
+                transportSender = sender,
+                bleConnectionStatus = BleConnectionStatus.IDLE,
+                activeTransportPeerId = null,
+                activeTransportDeviceAddress = null,
+                connectToReachablePeer = {
+                    PublicMeshConnectOnSendResult.Failed(
+                        peerId = runtimeReachablePeerId(it),
+                        reason = "connection did not reach ready state"
+                    )
+                },
+                localIdentityMaterial = RuntimePeerIdentityExchangePublicMaterial(
+                    peerId = "local-peer",
+                    publicAgreementKeyBytes = senderPublicKeyBytes()
+                )
+            )
+        }
+
+        assertEquals(
+            PeerIdentityExchangeSendResult.Failed("connection did not reach ready state"),
+            result
+        )
+        assertEquals(0, sender.sendCallCount)
+    }
+
+    @Test
+    fun resetAuroraLocalIdentityClearsSessionsAndDerivesFreshPeerIdentity() {
+        val oldPublicKeyBytes = generateEcKeyPair().publicKeyBytes()
+        val newPublicKeyBytes = generateEcKeyPair().publicKeyBytes()
+        var clearedSessions = false
+
+        val summary = resetAuroraLocalIdentity(
+            identity = gr.hua.aurora.identity.LocalKeyIdentity.default(),
+            clearSessionRegistry = {
+                clearedSessions = true
+            },
+            loadExistingPublicKeyBytes = { oldPublicKeyBytes.copyOf() },
+            clearLocalIdentityEntries = {
+                gr.hua.aurora.identity.AndroidKeystoreLocalAgreementKey.LocalIdentityClearResult(
+                    clearedAliases = setOf(
+                        gr.hua.aurora.identity.LocalKeyIdentity.DEFAULT_SIGNING_ALIAS,
+                        gr.hua.aurora.identity.LocalKeyIdentity.DEFAULT_KEY_AGREEMENT_ALIAS
+                    )
+                )
+            },
+            ensureFreshPublicKeyBytes = { newPublicKeyBytes.copyOf() }
+        )
+
+        assertTrue(clearedSessions)
+        assertNotEquals(summary.previousPeerId, summary.refreshedPeerId)
+        assertNotEquals(summary.previousStablePeerId, summary.refreshedStablePeerId)
+        assertEquals(
+            setOf(
+                gr.hua.aurora.identity.LocalKeyIdentity.DEFAULT_SIGNING_ALIAS,
+                gr.hua.aurora.identity.LocalKeyIdentity.DEFAULT_KEY_AGREEMENT_ALIAS
+            ),
+            summary.clearedAliases
+        )
     }
 
     @Test
@@ -1079,6 +1193,15 @@ class AuroraBleRuntimeHostTest {
             envelope = envelope,
             keyBytes = material.keyBytes,
             authenticatedData = material.authenticatedData
+        )
+        return MessageFrameCodec.decode(String(frameBytes, UTF_8))
+    }
+
+    private fun decodePlaintextFrame(
+        plan: OutgoingBleTransportSendPlan
+    ): MessageFrame {
+        val frameBytes = gr.hua.aurora.ble.transport.BleGattTransportFrameReassembler.reassemble(
+            plan.framesInSendOrder()
         )
         return MessageFrameCodec.decode(String(frameBytes, UTF_8))
     }

@@ -45,8 +45,10 @@ import gr.hua.aurora.ble.transport.BleTransportFrameReceiver
 import gr.hua.aurora.ble.transport.BleTransportReceiveResult
 import gr.hua.aurora.ble.transport.BleTransportSender
 import gr.hua.aurora.identity.AndroidKeystoreLocalAgreementKey
+import gr.hua.aurora.identity.AndroidKeystoreLocalAgreementKey.LocalIdentityClearResult
 import gr.hua.aurora.identity.AndroidKeystoreLocalAgreementKey.PrivateKeyLoadResult
 import gr.hua.aurora.identity.AndroidKeystoreLocalAgreementPublicKey
+import gr.hua.aurora.identity.LocalKeyIdentity
 import gr.hua.aurora.model.OutgoingChatMessage
 import gr.hua.aurora.protocol.IncomingSessionMaterialProvider
 import gr.hua.aurora.protocol.IncomingTransportMessage
@@ -59,6 +61,8 @@ import gr.hua.aurora.protocol.MessageFrameType
 import gr.hua.aurora.protocol.NoOpIncomingSessionMaterialProvider
 import gr.hua.aurora.protocol.PeerIdentityExchangeHandler
 import gr.hua.aurora.protocol.PeerIdentityExchangeHandlingResult
+import gr.hua.aurora.protocol.PeerIdentityExchangeSendResult
+import gr.hua.aurora.protocol.PeerIdentityExchangeSendUseCase
 import gr.hua.aurora.protocol.PeerSessionRegistry
 import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
 import gr.hua.aurora.protocol.PeerSessionPeerId
@@ -96,9 +100,11 @@ data class AuroraBleRuntimeState(
     val lastConnectOnSendStatus: String?,
     val lastGlobalMeshStatus: String?,
     val submitGlobalMeshMessage: suspend (OutgoingChatMessage, String) -> GlobalMeshDeliveryResult,
-    val submitPrivateChatMessage: suspend (OutgoingChatMessage) -> PrivateChatMessageSendResult,
+    val submitPrivateChatMessage: suspend (OutgoingChatMessage, String) -> PrivateChatMessageSendResult,
+    val exchangeIdentityWithPeer: suspend (BleDiscoveredDevice) -> PeerIdentityExchangeSendResult,
     val connectToTransportPeer: (String, String?) -> Unit,
-    val disconnectTransportPeer: () -> Unit
+    val disconnectTransportPeer: () -> Unit,
+    val resetLocalIdentityAndSessions: () -> Unit
 )
 
 internal fun shouldRunAuroraBleRuntime(
@@ -133,10 +139,13 @@ fun rememberAuroraBleRuntimeState(
     val bleConnector = remember(context, bluetoothAdapter) {
         AndroidBleConnector(context, bluetoothAdapter)
     }
+    var runtimeGeneration by remember {
+        mutableStateOf(0)
+    }
     val bleScanner = remember(bluetoothAdapter) {
         AndroidBleScanner(bluetoothAdapter)
     }
-    val discoveredAuroraPeersAggregator = remember {
+    val discoveredAuroraPeersAggregator = remember(runtimeGeneration) {
         BleScanAggregator()
     }
     val resolvedTransportFrameWriter = transportFrameWriter ?: bleConnector
@@ -146,46 +155,46 @@ fun rememberAuroraBleRuntimeState(
     val transportSenderSourceLabel = remember(bleTransportSender) {
         auroraTransportSenderSourceLabel(bleTransportSender)
     }
-    var lastIdentityExchangeStatus by remember {
+    var lastIdentityExchangeStatus by remember(runtimeGeneration) {
         mutableStateOf<String?>(null)
     }
-    var lastIncomingMessageStatus by remember {
+    var lastIncomingMessageStatus by remember(runtimeGeneration) {
         mutableStateOf<String?>(null)
     }
-    var lastConnectOnSendStatus by remember {
+    var lastConnectOnSendStatus by remember(runtimeGeneration) {
         mutableStateOf<String?>(null)
     }
-    var lastGlobalMeshStatus by remember {
+    var lastGlobalMeshStatus by remember(runtimeGeneration) {
         mutableStateOf<String?>(null)
     }
-    var bleConnectionStatus by remember {
+    var bleConnectionStatus by remember(runtimeGeneration) {
         mutableStateOf(BleConnectionStatus.IDLE)
     }
-    var activeTransportDeviceAddress by remember {
+    var activeTransportDeviceAddress by remember(runtimeGeneration) {
         mutableStateOf<String?>(null)
     }
-    var activeTransportPeerId by remember {
+    var activeTransportPeerId by remember(runtimeGeneration) {
         mutableStateOf<String?>(null)
     }
-    var bleScanStatus by remember {
+    var bleScanStatus by remember(runtimeGeneration) {
         mutableStateOf(BleScanStatus.IDLE)
     }
-    var bleScanDiagnostics by remember {
+    var bleScanDiagnostics by remember(runtimeGeneration) {
         mutableStateOf(BleScanDiagnostics())
     }
-    var discoveredAuroraPeers by remember {
+    var discoveredAuroraPeers by remember(runtimeGeneration) {
         mutableStateOf(emptyList<BleDiscoveredDevice>())
     }
-    val peerSessionRegistry = remember {
+    val peerSessionRegistry = remember(runtimeGeneration) {
         PeerSessionRegistry()
     }
-    var peerSessionDiagnostics by remember {
+    var peerSessionDiagnostics by remember(runtimeGeneration) {
         mutableStateOf(peerSessionRegistry.diagnosticsSnapshot())
     }
-    val globalMeshDeliveryCoordinator = remember {
+    val globalMeshDeliveryCoordinator = remember(runtimeGeneration) {
         GlobalMeshDeliveryCoordinator()
     }
-    var globalMeshDiagnostics by remember {
+    var globalMeshDiagnostics by remember(runtimeGeneration) {
         mutableStateOf(
             globalMeshDeliveryCoordinator.diagnosticsSnapshot(
                 reachablePeerIds = emptyList(),
@@ -199,7 +208,7 @@ fun rememberAuroraBleRuntimeState(
             activeTransportPeerId = activeTransportPeerId
         )
     }
-    val localIdentityMaterialLoadResult = remember {
+    val localIdentityMaterialLoadResult = remember(runtimeGeneration) {
         loadLocalPeerSessionIdentityMaterialResult()
     }
     val localIdentityMaterial = (
@@ -291,7 +300,7 @@ fun rememberAuroraBleRuntimeState(
             transportFrameListener = transportFrameBridge
         )
     }
-    val advertisedStablePeerId = remember {
+    val advertisedStablePeerId = remember(runtimeGeneration) {
         runCatching {
             BleStablePeerId.deriveFromPublicKeyBytes(
                 AndroidKeystoreLocalAgreementPublicKey.ensureAgreementPublicKeyBytes()
@@ -309,10 +318,10 @@ fun rememberAuroraBleRuntimeState(
     var isAppVisible by remember(lifecycleOwner) {
         mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
     }
-    var bleAdvertiseStatus by remember {
+    var bleAdvertiseStatus by remember(runtimeGeneration) {
         mutableStateOf(BleAdvertiseStatus.IDLE)
     }
-    var bleGattServerStatus by remember {
+    var bleGattServerStatus by remember(runtimeGeneration) {
         mutableStateOf(BleGattServerStatus.IDLE)
     }
     val shouldHostRuntime = shouldRunAuroraBleRuntime(
@@ -465,11 +474,12 @@ fun rememberAuroraBleRuntimeState(
             lastGlobalMeshStatus = globalMeshStatusText(result)
             result
         }
-    val submitPrivateChatMessage: suspend (OutgoingChatMessage) -> PrivateChatMessageSendResult =
-        { queuedMessage ->
+    val submitPrivateChatMessage: suspend (OutgoingChatMessage, String) -> PrivateChatMessageSendResult =
+        { queuedMessage, senderUsername ->
             submitPrivateEncryptedMessage(
                 message = queuedMessage,
                 senderPeerId = localPeerId,
+                senderUsername = senderUsername,
                 transportSender = bleTransportSender,
                 sessionMaterialProvider = peerSessionRegistry,
                 activeTransportPeerId = activeTransportPeerId,
@@ -477,6 +487,20 @@ fun rememberAuroraBleRuntimeState(
                 reachablePeers = discoveredAuroraPeers,
                 connectToReachablePeer = ::connectToReachablePeerAndAwait
             )
+        }
+    val exchangeIdentityWithPeer: suspend (BleDiscoveredDevice) -> PeerIdentityExchangeSendResult =
+        { device ->
+            val result = connectAndExchangeIdentityWithPeer(
+                device = device,
+                transportSender = bleTransportSender,
+                bleConnectionStatus = bleConnectionStatus,
+                activeTransportPeerId = activeTransportPeerId,
+                activeTransportDeviceAddress = activeTransportDeviceAddress,
+                connectToReachablePeer = ::connectToReachablePeerAndAwait,
+                localIdentityMaterial = loadLocalPeerIdentityExchangePublicMaterialOrNull()
+            )
+            lastIdentityExchangeStatus = identityExchangeSendStatusText(result)
+            result
         }
 
     val connectToTransportPeer: (String, String?) -> Unit = { deviceAddress, peerId ->
@@ -493,6 +517,25 @@ fun rememberAuroraBleRuntimeState(
         )
         bleConnector.disconnect()
         clearTransportConnectionState()
+    }
+    val resetLocalIdentityAndSessions: () -> Unit = {
+        Log.d(auroraBleRuntimeLogTag, "BLE runtime local identity reset requested")
+        bleConnector.disconnect()
+        clearTransportConnectionState()
+        clearRuntimeDiscoveryState(stopScanner = true)
+        bleAdvertiser.stop()
+        bleAdvertiseStatus = BleAdvertiseStatus.STOPPED
+        bleGattServer.stop()
+        bleGattServerStatus = BleGattServerStatus.STOPPED
+        transportFrameBridge.clear()
+        val resetSummary = resetAuroraLocalIdentity(
+            clearSessionRegistry = peerSessionRegistry::clearAll
+        )
+        Log.d(
+            auroraBleRuntimeLogTag,
+            "BLE runtime local identity reset: clearedAliases=${resetSummary.clearedAliases.joinToString(separator = ",").ifEmpty { "none" }} oldPeerId=${resetSummary.previousPeerId ?: "none"} newPeerId=${resetSummary.refreshedPeerId ?: "none"} oldStablePeerId=${resetSummary.previousStablePeerId ?: "none"} newStablePeerId=${resetSummary.refreshedStablePeerId ?: "none"}"
+        )
+        runtimeGeneration += 1
     }
 
     DisposableEffect(lifecycleOwner, bleAdvertiser, bleGattServer, bleConnector, bleScanner) {
@@ -538,7 +581,7 @@ fun rememberAuroraBleRuntimeState(
         )
     }
 
-    DisposableEffect(bleScanner, shouldHostRuntime) {
+    DisposableEffect(bleScanner, shouldHostRuntime, runtimeGeneration) {
         if (shouldHostRuntime) {
             discoveredAuroraPeersAggregator.clear()
             bleScanStatus = BleScanStatus.IDLE
@@ -581,7 +624,7 @@ fun rememberAuroraBleRuntimeState(
         }
     }
 
-    LaunchedEffect(shouldHostRuntime) {
+    LaunchedEffect(shouldHostRuntime, runtimeGeneration) {
         if (!shouldHostRuntime) {
             return@LaunchedEffect
         }
@@ -593,7 +636,7 @@ fun rememberAuroraBleRuntimeState(
         }
     }
 
-    DisposableEffect(bleAdvertiser, shouldHostRuntime, advertiseRequest) {
+    DisposableEffect(bleAdvertiser, shouldHostRuntime, advertiseRequest, runtimeGeneration) {
         if (shouldHostRuntime) {
             bleAdvertiseStatus = BleAdvertiseStatus.IDLE
             bleAdvertiser.start(
@@ -617,7 +660,7 @@ fun rememberAuroraBleRuntimeState(
         }
     }
 
-    DisposableEffect(bleGattServer, shouldHostRuntime) {
+    DisposableEffect(bleGattServer, shouldHostRuntime, runtimeGeneration) {
         if (shouldHostRuntime) {
             bleGattServer.start(
                 listener = object : BleGattServer.Listener {
@@ -641,7 +684,7 @@ fun rememberAuroraBleRuntimeState(
         }
     }
 
-    DisposableEffect(bleConnector, shouldHostRuntime) {
+    DisposableEffect(bleConnector, shouldHostRuntime, runtimeGeneration) {
         if (!shouldHostRuntime) {
             bleConnector.disconnect()
             clearTransportConnectionState()
@@ -673,8 +716,10 @@ fun rememberAuroraBleRuntimeState(
         lastGlobalMeshStatus = lastGlobalMeshStatus,
         submitGlobalMeshMessage = submitGlobalMeshMessage,
         submitPrivateChatMessage = submitPrivateChatMessage,
+        exchangeIdentityWithPeer = exchangeIdentityWithPeer,
         connectToTransportPeer = connectToTransportPeer,
-        disconnectTransportPeer = disconnectTransportPeer
+        disconnectTransportPeer = disconnectTransportPeer,
+        resetLocalIdentityAndSessions = resetLocalIdentityAndSessions
     )
 }
 
@@ -792,6 +837,7 @@ internal fun chooseExactReachablePeer(
 internal suspend fun submitPrivateEncryptedMessage(
     message: OutgoingChatMessage,
     senderPeerId: String?,
+    senderUsername: String,
     transportSender: BleTransportSender?,
     sessionMaterialProvider: gr.hua.aurora.protocol.OutgoingSessionMaterialProvider,
     activeTransportPeerId: String?,
@@ -816,6 +862,7 @@ internal suspend fun submitPrivateEncryptedMessage(
         return PrivateChatMessageSendUseCase.send(
             message = message,
             senderPeerId = sanitizedSenderPeerId,
+            senderUsername = senderUsername,
             transportSender = transportSender,
             sessionMaterialProvider = sessionMaterialProvider,
             activeConnectedPeerId = sanitizedActiveTransportPeerId,
@@ -836,6 +883,7 @@ internal suspend fun submitPrivateEncryptedMessage(
                 PrivateChatMessageSendUseCase.send(
                     message = message,
                     senderPeerId = sanitizedSenderPeerId,
+                    senderUsername = senderUsername,
                     transportSender = transportSender,
                     sessionMaterialProvider = sessionMaterialProvider,
                     activeConnectedPeerId = connectResult.peerId,
@@ -849,6 +897,128 @@ internal suspend fun submitPrivateEncryptedMessage(
             )
         }
     }
+}
+
+internal suspend fun connectAndExchangeIdentityWithPeer(
+    device: BleDiscoveredDevice,
+    transportSender: BleTransportSender,
+    bleConnectionStatus: BleConnectionStatus,
+    activeTransportPeerId: String?,
+    activeTransportDeviceAddress: String?,
+    connectToReachablePeer: suspend (BleDiscoveredDevice) -> PublicMeshConnectOnSendResult,
+    localIdentityMaterial: RuntimePeerIdentityExchangePublicMaterial?
+): PeerIdentityExchangeSendResult {
+    val targetPeerId = runtimeReachablePeerId(device)
+    val identityMaterial = localIdentityMaterial ?: return PeerIdentityExchangeSendResult.InvalidLocalIdentity(
+        reason = "Local agreement public key unavailable."
+    )
+    if (identityMaterial.peerId.isBlank() || identityMaterial.publicAgreementKeyBytes().isEmpty()) {
+        return PeerIdentityExchangeSendResult.InvalidLocalIdentity(
+            reason = "Local agreement public key unavailable."
+        )
+    }
+    val isActiveTargetConnection =
+        bleConnectionStatus == BleConnectionStatus.CONNECTED &&
+            activeTransportPeerId == targetPeerId &&
+            activeTransportDeviceAddress == device.address.trim()
+    if (!isActiveTargetConnection) {
+        when (val connectResult = connectToReachablePeer(device)) {
+            is PublicMeshConnectOnSendResult.Failed -> {
+                return PeerIdentityExchangeSendResult.Failed(
+                    reason = connectResult.reason
+                )
+            }
+            is PublicMeshConnectOnSendResult.Connected -> {
+                if (connectResult.peerId != targetPeerId) {
+                    return PeerIdentityExchangeSendResult.Failed(
+                        reason = "connected peer did not match the requested identity"
+                    )
+                }
+            }
+        }
+    }
+
+    return PeerIdentityExchangeSendUseCase.send(
+        localPeerId = identityMaterial.peerId,
+        localPublicAgreementKeyBytes = identityMaterial.publicAgreementKeyBytes(),
+        targetPeerId = targetPeerId,
+        transportSender = transportSender,
+        createdAtMillis = System.currentTimeMillis()
+    )
+}
+
+internal data class LocalIdentityResetSummary(
+    val previousPeerId: String?,
+    val refreshedPeerId: String?,
+    val previousStablePeerId: String?,
+    val refreshedStablePeerId: String?,
+    val clearedAliases: Set<String>
+)
+
+internal data class RuntimePeerIdentityExchangePublicMaterial(
+    val peerId: String,
+    private val publicAgreementKeyBytes: ByteArray
+) {
+    init {
+        require(peerId.isNotBlank()) {
+            "Runtime peer id must not be blank."
+        }
+        require(publicAgreementKeyBytes.isNotEmpty()) {
+            "Runtime public agreement key bytes must not be empty."
+        }
+    }
+
+    fun publicAgreementKeyBytes(): ByteArray {
+        return publicAgreementKeyBytes.copyOf()
+    }
+}
+
+internal fun loadLocalPeerIdentityExchangePublicMaterialOrNull(
+    loadPublicKeyBytes: () -> ByteArray? = {
+        runCatching {
+            AndroidKeystoreLocalAgreementPublicKey.ensureAgreementPublicKeyBytes()
+        }.getOrNull()
+    }
+): RuntimePeerIdentityExchangePublicMaterial? {
+    val publicKeyBytes = runCatching(loadPublicKeyBytes).getOrNull()
+        ?.takeIf { it.isNotEmpty() }
+        ?: return null
+
+    return runCatching {
+        RuntimePeerIdentityExchangePublicMaterial(
+            peerId = PeerSessionPeerId.deriveFromPublicKey(publicKeyBytes),
+            publicAgreementKeyBytes = publicKeyBytes
+        )
+    }.getOrNull()
+}
+
+internal fun resetAuroraLocalIdentity(
+    identity: LocalKeyIdentity = LocalKeyIdentity.default(),
+    clearSessionRegistry: () -> Unit = {},
+    loadExistingPublicKeyBytes: () -> ByteArray? = {
+        AndroidKeystoreLocalAgreementPublicKey.loadAgreementPublicKeyBytesOrNull(identity)
+    },
+    clearLocalIdentityEntries: () -> LocalIdentityClearResult = {
+        AndroidKeystoreLocalAgreementKey.clearLocalIdentityEntries(identity)
+    },
+    ensureFreshPublicKeyBytes: () -> ByteArray = {
+        AndroidKeystoreLocalAgreementPublicKey.ensureAgreementPublicKeyBytes(identity)
+    }
+): LocalIdentityResetSummary {
+    val previousPublicKeyBytes = runCatching(loadExistingPublicKeyBytes).getOrNull()
+        ?.takeIf { it.isNotEmpty() }
+    clearSessionRegistry()
+    val clearResult = clearLocalIdentityEntries()
+    val refreshedPublicKeyBytes = runCatching(ensureFreshPublicKeyBytes).getOrNull()
+        ?.takeIf { it.isNotEmpty() }
+
+    return LocalIdentityResetSummary(
+        previousPeerId = previousPublicKeyBytes?.let(::peerIdFromPublicKeyBytes),
+        refreshedPeerId = refreshedPublicKeyBytes?.let(::peerIdFromPublicKeyBytes),
+        previousStablePeerId = previousPublicKeyBytes?.let(::stablePeerIdHexFromPublicKeyBytes),
+        refreshedStablePeerId = refreshedPublicKeyBytes?.let(::stablePeerIdHexFromPublicKeyBytes),
+        clearedAliases = clearResult.clearedAliases
+    )
 }
 
 internal fun privateChatTargetPeerId(
@@ -956,6 +1126,21 @@ internal fun globalMeshStatusText(
     }
 }
 
+internal fun identityExchangeSendStatusText(
+    result: PeerIdentityExchangeSendResult
+): String {
+    return when (result) {
+        PeerIdentityExchangeSendResult.SubmittedLocally ->
+            "Identity sent. Run on both devices."
+        PeerIdentityExchangeSendResult.SenderUnavailable ->
+            "Identity exchange unavailable."
+        is PeerIdentityExchangeSendResult.InvalidLocalIdentity ->
+            result.reason
+        is PeerIdentityExchangeSendResult.Failed ->
+            "Identity exchange failed: ${result.reason}"
+    }
+}
+
 internal fun createAuroraBleTransportSender(
     transportFrameWriter: BleGattTransportFrameWriter?
 ): BleTransportSender {
@@ -964,6 +1149,22 @@ internal fun createAuroraBleTransportSender(
     } else {
         AndroidBleTransportSender(transportFrameWriter)
     }
+}
+
+private fun peerIdFromPublicKeyBytes(
+    publicKeyBytes: ByteArray
+): String {
+    return PeerSessionPeerId.deriveFromPublicKey(publicKeyBytes)
+}
+
+private fun stablePeerIdHexFromPublicKeyBytes(
+    publicKeyBytes: ByteArray
+): String {
+    return BleStablePeerId.deriveFromPublicKeyBytes(publicKeyBytes)
+        .toByteArray()
+        .joinToString(separator = "") { byte ->
+            "%02x".format(byte.toInt() and 0xFF)
+        }
 }
 
 internal sealed interface LocalPeerSessionIdentityMaterialLoadResult {

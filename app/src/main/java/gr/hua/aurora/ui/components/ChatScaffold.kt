@@ -1,5 +1,6 @@
 package gr.hua.aurora.ui.components
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Spacer
@@ -8,7 +9,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -30,10 +33,13 @@ fun ChatScaffold(
     topBarRightAction: AuroraTopBarAction = AuroraTopBarAction.NONE,
     onTopBarRightAction: (() -> Unit)? = null,
     composerHint: String = "Type a message",
+    composerEnabled: Boolean = true,
+    composerStateKey: Any? = Unit,
+    emptyStateText: String? = null,
     bodyTop: (@Composable ColumnScope.() -> Unit)? = null
 ) {
     // Το scaffold οργανώνει μόνο επαναχρησιμοποιήσιμες περιοχές chat UI χωρίς γνώση για state ή transport layers.
-    var composerValue by rememberSaveable { mutableStateOf("") }
+    var composerValue by rememberSaveable(composerStateKey) { mutableStateOf("") }
 
     Scaffold(
         modifier = modifier,
@@ -62,12 +68,26 @@ fun ChatScaffold(
                 Spacer(Modifier.height(12.dp))
             }
 
-            MessageList(
-                messages = messages,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-            )
+            if (messages.isEmpty() && emptyStateText != null) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                ) {
+                    Text(
+                        text = emptyStateText,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                MessageList(
+                    messages = messages,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                )
+            }
 
             Spacer(Modifier.height(10.dp))
 
@@ -78,7 +98,8 @@ fun ChatScaffold(
                     onSend(typedText)
                     composerValue = ""
                 },
-                hint = composerHint
+                hint = composerHint,
+                enabled = composerEnabled
             )
         }
     }

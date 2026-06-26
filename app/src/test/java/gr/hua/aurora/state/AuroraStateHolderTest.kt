@@ -3,6 +3,7 @@ package gr.hua.aurora.state
 import gr.hua.aurora.data.GeneratedUsername
 import gr.hua.aurora.data.LocalProfileSettings
 import gr.hua.aurora.data.LocalProfileSettingsStore
+import gr.hua.aurora.data.persistence.InMemoryAuroraPersistenceStore
 import gr.hua.aurora.model.AuroraContact
 import gr.hua.aurora.model.MessageStatus
 import gr.hua.aurora.protocol.GlobalMeshDeliveryResult
@@ -579,6 +580,41 @@ class AuroraStateHolderTest {
     }
 
     @Test
+    fun resetClearsContactsMessagesQueuesAndSelections() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1"
+        )
+        holder.addOrUpdateContact(
+            canonicalPeerId = "peer-123",
+            displayName = "Alex",
+            hasSession = true
+        )
+        holder.selectSecurePeer("peer-123")
+        val globalQueuedMessage = requireNotNull(holder.sendGlobalPreviewMessage("hello global"))
+        val privateQueuedMessage = requireNotNull(holder.sendPrivateChatMessage("peer-123", "hello private"))
+        holder.handleGlobalMeshDeliveryResult(
+            messageId = globalQueuedMessage.messageId,
+            result = GlobalMeshDeliveryResult.NoReachablePeers
+        )
+        holder.handlePrivateChatDeliveryResult(
+            peerId = "peer-123",
+            messageId = privateQueuedMessage.messageId,
+            result = PrivateChatMessageSendResult.ContactNotReachable
+        )
+
+        holder.resetLocalData()
+
+        assertTrue(holder.uiState.contacts.isEmpty())
+        assertTrue(holder.uiState.globalMessages.isEmpty())
+        assertTrue(holder.uiState.privateMessagesByPeerId.isEmpty())
+        assertTrue(holder.uiState.pendingOutgoingMessages.isEmpty())
+        assertNull(holder.uiState.selectedSecurePeerId)
+        assertNull(holder.uiState.globalMeshDeliveryResult)
+        assertTrue(holder.uiState.privateChatDeliveryResultsByPeerId.isEmpty())
+    }
+
+    @Test
     fun desiredAvailabilityCanBeUpdatedWithoutChangingProfileState() {
         val holder = createHolder(
             store = FakeProfileStore(),
@@ -610,12 +646,251 @@ class AuroraStateHolderTest {
         assertEquals(messageCountBefore, holder.uiState.globalMessages.size)
     }
 
+    @Test
+    fun contactsSurviveStateRecreationThroughPersistenceWithoutFakeReadyState() {
+        val profileStore = FakeProfileStore().apply {
+            generatedUsername = "PIAIUFN1"
+        }
+        val persistenceStore = InMemoryAuroraPersistenceStore()
+        val holder = createAuroraStateHolder(
+            localProfileStore = profileStore,
+            persistenceStore = persistenceStore
+        )
+
+        holder.addOrUpdateContact(
+            canonicalPeerId = "peer-123",
+            displayName = "Alex",
+            lastSeenMillis = 2_000L,
+            hasSession = true
+        )
+
+        val restoredHolder = createAuroraStateHolder(
+            localProfileStore = profileStore,
+            persistenceStore = persistenceStore
+        )
+        val restoredContact = restoredHolder.findContactByPeerId("peer-123")
+
+        assertEquals("Alex", restoredContact?.displayName)
+        assertEquals(2_000L, restoredContact?.lastSeenMillis)
+        assertEquals(false, restoredContact?.hasSession)
+    }
+
+    @Test
+    fun globalAndPrivateMessagesSurviveStateRecreationWithoutRestoringOutgoingQueue() {
+        val profileStore = FakeProfileStore().apply {
+            generatedUsername = "PIAIUFN1"
+        }
+        val persistenceStore = InMemoryAuroraPersistenceStore()
+        val holder = createAuroraStateHolder(
+            localProfileStore = profileStore,
+            persistenceStore = persistenceStore
+        )
+
+        holder.sendGlobalPreviewMessage("hello global")
+        holder.sendPrivateChatMessage("peer-123", "hello private")
+
+        val restoredHolder = createAuroraStateHolder(
+            localProfileStore = profileStore,
+            persistenceStore = persistenceStore
+        )
+
+        assertEquals(1, restoredHolder.uiState.globalMessages.size)
+        assertEquals("hello global", restoredHolder.uiState.globalMessages.single().text)
+        assertEquals(MessageStatus.FAILED, restoredHolder.uiState.globalMessages.single().status)
+        assertEquals(1, restoredHolder.privateMessagesForPeerId("peer-123").size)
+        assertEquals("hello private", restoredHolder.privateMessagesForPeerId("peer-123").single().text)
+        assertEquals(MessageStatus.FAILED, restoredHolder.privateMessagesForPeerId("peer-123").single().status)
+        assertTrue(restoredHolder.uiState.pendingOutgoingMessages.isEmpty())
+        assertTrue(restoredHolder.uiState.globalMessages.none { it.status == MessageStatus.DELIVERED })
+        assertTrue(restoredHolder.privateMessagesForPeerId("peer-123").none { it.status == MessageStatus.DELIVERED })
+    }
+
+    @Test
+    fun closingAndRecreatingAppDoesNotClearPersistedData() {
+        val profileStore = FakeProfileStore().apply {
+            generatedUsername = "PIAIUFN1"
+        }
+        val persistenceStore = InMemoryAuroraPersistenceStore()
+        val firstHolder = createAuroraStateHolder(
+            localProfileStore = profileStore,
+            persistenceStore = persistenceStore
+        )
+
+        firstHolder.addOrUpdateContact(
+            canonicalPeerId = "peer-123",
+            displayName = "Alex"
+        )
+        firstHolder.sendGlobalPreviewMessage("hello again")
+
+        val secondHolder = createAuroraStateHolder(
+            localProfileStore = profileStore,
+            persistenceStore = persistenceStore
+        )
+
+        assertEquals(1, secondHolder.uiState.contacts.size)
+        assertEquals(1, secondHolder.uiState.globalMessages.size)
+        assertEquals("hello again", secondHolder.uiState.globalMessages.single().text)
+        assertEquals("PIAIUFN1", secondHolder.uiState.generatedUsername)
+    }
+
+    @Test
+    fun clearLocalDataClearsPersistedContactsAndMessages() {
+        val profileStore = FakeProfileStore().apply {
+            generatedUsername = "PIAIUFN1"
+        }
+        val persistenceStore = InMemoryAuroraPersistenceStore()
+        val holder = createAuroraStateHolder(
+            localProfileStore = profileStore,
+            persistenceStore = persistenceStore
+        )
+        holder.addOrUpdateContact(
+            canonicalPeerId = "peer-123",
+            displayName = "Alex"
+        )
+        holder.sendGlobalPreviewMessage("hello")
+        holder.sendPrivateChatMessage("peer-123", "private")
+
+        holder.resetLocalData()
+
+        val restoredHolder = createAuroraStateHolder(
+            localProfileStore = profileStore,
+            persistenceStore = persistenceStore
+        )
+
+        assertTrue(restoredHolder.uiState.contacts.isEmpty())
+        assertTrue(restoredHolder.uiState.globalMessages.isEmpty())
+        assertTrue(restoredHolder.uiState.privateMessagesByPeerId.isEmpty())
+        assertTrue(restoredHolder.uiState.pendingOutgoingMessages.isEmpty())
+    }
+
+    @Test
+    fun delayedMessagesAreOrderedByTimestampThenMessageId() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1"
+        )
+
+        holder.ingestIncomingTransportMessage(
+            gr.hua.aurora.protocol.IncomingTransportMessage(
+                frame = gr.hua.aurora.protocol.MessageFrame(
+                    id = "msg-2",
+                    type = MessageFrameType.GLOBAL_TEXT,
+                    senderId = "peer-late",
+                    createdAtMillis = 2_000L,
+                    payload = "newer"
+                ),
+                senderPublicKey = byteArrayOf(1, 2, 3)
+            )
+        )
+        holder.ingestIncomingTransportMessage(
+            gr.hua.aurora.protocol.IncomingTransportMessage(
+                frame = gr.hua.aurora.protocol.MessageFrame(
+                    id = "msg-1",
+                    type = MessageFrameType.GLOBAL_TEXT,
+                    senderId = "peer-early",
+                    createdAtMillis = 1_000L,
+                    payload = "older"
+                ),
+                senderPublicKey = byteArrayOf(1, 2, 4)
+            )
+        )
+
+        assertEquals(
+            listOf("msg-1", "msg-2"),
+            holder.uiState.globalMessages.map { it.id }
+        )
+    }
+
+    @Test
+    fun localUsernameChangesAffectFuturePrivateMessagesOnlyAfterRestore() {
+        val profileStore = FakeProfileStore().apply {
+            generatedUsername = "PIAIUFN1"
+        }
+        val persistenceStore = InMemoryAuroraPersistenceStore()
+        val holder = createAuroraStateHolder(
+            localProfileStore = profileStore,
+            persistenceStore = persistenceStore
+        )
+
+        holder.updateUsername("Alex")
+        holder.sendPrivateChatMessage("peer-123", "first")
+        holder.updateUsername("Maria")
+        holder.sendPrivateChatMessage("peer-123", "second")
+
+        val restoredHolder = createAuroraStateHolder(
+            localProfileStore = profileStore,
+            persistenceStore = persistenceStore
+        )
+        val restoredNames = restoredHolder.privateMessagesForPeerId("peer-123")
+            .map { it.senderName }
+
+        assertEquals(listOf("Alex", "Maria"), restoredNames)
+    }
+
+    @Test
+    fun incomingPrivateMessageUpdatesContactDisplayNameWithoutRenamingOlderMessages() {
+        val profileStore = FakeProfileStore().apply {
+            generatedUsername = "PIAIUFN1"
+        }
+        val persistenceStore = InMemoryAuroraPersistenceStore()
+        val holder = createAuroraStateHolder(
+            localProfileStore = profileStore,
+            persistenceStore = persistenceStore
+        )
+        holder.ingestIncomingTransportMessage(
+            gr.hua.aurora.protocol.IncomingTransportMessage(
+                frame = gr.hua.aurora.protocol.MessageFrame(
+                    id = "private-1",
+                    type = MessageFrameType.PRIVATE_TEXT,
+                    senderId = "peer-123",
+                    recipientId = "self",
+                    createdAtMillis = 1_000L,
+                    payload = gr.hua.aurora.protocol.PrivateChatMessagePayloadCodec.encode(
+                        gr.hua.aurora.protocol.PrivateChatMessagePayload(
+                            senderUsername = "Alex",
+                            body = "hello"
+                        )
+                    )
+                ),
+                senderPublicKey = byteArrayOf(1, 2, 3, 4)
+            )
+        )
+        holder.ingestIncomingTransportMessage(
+            gr.hua.aurora.protocol.IncomingTransportMessage(
+                frame = gr.hua.aurora.protocol.MessageFrame(
+                    id = "private-2",
+                    type = MessageFrameType.PRIVATE_TEXT,
+                    senderId = "peer-123",
+                    recipientId = "self",
+                    createdAtMillis = 2_000L,
+                    payload = gr.hua.aurora.protocol.PrivateChatMessagePayloadCodec.encode(
+                        gr.hua.aurora.protocol.PrivateChatMessagePayload(
+                            senderUsername = "Maria",
+                            body = "hi again"
+                        )
+                    )
+                ),
+                senderPublicKey = byteArrayOf(1, 2, 3, 5)
+            )
+        )
+
+        val restoredHolder = createAuroraStateHolder(
+            localProfileStore = profileStore,
+            persistenceStore = persistenceStore
+        )
+        val restoredMessages = restoredHolder.privateMessagesForPeerId("peer-123")
+
+        assertEquals(listOf("Alex", "Maria"), restoredMessages.map { it.senderName })
+        assertEquals("Maria", restoredHolder.findContactByPeerId("peer-123")?.displayName)
+    }
+
     private fun createHolder(
         store: FakeProfileStore,
         generatedUsername: String,
         customUsername: String? = null,
         useCustomUsernameInGlobalChat: Boolean = true,
-        desiredAvailability: AuroraAvailabilityPreference = AuroraAvailabilityPreference.ONLINE
+        desiredAvailability: AuroraAvailabilityPreference = AuroraAvailabilityPreference.ONLINE,
+        persistenceStore: InMemoryAuroraPersistenceStore? = null
     ): AuroraStateHolder {
         return AuroraStateHolder(
             initialState = SampleAuroraState.create(
@@ -624,7 +899,8 @@ class AuroraStateHolderTest {
                 useCustomUsernameInGlobalChat = useCustomUsernameInGlobalChat,
                 desiredAvailability = desiredAvailability
             ),
-            localProfileStore = store
+            localProfileStore = store,
+            persistenceStore = persistenceStore
         )
     }
 

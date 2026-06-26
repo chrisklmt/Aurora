@@ -1,7 +1,13 @@
 package gr.hua.aurora.ui.screens
 
 import gr.hua.aurora.model.AuroraContact
+import gr.hua.aurora.model.ChatMessage
+import gr.hua.aurora.model.MessageStatus
+import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
 import gr.hua.aurora.protocol.PrivateChatMessageSendResult
+import gr.hua.aurora.ui.components.DebugInfoCardModel
+import gr.hua.aurora.ui.components.DebugInfoItem
+import gr.hua.aurora.ui.components.DebugInfoSection
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -29,7 +35,7 @@ class PrivateChatScreenTest {
     }
 
     @Test
-    fun privateChatComposerIsEnabledWhenKeysAreReady() {
+    fun privateChatReadyContentKeepsNormalModeClean() {
         val contact = AuroraContact(
             canonicalPeerId = "peer-123",
             displayName = "Alex",
@@ -42,14 +48,15 @@ class PrivateChatScreenTest {
             contact = contact
         )
 
-        assertEquals("Keys ready", content.keyStatusText)
-        assertEquals("Private chat setup is ready.", content.setupText)
+        assertNull(content.statusText)
+        assertNull(content.helperText)
         assertTrue(content.isComposerEnabled)
         assertEquals("Private message", content.composerHint)
+        assertEquals("No private messages yet.", content.emptyStateText)
     }
 
     @Test
-    fun privateChatComposerIsDisabledWhenKeysAreMissing() {
+    fun privateChatMissingSetupUsesProductFacingHint() {
         val contact = AuroraContact(
             canonicalPeerId = "peer-123",
             displayName = "Alex",
@@ -62,16 +69,16 @@ class PrivateChatScreenTest {
             contact = contact
         )
 
-        assertEquals("Keys missing", content.keyStatusText)
+        assertEquals("Private chat is not ready yet", content.statusText)
         assertEquals(
-            "Exchange keys from Nearby before sending private messages.",
-            content.setupText
+            "Setup needed. Open Nearby to finish private chat setup.",
+            content.helperText
         )
         assertFalse(content.isComposerEnabled)
-        assertEquals(
-            "Exchange keys from Nearby before sending private messages.",
-            content.composerHint
-        )
+        assertEquals("Setup needed before sending", content.composerHint)
+        assertFalse(requireNotNull(content.helperText).contains("Transport", ignoreCase = true))
+        assertFalse(requireNotNull(content.helperText).contains("Session", ignoreCase = true))
+        assertFalse(requireNotNull(content.helperText).contains("Peer:", ignoreCase = true))
     }
 
     @Test
@@ -83,44 +90,117 @@ class PrivateChatScreenTest {
 
         assertEquals("Contact not found", content.title)
         assertEquals("missing-peer...", content.shortPeerId)
-        assertNull(content.keyStatusText)
+        assertEquals("Contact not found", content.statusText)
         assertEquals(
-            "Open Nearby or Contacts and select a saved contact first.",
-            content.setupText
+            "Add this device from Nearby to start a private chat.",
+            content.helperText
         )
         assertTrue(content.isMissingContact)
-        assertFalse(content.shouldShowComposer)
         assertFalse(content.isComposerEnabled)
     }
 
     @Test
-    fun privateChatDeliveryStringsStaySafeAndShort() {
-        assertEquals(
-            "Sent.",
-            privateChatDeliveryStatusText(PrivateChatMessageSendResult.SubmittedLocally)
+    fun privateChatDebugCardShowsSingleGroupedStructureWhenEnabled() {
+        val contact = AuroraContact(
+            canonicalPeerId = "peer-123",
+            displayName = "Alex",
+            createdAtMillis = 1_000L,
+            lastSeenMillis = 2_000L,
+            hasSession = true
         )
-        assertEquals(
-            "Keys unavailable.",
-            privateChatDeliveryStatusText(PrivateChatMessageSendResult.KeysUnavailable)
-        )
-        assertEquals(
-            "Contact not reachable.",
-            privateChatDeliveryStatusText(PrivateChatMessageSendResult.ContactNotReachable)
-        )
-        assertEquals(
-            "Send failed.",
-            privateChatDeliveryStatusText(
-                PrivateChatMessageSendResult.Failed("transport failed")
+        val messages = listOf(
+            ChatMessage(
+                id = "msg-1",
+                threadId = "private:peer-123",
+                senderId = "self",
+                senderName = "Chris",
+                text = "hello",
+                createdAtMillis = 5_000L,
+                status = MessageStatus.SENT,
+                isOutgoing = true
             )
         )
-        assertFalse(
-            privateChatDeliveryStatusText(PrivateChatMessageSendResult.KeysUnavailable)
-                .contains("private key", ignoreCase = true)
+
+        val card = buildPrivateChatDebugCard(
+            showDebugDiagnostics = true,
+            requestedPeerId = contact.canonicalPeerId,
+            contact = contact,
+            messages = messages,
+            lastDeliveryResult = PrivateChatMessageSendResult.SubmittedLocally,
+            peerSessionDiagnostics = PeerSessionRegistryDiagnostics(
+                establishedPeerIds = listOf("peer-123"),
+                canonicalPeerIdByAlias = emptyMap()
+            ),
+            activeTransportPeerId = "peer-123",
+            lastIdentityExchangeStatus = "Identity received from peer-123. Send yours back from this device.",
+            isComposerEnabled = true
         )
-        assertFalse(
-            privateChatDeliveryStatusText(
+
+        assertEquals(
+            DebugInfoCardModel(
+                title = "Debug",
+                sections = listOf(
+                    DebugInfoSection(
+                        title = "Target",
+                        items = listOf(
+                            DebugInfoItem("Peer", "peer-123"),
+                            DebugInfoItem("Messages", "1"),
+                            DebugInfoItem("Seen", "recent")
+                        )
+                    ),
+                    DebugInfoSection(
+                        title = "Runtime",
+                        items = listOf(
+                            DebugInfoItem("Session", "ready"),
+                            DebugInfoItem("Active", "match"),
+                            DebugInfoItem("Composer", "enabled"),
+                            DebugInfoItem("Keys", "ready")
+                        )
+                    ),
+                    DebugInfoSection(
+                        title = "Events",
+                        items = listOf(
+                            DebugInfoItem("Last send", "queued"),
+                            DebugInfoItem(
+                                "Last identity",
+                                "Identity received from peer-123. Send yours back from this device.",
+                                preferFullWidth = true
+                            )
+                        )
+                    )
+                )
+            ),
+            card
+        )
+    }
+
+    @Test
+    fun privateChatCanonicalPeerIdResolvesAlias() {
+        val diagnostics = PeerSessionRegistryDiagnostics(
+            establishedPeerIds = listOf("canonical-peer"),
+            canonicalPeerIdByAlias = mapOf("friendly-peer" to "canonical-peer")
+        )
+
+        assertEquals(
+            "canonical-peer",
+            privateChatCanonicalPeerId("friendly-peer", diagnostics)
+        )
+        assertEquals(
+            "canonical-peer",
+            privateChatCanonicalPeerId("canonical-peer", diagnostics)
+        )
+    }
+
+    @Test
+    fun privateChatDebugDeliveryValueStaysCompactAndSafe() {
+        assertEquals("queued", privateChatDebugDeliveryValue(PrivateChatMessageSendResult.SubmittedLocally))
+        assertEquals("setup needed", privateChatDebugDeliveryValue(PrivateChatMessageSendResult.KeysUnavailable))
+        assertEquals("not reachable", privateChatDebugDeliveryValue(PrivateChatMessageSendResult.ContactNotReachable))
+        assertEquals(
+            "failed",
+            privateChatDebugDeliveryValue(
                 PrivateChatMessageSendResult.Failed("transport failed")
-            ).contains("transport failed", ignoreCase = true)
+            )
         )
     }
 }

@@ -130,6 +130,12 @@ interface AuroraPersistenceStore {
     fun saveMessage(message: PersistedChatMessage)
 
     fun clear()
+
+    fun replaceAll(state: PersistedAuroraState) {
+        clear()
+        state.contacts.forEach(::saveContact)
+        state.messages.forEach(::saveMessage)
+    }
 }
 
 fun AuroraContact.toPersistedContact(): PersistedContact {

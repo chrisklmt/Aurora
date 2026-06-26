@@ -12,6 +12,10 @@ object AndroidKeystoreLocalAgreementKey {
     private const val provider = "AndroidKeyStore"
     private const val curveName = "secp256r1"
 
+    data class LocalIdentityClearResult(
+        val clearedAliases: Set<String>
+    )
+
     sealed interface PrivateKeyLoadResult {
         data class Ready(
             val privateKey: PrivateKey,
@@ -192,10 +196,42 @@ object AndroidKeystoreLocalAgreementKey {
         }
     }
 
+    fun clearLocalIdentityEntries(
+        identity: LocalKeyIdentity = LocalKeyIdentity.default()
+    ): LocalIdentityClearResult {
+        val keyStore = loadKeyStoreOrThrow()
+        return clearLocalIdentityEntries(
+            identity = identity,
+            hasAlias = keyStore::containsAlias,
+            deleteAlias = { alias ->
+                keyStore.deleteEntry(alias)
+            }
+        )
+    }
+
     private fun loadKeyStoreOrThrow(): KeyStore {
         return KeyStore.getInstance(provider).apply {
             load(null)
         }
+    }
+
+    internal fun clearLocalIdentityEntries(
+        identity: LocalKeyIdentity,
+        hasAlias: (String) -> Boolean,
+        deleteAlias: (String) -> Unit
+    ): LocalIdentityClearResult {
+        val clearedAliases = linkedSetOf<String>()
+        listOf(identity.signingAlias, identity.keyAgreementAlias).forEach { alias ->
+            if (!hasAlias(alias)) {
+                return@forEach
+            }
+            deleteAlias(alias)
+            clearedAliases += alias
+        }
+
+        return LocalIdentityClearResult(
+            clearedAliases = clearedAliases
+        )
     }
 
     private fun loadKeyStoreOrNull(): KeyStore? {

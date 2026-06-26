@@ -25,6 +25,7 @@ object PrivateChatMessageSendUseCase {
     suspend fun send(
         message: OutgoingChatMessage,
         senderPeerId: String?,
+        senderUsername: String,
         transportSender: BleTransportSender?,
         sessionMaterialProvider: OutgoingSessionMaterialProvider,
         activeConnectedPeerId: String?,
@@ -55,9 +56,24 @@ object PrivateChatMessageSendUseCase {
             return PrivateChatMessageSendResult.ContactNotReachable
         }
 
-        val sendResult = OutgoingMessageSendUseCase.send(
-            message = message,
-            senderId = sanitizedSenderPeerId,
+        val encodedPrivatePayload = runCatching {
+            PrivateChatMessagePayloadCodec.encode(
+                PrivateChatMessagePayload(
+                    senderUsername = senderUsername.trim(),
+                    body = draft.payload
+                )
+            )
+        }.getOrElse { error ->
+            return PrivateChatMessageSendResult.Failed(
+                reason = error.message ?: "Private chat payload is invalid."
+            )
+        }
+        val resolvedFrame = OutgoingMessageFrameResolver.resolve(
+            draft = draft.copy(payload = encodedPrivatePayload),
+            senderId = sanitizedSenderPeerId
+        )
+        val sendResult = MessageFrameTransportSendUseCase.send(
+            frame = resolvedFrame,
             encryptionMaterial = encryptionMaterial,
             transportSender = sender,
             targetPeerId = targetPeerId

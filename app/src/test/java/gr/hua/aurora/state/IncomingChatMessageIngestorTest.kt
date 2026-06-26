@@ -137,6 +137,53 @@ class IncomingChatMessageIngestorTest {
     }
 
     @Test
+    fun privateIncomingStructuredPayloadUpdatesContactDisplayNameFromSenderUsername() {
+        val state = SampleAuroraState.create(
+            generatedUsername = "PIAIUFN1"
+        ).copy(
+            contacts = listOf(
+                AuroraContact(
+                    canonicalPeerId = "peer-private",
+                    displayName = "Aurora device 10325476",
+                    createdAtMillis = 1_000L,
+                    hasSession = false
+                )
+            )
+        )
+        val frame = MessageFrame(
+            id = "incoming-private-structured",
+            type = MessageFrameType.PRIVATE_TEXT,
+            senderId = "peer-private",
+            recipientId = "self",
+            createdAtMillis = 4_777L,
+            payload = gr.hua.aurora.protocol.PrivateChatMessagePayloadCodec.encode(
+                gr.hua.aurora.protocol.PrivateChatMessagePayload(
+                    senderUsername = "Alex",
+                    body = "private hello"
+                )
+            )
+        )
+
+        val outcome = IncomingChatMessageIngestor.ingest(
+            state = state,
+            frame = frame
+        )
+
+        assertTrue(outcome.result is IncomingMessageIngestionResult.Appended)
+        val appendedMessage = (outcome.result as IncomingMessageIngestionResult.Appended).message
+        assertEquals("Alex", appendedMessage.senderName)
+        assertEquals("private hello", appendedMessage.text)
+        assertEquals(
+            "Alex",
+            outcome.updatedState.contacts.single { it.canonicalPeerId == "peer-private" }.displayName
+        )
+        assertEquals(
+            true,
+            outcome.updatedState.contacts.single { it.canonicalPeerId == "peer-private" }.hasSession
+        )
+    }
+
+    @Test
     fun privateIncomingFrameWithBlankSenderIsRejected() {
         val state = SampleAuroraState.create(
             generatedUsername = "PIAIUFN1"
@@ -227,7 +274,8 @@ class IncomingChatMessageIngestorTest {
         assertTrue(result is IncomingMessageIngestionResult.Appended)
         assertEquals(queueBeforeIngest, holder.uiState.pendingOutgoingMessages)
         assertEquals(queuedMessage.messageId, holder.uiState.pendingOutgoingMessages.single().messageId)
-        val appendedMessage = holder.uiState.globalMessages.last()
+        val appendedMessage = holder.uiState.globalMessages
+            .single { it.id == "incoming-global-transport" }
         assertEquals("incoming-global-transport", appendedMessage.id)
         assertEquals("peer-transport", appendedMessage.senderId)
         assertEquals("peer-transport", appendedMessage.senderName)

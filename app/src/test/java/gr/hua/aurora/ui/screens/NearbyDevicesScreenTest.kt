@@ -104,11 +104,11 @@ class NearbyDevicesScreenTest {
     @Test
     fun nearbyIdentityExchangeStatusTextUsesTruthfulTransportWording() {
         assertEquals(
-            "Keys sent. Run on both devices.",
+            "Identity sent. Run on both devices.",
             nearbyIdentityExchangeStatusText(PeerIdentityExchangeSendResult.SubmittedLocally)
         )
         assertEquals(
-            "Key exchange unavailable.",
+            "Identity exchange unavailable.",
             nearbyIdentityExchangeStatusText(PeerIdentityExchangeSendResult.SenderUnavailable)
         )
         assertEquals(
@@ -120,7 +120,7 @@ class NearbyDevicesScreenTest {
             )
         )
         assertEquals(
-            "Key exchange failed: writer unavailable",
+            "Identity exchange failed: writer unavailable",
             nearbyIdentityExchangeStatusText(
                 PeerIdentityExchangeSendResult.Failed(
                     reason = "writer unavailable"
@@ -148,8 +148,8 @@ class NearbyDevicesScreenTest {
             stablePeerId = null
         )
 
-        assertEquals("Alex tablet", nearbyContactDisplayName(namedDevice))
-        assertEquals("Peer 10325476", nearbyContactDisplayName(unnamedAuroraDevice))
+        assertEquals("Aurora device 10325476", nearbyContactDisplayName(namedDevice))
+        assertEquals("Aurora device 10325476", nearbyContactDisplayName(unnamedAuroraDevice))
         assertEquals("Unknown BLE device", nearbyContactDisplayName(unknownDevice))
     }
 
@@ -162,19 +162,105 @@ class NearbyDevicesScreenTest {
             )
         )
         assertEquals(
-            "Contact | Keys missing",
+            "Setup needed",
             nearbyContactStatusText(
                 isContact = true,
                 hasReadyKeys = false
             )
         )
         assertEquals(
-            "Contact | Keys ready",
+            "Private chat ready",
             nearbyContactStatusText(
                 isContact = true,
                 hasReadyKeys = true
             )
         )
+    }
+
+    @Test
+    fun nearbyProductStatusTextKeepsNormalModeCompact() {
+        assertEquals(
+            "Aurora device",
+            nearbyProductStatusText(
+                isContact = false,
+                hasReadyKeys = false,
+                isAuroraDevice = true
+            )
+        )
+        assertEquals(
+            "Setup needed",
+            nearbyProductStatusText(
+                isContact = true,
+                hasReadyKeys = false,
+                isAuroraDevice = true
+            )
+        )
+        assertEquals(
+            "Private chat ready",
+            nearbyProductStatusText(
+                isContact = true,
+                hasReadyKeys = true,
+                isAuroraDevice = true
+            )
+        )
+    }
+
+    @Test
+    fun nearbyNormalModeHidesManualConnectDisconnectAndExchangeKeys() {
+        val device = BleDiscoveredDevice(
+            address = "AA:BB:CC:DD:EE:FF",
+            name = "Aurora",
+            rssi = -45,
+            isConnectable = true,
+            hasAuroraDiscoveryPayload = true,
+            stablePeerId = BleStablePeerId.fromBytes(
+                byteArrayOf(0x10, 0x32, 0x54, 0x76, 0x11, 0x22, 0x33, 0x44)
+            )
+        )
+
+        val visibility = nearbyRowActionVisibility(
+            device = device,
+            existingContact = null,
+            connectionStatus = BleConnectionStatus.CONNECTED,
+            activeConnectionDeviceAddress = device.address,
+            showDebugActions = false
+        )
+
+        assertEquals(false, visibility.showConnect)
+        assertEquals(false, visibility.showDisconnect)
+        assertEquals(false, visibility.showExchangeIdentity)
+        assertEquals(true, visibility.showAddContact)
+        assertEquals(false, visibility.showOpenChat)
+    }
+
+    @Test
+    fun nearbyDebugModeKeepsManualTransportAndIdentityControls() {
+        val device = BleDiscoveredDevice(
+            address = "AA:BB:CC:DD:EE:FF",
+            name = "Aurora",
+            rssi = -45,
+            isConnectable = true,
+            hasAuroraDiscoveryPayload = true,
+            stablePeerId = BleStablePeerId.fromBytes(
+                byteArrayOf(0x10, 0x32, 0x54, 0x76, 0x11, 0x22, 0x33, 0x44)
+            )
+        )
+
+        val visibility = nearbyRowActionVisibility(
+            device = device,
+            existingContact = null,
+            connectionStatus = BleConnectionStatus.CONNECTED,
+            activeConnectionDeviceAddress = device.address,
+            showDebugActions = true
+        )
+
+        assertEquals(false, visibility.showAddContact)
+        assertEquals(false, visibility.showOpenChat)
+        assertEquals(true, visibility.showDisconnect)
+        assertEquals(true, visibility.showExchangeIdentity)
+        assertEquals(true, visibility.showReadTransportMarker)
+        assertEquals(true, visibility.showReadTransportFrame)
+        assertEquals(true, visibility.showWriteTransportMarker)
     }
 
     @Test

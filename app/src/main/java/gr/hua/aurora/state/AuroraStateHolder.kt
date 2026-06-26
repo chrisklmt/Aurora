@@ -9,6 +9,10 @@ import gr.hua.aurora.data.GeneratedUsername
 import gr.hua.aurora.data.LocalProfileSettings
 import gr.hua.aurora.data.LocalProfileSettingsStore
 import gr.hua.aurora.data.LocalProfileStore
+import gr.hua.aurora.data.persistence.AuroraPersistenceStore
+import gr.hua.aurora.data.persistence.PersistedAuroraState
+import gr.hua.aurora.data.persistence.toPersistedChatMessage
+import gr.hua.aurora.data.persistence.toPersistedContact
 import gr.hua.aurora.model.AuroraContact
 import gr.hua.aurora.model.ChatMessage
 import gr.hua.aurora.model.MessageStatus
@@ -21,10 +25,12 @@ import gr.hua.aurora.protocol.PrivateChatMessageSendResult
 
 class AuroraStateHolder(
     initialState: AuroraUiState,
-    private val localProfileStore: LocalProfileSettingsStore
+    private val localProfileStore: LocalProfileSettingsStore,
+    private val persistenceStore: AuroraPersistenceStore? = null
 ) {
     var uiState by mutableStateOf(initialState)
         private set
+    private var localMessageSequence = 0L
 
     // Οι helpers ενημερώνουν μόνο την τοπική Compose μνήμη ώστε το UI να δείχνει συνεκτικό,
     // χωρίς αποθήκευση μηνυμάτων, δικτύωση ή άλλη business orchestration.
@@ -41,21 +47,12 @@ class AuroraStateHolder(
             message = outgoingMessage
         )
 
-        uiState = AuroraUiState(
-            contacts = uiState.contacts,
-            nearbyDevices = uiState.nearbyDevices,
-            globalMessages = uiState.globalMessages + outgoingMessage,
+        uiState = uiState.copy(
+            globalMessages = sortVisibleMessages(uiState.globalMessages + outgoingMessage),
             pendingOutgoingMessages = uiState.pendingOutgoingMessages + queuedMessage,
-            privateMessagesByPeerId = uiState.privateMessagesByPeerId,
-            generatedUsername = uiState.generatedUsername,
-            customUsername = uiState.customUsername,
-            useCustomUsernameInGlobalChat = uiState.useCustomUsernameInGlobalChat,
-            isDebugModeEnabled = uiState.isDebugModeEnabled,
-            desiredAvailability = uiState.desiredAvailability,
-            selectedSecurePeerId = uiState.selectedSecurePeerId,
-            globalMeshDeliveryResult = null,
-            privateChatDeliveryResultsByPeerId = uiState.privateChatDeliveryResultsByPeerId
+            globalMeshDeliveryResult = null
         )
+        persistRestorableState()
 
         return queuedMessage
     }
@@ -75,23 +72,16 @@ class AuroraStateHolder(
         val queuedMessage = createQueuedOutgoingChatMessage(
             message = outgoingMessage
         )
-        val updatedMessages = privateMessagesForPeerId(sanitizedPeerId) + outgoingMessage
+        val updatedMessages = sortVisibleMessages(
+            privateMessagesForPeerId(sanitizedPeerId) + outgoingMessage
+        )
 
-        uiState = AuroraUiState(
-            contacts = uiState.contacts,
-            nearbyDevices = uiState.nearbyDevices,
-            globalMessages = uiState.globalMessages,
+        uiState = uiState.copy(
             pendingOutgoingMessages = uiState.pendingOutgoingMessages + queuedMessage,
             privateMessagesByPeerId = uiState.privateMessagesByPeerId + (sanitizedPeerId to updatedMessages),
-            generatedUsername = uiState.generatedUsername,
-            customUsername = uiState.customUsername,
-            useCustomUsernameInGlobalChat = uiState.useCustomUsernameInGlobalChat,
-            isDebugModeEnabled = uiState.isDebugModeEnabled,
-            desiredAvailability = uiState.desiredAvailability,
-            selectedSecurePeerId = uiState.selectedSecurePeerId,
-            globalMeshDeliveryResult = uiState.globalMeshDeliveryResult,
             privateChatDeliveryResultsByPeerId = uiState.privateChatDeliveryResultsByPeerId - sanitizedPeerId
         )
+        persistRestorableState()
 
         return queuedMessage
     }
@@ -218,6 +208,7 @@ class AuroraStateHolder(
             uiState = uiState.copy(
                 contacts = updatedContacts
             )
+            persistRestorableState()
         }
 
         return updatedContact
@@ -232,6 +223,7 @@ class AuroraStateHolder(
     fun resetLocalData() {
         // Το reset μένει στο ίδιο κεντρικό flow ώστε να καθαρίζει σταδιακά όλα τα τοπικά profile settings.
         localProfileStore.clearProfile()
+        persistenceStore?.clear()
         val freshGeneratedUsername = createAndPersistGeneratedUsername()
         uiState = SampleAuroraState.create(
             generatedUsername = freshGeneratedUsername,
@@ -284,6 +276,7 @@ class AuroraStateHolder(
             },
             globalMeshDeliveryResult = result
         )
+        persistRestorableState()
     }
 
     fun handlePrivateChatDeliveryResult(
@@ -311,17 +304,38 @@ class AuroraStateHolder(
             privateChatDeliveryResultsByPeerId =
                 uiState.privateChatDeliveryResultsByPeerId + (sanitizedPeerId to result)
         )
+        persistRestorableState()
     }
 
     fun ingestIncomingTransportMessage(
         message: IncomingTransportMessage
     ): IncomingMessageIngestionResult {
+        val previousState = uiState
         val outcome = IncomingChatMessageIngestor.ingest(
             state = uiState,
             message = message
         )
         uiState = outcome.updatedState
+        if (outcome.updatedState != previousState) {
+            persistRestorableState()
+        }
         return outcome.result
+    }
+
+    private fun persistRestorableState() {
+        persistenceStore?.replaceAll(
+            PersistedAuroraState(
+                contacts = uiState.contacts.map(AuroraContact::toPersistedContact),
+                messages = restoredVisibleMessages().map(ChatMessage::toPersistedChatMessage)
+            )
+        )
+    }
+
+    private fun restoredVisibleMessages(): List<ChatMessage> {
+        return sortVisibleMessages(
+            uiState.globalMessages +
+                uiState.privateMessagesByPeerId.values.flatten()
+        )
     }
 
     private fun createOutgoingMessage(
@@ -331,9 +345,10 @@ class AuroraStateHolder(
         status: MessageStatus
     ): ChatMessage {
         val now = System.currentTimeMillis()
+        val sequenceToken = localMessageSequence++.toString().padStart(6, '0')
 
         return ChatMessage(
-            id = "$threadId-$now",
+            id = "$threadId-$now-$sequenceToken",
             threadId = threadId,
             senderId = "self",
             senderName = senderName,
@@ -391,29 +406,80 @@ private fun visiblePrivateMessageStatusForSendResult(
 
 @Composable
 fun rememberAuroraStateHolder(
-    localProfileStore: LocalProfileStore
+    localProfileStore: LocalProfileStore,
+    persistenceStore: AuroraPersistenceStore? = null
 ): AuroraStateHolder {
-    return remember(localProfileStore) {
-        createAuroraStateHolder(localProfileStore)
+    return remember(localProfileStore, persistenceStore) {
+        createAuroraStateHolder(localProfileStore, persistenceStore)
     }
 }
 
 fun createAuroraStateHolder(
-    localProfileStore: LocalProfileSettingsStore
+    localProfileStore: LocalProfileSettingsStore,
+    persistenceStore: AuroraPersistenceStore? = null
 ): AuroraStateHolder {
     val profileSettings = ensureGeneratedUsername(
         profileSettings = localProfileStore.loadProfileSettings(),
         localProfileStore = localProfileStore
     )
-
-    return AuroraStateHolder(
-        initialState = SampleAuroraState.create(
+    val initialState = restoreAuroraUiState(
+        baseState = SampleAuroraState.create(
             generatedUsername = profileSettings.generatedUsername
                 ?: error("generatedUsername must be resolved before state creation."),
             customUsername = profileSettings.customUsername,
             useCustomUsernameInGlobalChat = profileSettings.useCustomUsernameInGlobalChat
         ),
-        localProfileStore = localProfileStore
+        persistedState = persistenceStore?.load() ?: PersistedAuroraState()
+    )
+
+    return AuroraStateHolder(
+        initialState = initialState,
+        localProfileStore = localProfileStore,
+        persistenceStore = persistenceStore
+    )
+}
+
+internal fun restoreAuroraUiState(
+    baseState: AuroraUiState,
+    persistedState: PersistedAuroraState
+): AuroraUiState {
+    val restoredContacts = persistedState.contacts
+        .map { it.toRestoredContact() }
+        .sortedWith(
+            compareByDescending<AuroraContact> { it.hasSession }
+                .thenBy { it.displayName.lowercase() }
+                .thenBy { it.canonicalPeerId }
+        )
+    val restoredMessages = persistedState.messages
+        .map { it.toRestoredChatMessage() }
+        .sortedWith(
+            compareBy<ChatMessage>({ it.createdAtMillis }, { it.id })
+        )
+    val restoredGlobalMessages = restoredMessages.filter { it.threadId == "global" }
+    val restoredPrivateMessages = restoredMessages
+        .filter { it.threadId.startsWith("private:") }
+        .groupBy { it.threadId.removePrefix("private:") }
+        .mapValues { (_, messages) ->
+            sortVisibleMessages(messages)
+        }
+        .toSortedMap()
+
+    return baseState.copy(
+        contacts = restoredContacts,
+        globalMessages = restoredGlobalMessages,
+        pendingOutgoingMessages = emptyList(),
+        privateMessagesByPeerId = restoredPrivateMessages,
+        selectedSecurePeerId = null,
+        globalMeshDeliveryResult = null,
+        privateChatDeliveryResultsByPeerId = emptyMap()
+    )
+}
+
+internal fun sortVisibleMessages(
+    messages: List<ChatMessage>
+): List<ChatMessage> {
+    return messages.sortedWith(
+        compareBy<ChatMessage>({ it.createdAtMillis }, { it.id })
     )
 }
 

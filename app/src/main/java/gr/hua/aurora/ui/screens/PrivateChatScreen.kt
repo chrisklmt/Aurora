@@ -2,41 +2,35 @@ package gr.hua.aurora.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import gr.hua.aurora.model.AuroraContact
 import gr.hua.aurora.model.ChatMessage
+import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
 import gr.hua.aurora.protocol.PrivateChatMessageSendResult
 import gr.hua.aurora.ui.components.AuroraTopBarAction
-import gr.hua.aurora.ui.components.ChatComposer
-import gr.hua.aurora.ui.components.MessageList
-import gr.hua.aurora.ui.components.TransportStatusCard
-import gr.hua.aurora.ui.components.TransportStatusTone
+import gr.hua.aurora.ui.components.ChatScaffold
+import gr.hua.aurora.ui.components.DebugInfoCard
+import gr.hua.aurora.ui.components.DebugInfoCardModel
+import gr.hua.aurora.ui.components.DebugInfoItem
+import gr.hua.aurora.ui.components.DebugInfoSection
 import gr.hua.aurora.ui.components.toMessageListItem
 
 internal data class PrivateChatScreenContent(
     val title: String,
     val shortPeerId: String,
-    val keyStatusText: String?,
-    val setupText: String,
+    val statusText: String?,
+    val helperText: String?,
     val isMissingContact: Boolean,
     val isComposerEnabled: Boolean,
-    val composerHint: String
-) {
-    val shouldShowComposer: Boolean
-        get() = !isMissingContact
-}
+    val composerHint: String,
+    val emptyStateText: String
+)
 
 @Composable
 fun PrivateChatScreen(
@@ -45,6 +39,10 @@ fun PrivateChatScreen(
     currentUsername: String,
     messages: List<ChatMessage>,
     lastDeliveryResult: PrivateChatMessageSendResult?,
+    showDebugDiagnostics: Boolean,
+    peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
+    activeTransportPeerId: String?,
+    lastIdentityExchangeStatus: String?,
     onBack: () -> Unit,
     onSendMessage: (String) -> Unit,
     onResetLocalData: () -> Unit
@@ -54,108 +52,93 @@ fun PrivateChatScreen(
         contact = contact
     )
     val mappedMessages = messages.map { it.toMessageListItem() }
-    var composerValue by rememberSaveable(content.shortPeerId) {
-        mutableStateOf("")
+    val debugCard = buildPrivateChatDebugCard(
+        showDebugDiagnostics = showDebugDiagnostics,
+        requestedPeerId = requestedPeerId,
+        contact = contact,
+        messages = messages,
+        lastDeliveryResult = lastDeliveryResult,
+        peerSessionDiagnostics = peerSessionDiagnostics,
+        activeTransportPeerId = activeTransportPeerId,
+        lastIdentityExchangeStatus = lastIdentityExchangeStatus,
+        isComposerEnabled = content.isComposerEnabled
+    )
+    val bodyTopContent: (@Composable ColumnScope.() -> Unit)? = when {
+        content.isMissingContact || !content.isComposerEnabled || debugCard != null -> {
+            {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    content.statusText?.let { statusText ->
+                        Text(
+                            text = statusText,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                    content.helperText?.let { helperText ->
+                        Text(
+                            text = helperText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    debugCard?.let { card ->
+                        DebugInfoCard(card = card)
+                    }
+                }
+            }
+        }
+        else -> null
     }
 
-    PlaceholderScreenScaffold(
-        title = "Private Chat",
-        subtitle = content.title,
-        username = currentUsername,
-        onUsernameTripleTap = onResetLocalData,
-        rightAction = AuroraTopBarAction.BACK,
-        onRightActionClick = onBack
-    ) {
-        if (content.isMissingContact) {
-            TransportStatusCard(
-                summary = "Contact not found",
-                detail = content.setupText,
-                tone = TransportStatusTone.WARNING,
-                note = "Peer: ${content.shortPeerId}"
-            )
-            return@PlaceholderScreenScaffold
-        }
-
-        Card(
-            modifier = Modifier.fillMaxWidth()
+    if (content.isMissingContact) {
+        PlaceholderScreenScaffold(
+            title = "Private Chat",
+            subtitle = null,
+            username = currentUsername,
+            onUsernameTripleTap = onResetLocalData,
+            rightAction = AuroraTopBarAction.BACK,
+            onRightActionClick = onBack
         ) {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(14.dp),
+                modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(
                     text = content.title,
                     style = MaterialTheme.typography.titleMedium
                 )
-                Text(
-                    text = "Peer: ${content.shortPeerId}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = requireNotNull(content.keyStatusText),
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            }
-        }
-
-        TransportStatusCard(
-            summary = requireNotNull(content.keyStatusText),
-            detail = content.setupText,
-            tone = if (contact?.hasSession == true) {
-                TransportStatusTone.HEALTHY
-            } else {
-                TransportStatusTone.WARNING
-            },
-            note = lastDeliveryResult?.let(::privateChatDeliveryStatusText)
-        )
-
-        Card(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text(
-                    text = "Messages",
-                    style = MaterialTheme.typography.titleSmall
-                )
-                if (mappedMessages.isEmpty()) {
+                content.helperText?.let { helperText ->
                     Text(
-                        text = "No private messages yet.",
+                        text = helperText,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                } else {
-                    MessageList(
-                        messages = mappedMessages,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 120.dp, max = 260.dp)
-                    )
+                }
+                debugCard?.let { card ->
+                    DebugInfoCard(card = card)
                 }
             }
         }
-
-        if (content.shouldShowComposer) {
-            ChatComposer(
-                value = composerValue,
-                onValueChange = { composerValue = it },
-                onSend = { typedText ->
-                    onSendMessage(typedText)
-                    composerValue = ""
-                },
-                hint = content.composerHint,
-                sendLabel = "Send",
-                enabled = content.isComposerEnabled
-            )
-        }
+        return
     }
+
+    ChatScaffold(
+        title = "Private Chat",
+        subtitle = content.title,
+        messages = mappedMessages,
+        onSend = onSendMessage,
+        topBarUsername = currentUsername,
+        onTopBarUsernameTripleTap = onResetLocalData,
+        topBarRightAction = AuroraTopBarAction.BACK,
+        onTopBarRightAction = onBack,
+        composerHint = content.composerHint,
+        composerEnabled = content.isComposerEnabled,
+        composerStateKey = contact?.canonicalPeerId ?: requestedPeerId,
+        emptyStateText = content.emptyStateText,
+        bodyTop = bodyTopContent
+    )
 }
 
 internal fun buildPrivateChatScreenContent(
@@ -167,60 +150,178 @@ internal fun buildPrivateChatScreenContent(
         PrivateChatScreenContent(
             title = "Contact not found",
             shortPeerId = privateChatShortPeerId(resolvedPeerId),
-            keyStatusText = null,
-            setupText = "Open Nearby or Contacts and select a saved contact first.",
+            statusText = "Contact not found",
+            helperText = "Add this device from Nearby to start a private chat.",
             isMissingContact = true,
             isComposerEnabled = false,
-            composerHint = "Private messaging coming next"
+            composerHint = "Private messaging coming next",
+            emptyStateText = "Contact not found"
         )
     } else {
         val hasReadyKeys = contact.hasSession
         PrivateChatScreenContent(
             title = contact.displayName,
             shortPeerId = privateChatShortPeerId(contact.canonicalPeerId),
-            keyStatusText = privateChatKeyStatusText(contact),
-            setupText = privateChatSetupText(contact),
+            statusText = if (hasReadyKeys) null else "Private chat is not ready yet",
+            helperText = if (hasReadyKeys) {
+                null
+            } else {
+                "Setup needed. Open Nearby to finish private chat setup."
+            },
             isMissingContact = false,
             isComposerEnabled = hasReadyKeys,
             composerHint = if (hasReadyKeys) {
                 "Private message"
             } else {
-                "Exchange keys from Nearby before sending private messages."
-            }
+                "Setup needed before sending"
+            },
+            emptyStateText = "No private messages yet."
         )
     }
 }
 
-internal fun privateChatKeyStatusText(contact: AuroraContact): String {
+internal fun buildPrivateChatDebugCard(
+    showDebugDiagnostics: Boolean,
+    requestedPeerId: String,
+    contact: AuroraContact?,
+    messages: List<ChatMessage>,
+    lastDeliveryResult: PrivateChatMessageSendResult?,
+    peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
+    activeTransportPeerId: String?,
+    lastIdentityExchangeStatus: String?,
+    isComposerEnabled: Boolean
+): DebugInfoCardModel? {
+    if (!showDebugDiagnostics) {
+        return null
+    }
+
+    val targetPeerId = (contact?.canonicalPeerId ?: requestedPeerId).trim()
+    val canonicalPeerId = privateChatCanonicalPeerId(
+        peerId = targetPeerId,
+        diagnostics = peerSessionDiagnostics
+    )
+    val targetHasSession = canonicalPeerId != null
+    val sections = buildList {
+        add(
+            DebugInfoSection(
+                title = "Target",
+                items = buildList {
+                    add(DebugInfoItem("Peer", privateChatShortPeerId(targetPeerId)))
+                    if (canonicalPeerId != null && canonicalPeerId != targetPeerId) {
+                        add(
+                            DebugInfoItem(
+                                "Canonical",
+                                canonicalPeerId,
+                                preferFullWidth = true
+                            )
+                        )
+                    }
+                    add(DebugInfoItem("Messages", messages.size.toString()))
+                    contact?.lastSeenMillis?.let {
+                        add(DebugInfoItem("Seen", "recent"))
+                    }
+                }
+            )
+        )
+        add(
+            DebugInfoSection(
+                title = "Runtime",
+                items = listOf(
+                    DebugInfoItem("Session", if (targetHasSession) "ready" else "missing"),
+                    DebugInfoItem(
+                        "Active",
+                        privateChatActivePeerValue(
+                            activeTransportPeerId = activeTransportPeerId,
+                            targetPeerId = canonicalPeerId ?: targetPeerId
+                        )
+                    ),
+                    DebugInfoItem(
+                        "Composer",
+                        if (isComposerEnabled) "enabled" else "blocked"
+                    ),
+                    DebugInfoItem(
+                        "Keys",
+                        contact?.let(::privateChatDebugKeyStatusText) ?: "missing"
+                    )
+                )
+            )
+        )
+
+        val eventItems = buildList {
+            add(
+                DebugInfoItem(
+                    "Last send",
+                    privateChatDebugDeliveryValue(lastDeliveryResult)
+                )
+            )
+            if (!lastIdentityExchangeStatus.isNullOrBlank()) {
+                add(
+                    DebugInfoItem(
+                        "Last identity",
+                        lastIdentityExchangeStatus,
+                        preferFullWidth = true
+                    )
+                )
+            }
+        }
+        if (eventItems.isNotEmpty()) {
+            add(
+                DebugInfoSection(
+                    title = "Events",
+                    items = eventItems
+                )
+            )
+        }
+    }
+
+    return DebugInfoCardModel(
+        title = "Debug",
+        sections = sections
+    )
+}
+
+internal fun privateChatDebugKeyStatusText(contact: AuroraContact): String {
     return if (contact.hasSession) {
-        "Keys ready"
+        "ready"
     } else {
-        "Keys missing"
+        "missing"
     }
 }
 
-internal fun privateChatSetupText(contact: AuroraContact): String {
-    return if (contact.hasSession) {
-        "Private chat setup is ready."
-    } else {
-        "Exchange keys from Nearby before sending private messages."
-    }
-}
-
-internal fun privateChatDeliveryStatusText(
-    result: PrivateChatMessageSendResult
+internal fun privateChatDebugDeliveryValue(
+    result: PrivateChatMessageSendResult?
 ): String {
     return when (result) {
-        PrivateChatMessageSendResult.SubmittedLocally ->
-            "Sent."
-        PrivateChatMessageSendResult.KeysUnavailable ->
-            "Keys unavailable."
-        PrivateChatMessageSendResult.ContactUnavailable ->
-            "Contact unavailable."
-        PrivateChatMessageSendResult.ContactNotReachable ->
-            "Contact not reachable."
-        is PrivateChatMessageSendResult.Failed ->
-            "Send failed."
+        null -> "none"
+        PrivateChatMessageSendResult.SubmittedLocally -> "queued"
+        PrivateChatMessageSendResult.KeysUnavailable -> "setup needed"
+        PrivateChatMessageSendResult.ContactUnavailable -> "contact missing"
+        PrivateChatMessageSendResult.ContactNotReachable -> "not reachable"
+        is PrivateChatMessageSendResult.Failed -> "failed"
+    }
+}
+
+internal fun privateChatCanonicalPeerId(
+    peerId: String,
+    diagnostics: PeerSessionRegistryDiagnostics
+): String? {
+    val sanitizedPeerId = peerId.trim().takeIf { it.isNotEmpty() } ?: return null
+    return when {
+        diagnostics.establishedPeerIds.contains(sanitizedPeerId) -> sanitizedPeerId
+        else -> diagnostics.canonicalPeerIdByAlias[sanitizedPeerId]
+    }
+}
+
+internal fun privateChatActivePeerValue(
+    activeTransportPeerId: String?,
+    targetPeerId: String
+): String {
+    val sanitizedActivePeerId = activeTransportPeerId?.trim()?.takeIf { it.isNotEmpty() }
+        ?: return "none"
+    return if (sanitizedActivePeerId == targetPeerId) {
+        "match"
+    } else {
+        privateChatShortPeerId(sanitizedActivePeerId)
     }
 }
 

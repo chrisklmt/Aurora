@@ -1,16 +1,22 @@
 package gr.hua.aurora.ui.screens
 
 import gr.hua.aurora.model.AuroraContact
+import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
+import gr.hua.aurora.ui.components.DebugInfoCardModel
+import gr.hua.aurora.ui.components.DebugInfoItem
+import gr.hua.aurora.ui.components.DebugInfoSection
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ContactsScreenTest {
     @Test
-    fun contactsKeyStatusTextReflectsSessionReadiness() {
+    fun contactsNormalModeUsesProductFacingReadinessText() {
         val readyContact = AuroraContact(
             canonicalPeerId = "peer-123",
             displayName = "Alex",
-            createdAtMillis = 1000L,
+            createdAtMillis = 1_000L,
             hasSession = true
         )
         val missingContact = readyContact.copy(
@@ -18,8 +24,97 @@ class ContactsScreenTest {
             hasSession = false
         )
 
-        assertEquals("Keys ready", contactsKeyStatusText(readyContact))
-        assertEquals("Keys missing", contactsKeyStatusText(missingContact))
+        assertEquals("Private chat ready", contactsProductStatusText(readyContact))
+        assertEquals("Setup needed", contactsProductStatusText(missingContact))
+        assertFalse(contactsProductStatusText(readyContact).contains("Keys", ignoreCase = true))
+        assertFalse(contactsProductStatusText(missingContact).contains("Session", ignoreCase = true))
+        assertFalse(contactsProductStatusText(missingContact).contains("Transport", ignoreCase = true))
+        assertFalse(contactsProductStatusText(missingContact).contains("Peer", ignoreCase = true))
+    }
+
+    @Test
+    fun contactsSeenStatusOnlyAppearsWhenLastSeenExists() {
+        val seenContact = AuroraContact(
+            canonicalPeerId = "peer-123",
+            displayName = "Alex",
+            createdAtMillis = 1_000L,
+            lastSeenMillis = 2_000L
+        )
+        val unseenContact = seenContact.copy(
+            canonicalPeerId = "peer-456",
+            lastSeenMillis = null
+        )
+
+        assertEquals("Seen recently", contactsSeenStatusText(seenContact))
+        assertNull(contactsSeenStatusText(unseenContact))
+    }
+
+    @Test
+    fun contactsDebugCardIsHiddenWhenDebugModeIsDisabled() {
+        assertNull(
+            buildContactsDebugCard(
+                showDebugDiagnostics = false,
+                contacts = emptyList(),
+                peerSessionDiagnostics = PeerSessionRegistryDiagnostics(
+                    establishedPeerIds = emptyList(),
+                    canonicalPeerIdByAlias = emptyMap()
+                ),
+                lastIdentityExchangeStatus = null
+            )
+        )
+    }
+
+    @Test
+    fun contactsDebugCardShowsSingleGroupedStructureWhenEnabled() {
+        val contacts = listOf(
+            AuroraContact(
+                canonicalPeerId = "peer-123456789abc",
+                displayName = "Alex",
+                createdAtMillis = 1_000L,
+                lastSeenMillis = 2_000L,
+                hasSession = true
+            ),
+            AuroraContact(
+                canonicalPeerId = "peer-456",
+                displayName = "Nina",
+                createdAtMillis = 3_000L,
+                hasSession = false
+            )
+        )
+
+        val card = buildContactsDebugCard(
+            showDebugDiagnostics = true,
+            contacts = contacts,
+            peerSessionDiagnostics = PeerSessionRegistryDiagnostics(
+                establishedPeerIds = listOf("peer-123456789abc"),
+                canonicalPeerIdByAlias = mapOf("alex" to "peer-123456789abc")
+            ),
+            lastIdentityExchangeStatus = "Identity sent. Run on both devices."
+        )
+
+        assertEquals(
+            DebugInfoCardModel(
+                title = "Debug",
+                sections = listOf(
+                    DebugInfoSection(
+                        title = "Contacts",
+                        items = listOf(
+                            DebugInfoItem("Count", "2"),
+                            DebugInfoItem("Ready", "1"),
+                            DebugInfoItem("Seen", "1"),
+                            DebugInfoItem("Sessions", "1"),
+                            DebugInfoItem("Peers", "peer-1234567..., peer-456", preferFullWidth = true),
+                            DebugInfoItem(
+                                "Last exchange",
+                                "Identity sent. Run on both devices.",
+                                preferFullWidth = true
+                            )
+                        )
+                    )
+                )
+            ),
+            card
+        )
     }
 
     @Test
@@ -27,7 +122,7 @@ class ContactsScreenTest {
         val contact = AuroraContact(
             canonicalPeerId = "peer-123",
             displayName = "Alex",
-            createdAtMillis = 1000L,
+            createdAtMillis = 1_000L,
             hasSession = true
         )
 

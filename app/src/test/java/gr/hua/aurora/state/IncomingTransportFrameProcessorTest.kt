@@ -63,7 +63,8 @@ class IncomingTransportFrameProcessorTest {
         assertTrue(result is IncomingTransportFrameProcessingResult.Received)
         val receivedResult = result as IncomingTransportFrameProcessingResult.Received
         assertTrue(receivedResult.ingestionResult is IncomingMessageIngestionResult.Appended)
-        val appendedMessage = holder.uiState.globalMessages.last()
+        val appendedMessage = holder.uiState.globalMessages
+            .single { it.id == frame.id }
         assertEquals(frame.id, receivedResult.message.frame.id)
         assertEquals(frame.id, appendedMessage.id)
         assertEquals(frame.senderId, appendedMessage.senderId)

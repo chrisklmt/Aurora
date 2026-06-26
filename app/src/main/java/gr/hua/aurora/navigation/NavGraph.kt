@@ -25,6 +25,10 @@ fun NavGraph(
 ) {
     val uiState = stateHolder.uiState
     val sendScope = rememberCoroutineScope()
+    val onResetLocalData: () -> Unit = {
+        bleRuntimeState.resetLocalIdentityAndSessions()
+        stateHolder.resetLocalData()
+    }
     val onNavigateBackOrGlobal: () -> Unit = {
         if (!navController.popBackStack()) {
             navController.navigate(Routes.GLOBAL) {
@@ -79,7 +83,7 @@ fun NavGraph(
                         }
                     }
                 },
-                onResetLocalData = stateHolder::resetLocalData
+                onResetLocalData = onResetLocalData
             )
         }
 
@@ -88,10 +92,13 @@ fun NavGraph(
                 contacts = uiState.contacts,
                 currentUsername = uiState.privateProfileUsername,
                 desiredAvailability = uiState.desiredAvailability,
+                showDebugDiagnostics = uiState.isDebugModeEnabled,
+                peerSessionDiagnostics = bleRuntimeState.peerSessionDiagnostics,
+                lastIdentityExchangeStatus = bleRuntimeState.lastIdentityExchangeStatus,
                 onOpenChat = { peerId ->
                     navController.navigate(Routes.privateChat(peerId))
                 },
-                onResetLocalData = stateHolder::resetLocalData,
+                onResetLocalData = onResetLocalData,
                 onBack = onNavigateBackOrGlobal
             )
         }
@@ -105,13 +112,18 @@ fun NavGraph(
                 currentUsername = uiState.privateProfileUsername,
                 messages = stateHolder.privateMessagesForPeerId(peerId),
                 lastDeliveryResult = stateHolder.latestPrivateChatDeliveryResultForPeerId(peerId),
+                showDebugDiagnostics = uiState.isDebugModeEnabled,
+                peerSessionDiagnostics = bleRuntimeState.peerSessionDiagnostics,
+                activeTransportPeerId = bleRuntimeState.activeTransportPeerId,
+                lastIdentityExchangeStatus = bleRuntimeState.lastIdentityExchangeStatus,
                 onBack = onNavigateBackOrGlobal,
                 onSendMessage = { text ->
                     val queuedMessage = stateHolder.sendPrivateChatMessage(peerId, text)
                     if (queuedMessage != null) {
                         sendScope.launch {
                             val transportResult = bleRuntimeState.submitPrivateChatMessage(
-                                queuedMessage
+                                queuedMessage,
+                                uiState.privateProfileUsername
                             )
                             stateHolder.handlePrivateChatDeliveryResult(
                                 peerId = peerId,
@@ -121,7 +133,7 @@ fun NavGraph(
                         }
                     }
                 },
-                onResetLocalData = stateHolder::resetLocalData
+                onResetLocalData = onResetLocalData
             )
         }
 
@@ -139,7 +151,6 @@ fun NavGraph(
                 showDebugDiagnostics = uiState.isDebugModeEnabled,
                 bleConnectionStatus = bleRuntimeState.bleConnectionStatus,
                 bleConnector = bleRuntimeState.bleConnector,
-                bleTransportSender = bleRuntimeState.bleTransportSender,
                 transportSenderSourceLabel = bleRuntimeState.transportSenderSourceLabel,
                 identityHandlerStatus = bleRuntimeState.identityHandlerStatus,
                 peerSessionDiagnostics = bleRuntimeState.peerSessionDiagnostics,
@@ -147,6 +158,7 @@ fun NavGraph(
                 activeTransportDeviceAddress = bleRuntimeState.activeTransportDeviceAddress,
                 selectedSecurePeerId = uiState.selectedSecurePeerId,
                 lastIdentityExchangeStatus = bleRuntimeState.lastIdentityExchangeStatus,
+                onExchangeIdentityWithPeer = bleRuntimeState.exchangeIdentityWithPeer,
                 onConnectTransportPeer = bleRuntimeState.connectToTransportPeer,
                 onDisconnectTransportPeer = bleRuntimeState.disconnectTransportPeer,
                 onAddOrUpdateContact = { peerId, displayName, lastSeenMillis, hasSession ->
@@ -162,7 +174,7 @@ fun NavGraph(
                 onOpenPrivateChat = { peerId ->
                     navController.navigate(Routes.privateChat(peerId))
                 },
-                onResetLocalData = stateHolder::resetLocalData,
+                onResetLocalData = onResetLocalData,
                 onBack = onNavigateBackOrGlobal
             )
         }
@@ -176,7 +188,7 @@ fun NavGraph(
                 onUsernameChange = stateHolder::updateUsername,
                 onUseCustomUsernameInGlobalChatChange = stateHolder::updateUseCustomUsernameInGlobalChat,
                 onDebugModeChange = stateHolder::updateDebugMode,
-                onClearLocalData = stateHolder::resetLocalData,
+                onClearLocalData = onResetLocalData,
                 onBack = onNavigateBackOrGlobal
             )
         }

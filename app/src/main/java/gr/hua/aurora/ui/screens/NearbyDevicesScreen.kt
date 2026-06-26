@@ -40,7 +40,6 @@ import gr.hua.aurora.ble.transport.BleGattTransportFrameReader
 import gr.hua.aurora.ble.transport.BleGattTransportPayload
 import gr.hua.aurora.ble.transport.BleGattTransportReadResult
 import gr.hua.aurora.ble.transport.BleGattTransportReader
-import gr.hua.aurora.ble.transport.BleTransportSender
 import gr.hua.aurora.ble.transport.BleGattTransportWriteResult
 import gr.hua.aurora.ble.transport.BleGattTransportWriter
 import gr.hua.aurora.ble.discovery.BleScanStatus
@@ -51,7 +50,6 @@ import gr.hua.aurora.identity.AndroidKeystoreLocalAgreementPublicKey
 import gr.hua.aurora.model.AuroraContact
 import gr.hua.aurora.model.NearbyDevicePreview
 import gr.hua.aurora.protocol.PeerIdentityExchangeSendResult
-import gr.hua.aurora.protocol.PeerIdentityExchangeSendUseCase
 import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
 import gr.hua.aurora.protocol.PeerSessionPeerId
 import gr.hua.aurora.state.AuroraAvailabilityPreference
@@ -102,7 +100,6 @@ private data class NearbyBleSessionState(
     val readTransportMarker: () -> Unit,
     val readTransportFrame: () -> Unit,
     val writeTransportMarker: () -> Unit,
-    val exchangeIdentityWithDevice: suspend (BleDiscoveredDevice) -> PeerIdentityExchangeSendResult,
     val requestMissingPermissions: () -> Unit,
     val openBluetoothSettings: () -> Unit,
     val openLocationSettings: () -> Unit
@@ -122,7 +119,6 @@ fun NearbyDevicesScreen(
     showDebugDiagnostics: Boolean,
     bleConnectionStatus: BleConnectionStatus,
     bleConnector: AndroidBleConnector,
-    bleTransportSender: BleTransportSender,
     transportSenderSourceLabel: String,
     identityHandlerStatus: String,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
@@ -130,6 +126,7 @@ fun NearbyDevicesScreen(
     activeTransportDeviceAddress: String?,
     selectedSecurePeerId: String?,
     lastIdentityExchangeStatus: String?,
+    onExchangeIdentityWithPeer: suspend (BleDiscoveredDevice) -> PeerIdentityExchangeSendResult,
     onConnectTransportPeer: (String, String?) -> Unit,
     onDisconnectTransportPeer: () -> Unit,
     onAddOrUpdateContact: (String, String, Long?, Boolean) -> Unit,
@@ -146,7 +143,6 @@ fun NearbyDevicesScreen(
         runtimeDiscoveredBleDevices = discoveredBleDevices,
         bleConnectionStatus = bleConnectionStatus,
         bleConnector = bleConnector,
-        bleTransportSender = bleTransportSender,
         activeConnectionDeviceAddress = activeTransportDeviceAddress,
         onConnectTransportPeer = onConnectTransportPeer,
         onDisconnectTransportPeer = onDisconnectTransportPeer
@@ -256,7 +252,7 @@ fun NearbyDevicesScreen(
                         identityExchangeStatusTexts[deviceKey] = "Exchanging identity..."
                         coroutineScope.launch {
                             val result = runCatching {
-                                bleSessionState.exchangeIdentityWithDevice(device)
+                                onExchangeIdentityWithPeer(device)
                             }
                             identityExchangeStatusTexts[deviceKey] = result.fold(
                                 onSuccess = { sendResult ->
@@ -297,7 +293,6 @@ private fun rememberNearbyBleSessionState(
     runtimeDiscoveredBleDevices: List<BleDiscoveredDevice>,
     bleConnectionStatus: BleConnectionStatus,
     bleConnector: AndroidBleConnector,
-    bleTransportSender: BleTransportSender,
     activeConnectionDeviceAddress: String?,
     onConnectTransportPeer: (String, String?) -> Unit,
     onDisconnectTransportPeer: () -> Unit
@@ -427,31 +422,6 @@ private fun rememberNearbyBleSessionState(
         )
     }
 
-    val exchangeIdentityWithDevice: suspend (BleDiscoveredDevice) -> PeerIdentityExchangeSendResult =
-        { device ->
-            when (val localIdentityMaterial = loadLocalPeerIdentityExchangePublicMaterialResult()) {
-                is LocalPeerIdentityExchangePublicMaterialLoadResult.Unavailable -> {
-                    Log.w(
-                        nearbyDevicesLogTag,
-                        "Manual identity exchange: ${localIdentityMaterial.reason} address=${device.address}"
-                    )
-                    PeerIdentityExchangeSendResult.InvalidLocalIdentity(
-                        reason = localIdentityMaterial.reason
-                    )
-                }
-                is LocalPeerIdentityExchangePublicMaterialLoadResult.Ready -> {
-                    PeerIdentityExchangeSendUseCase.send(
-                        localPeerId = localIdentityMaterial.material.peerId,
-                        localPublicAgreementKeyBytes =
-                            localIdentityMaterial.material.publicAgreementKeyBytes(),
-                        targetPeerId = device.stablePeerId?.toNearbyPeerId(),
-                        transportSender = bleTransportSender,
-                        createdAtMillis = System.currentTimeMillis()
-                    )
-                }
-            }
-        }
-
     return NearbyBleSessionState(
         bluetoothStatus = bluetoothStatus,
         bleConnectionStatus = bleConnectionStatus,
@@ -467,7 +437,6 @@ private fun rememberNearbyBleSessionState(
         readTransportMarker = readTransportMarker,
         readTransportFrame = readTransportFrame,
         writeTransportMarker = writeTransportMarker,
-        exchangeIdentityWithDevice = exchangeIdentityWithDevice,
         requestMissingPermissions = requestMissingPermissions,
         openBluetoothSettings = openBluetoothSettings,
         openLocationSettings = openLocationSettings
@@ -665,23 +634,15 @@ private fun BleDiscoveredDeviceRow(
     onWriteTransportMarker: () -> Unit,
     onExchangeIdentity: (BleDiscoveredDevice) -> Unit
 ) {
-    val isActiveDevice = activeConnectionDeviceAddress == device.address
-    val hasActiveConnection = connectionStatus == BleConnectionStatus.CONNECTING ||
-        connectionStatus == BleConnectionStatus.CONNECTED
-    val showDisconnect = isActiveDevice && hasActiveConnection
-    val showReadTransportMarker =
-        isActiveDevice && connectionStatus == BleConnectionStatus.CONNECTED
-    val showReadTransportFrame =
-        isActiveDevice && connectionStatus == BleConnectionStatus.CONNECTED
-    val showWriteTransportMarker =
-        isActiveDevice && connectionStatus == BleConnectionStatus.CONNECTED
-    val showExchangeIdentity =
-        isActiveDevice &&
-            connectionStatus == BleConnectionStatus.CONNECTED &&
-            device.hasAuroraDiscoveryPayload
+    val actionVisibility = nearbyRowActionVisibility(
+        device = device,
+        existingContact = existingContact,
+        connectionStatus = connectionStatus,
+        activeConnectionDeviceAddress = activeConnectionDeviceAddress,
+        showDebugActions = showDebugActions
+    )
     val securePeerId = nearbyContactPeerId(device)
-    val canSelectSecurePeer =
-        showDebugActions && device.hasAuroraDiscoveryPayload && !securePeerId.isNullOrBlank()
+    val canSelectSecurePeer = showDebugActions && !securePeerId.isNullOrBlank()
     val isSelectedSecurePeer = securePeerId != null && securePeerId == selectedSecurePeerId
     val isContact = existingContact != null
     val isTransportActionActive =
@@ -692,21 +653,31 @@ private fun BleDiscoveredDeviceRow(
     val isReadTransportMarkerEnabled = !isTransportActionActive
     val isReadTransportFrameEnabled = !isTransportActionActive
     val isWriteTransportMarkerEnabled = !isTransportActionActive
-    val showConnect = device.hasAuroraDiscoveryPayload &&
-        !showDisconnect &&
-        (!hasActiveConnection || isActiveDevice)
     val productDisplayName = existingContact?.displayName ?: nearbyContactDisplayName(device)
-    val contactStatusText = nearbyContactStatusText(
-        isContact = isContact,
-        hasReadyKeys = hasReadyKeys
-    )
+    val titleText = if (showDebugActions) {
+        device.name?.trim()?.takeIf { it.isNotEmpty() } ?: productDisplayName
+    } else {
+        productDisplayName
+    }
+    val statusText = if (showDebugActions) {
+        nearbyContactStatusText(
+            isContact = isContact,
+            hasReadyKeys = hasReadyKeys
+        )
+    } else {
+        nearbyProductStatusText(
+            isContact = isContact,
+            hasReadyKeys = hasReadyKeys,
+            isAuroraDevice = device.hasAuroraDiscoveryPayload
+        )
+    }
     val openChatPeerId = nearbyOpenChatPeerId(existingContact)
 
     Column(
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Text(
-            text = productDisplayName,
+            text = titleText,
             style = MaterialTheme.typography.titleSmall
         )
         Text(
@@ -743,56 +714,50 @@ private fun BleDiscoveredDeviceRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        if (contactStatusText != null) {
+        if (statusText != null) {
             Text(
-                text = contactStatusText,
+                text = statusText,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        if (showConnect) {
+        if (actionVisibility.showConnect) {
             Button(
                 onClick = { onConnect(device) }
             ) {
                 Text("Connect")
             }
         }
-        if (showDisconnect) {
+        if (actionVisibility.showDisconnect) {
             Button(
                 onClick = onDisconnect
             ) {
                 Text("Disconnect")
             }
         }
-        if (!showDebugActions && device.hasAuroraDiscoveryPayload && securePeerId != null) {
-            if (!isContact) {
-                Button(
-                    onClick = {
-                        onAddOrUpdateContact(
-                            securePeerId,
-                            nearbyContactDisplayName(device),
-                            System.currentTimeMillis(),
-                            hasReadyKeys
-                        )
-                    }
-                ) {
-                    Text("Add contact")
-                }
-            } else {
-                Button(
-                    onClick = { onOpenPrivateChat(openChatPeerId ?: securePeerId) }
-                ) {
-                    Text("Open chat")
-                }
-            }
+        if (actionVisibility.showAddContact && securePeerId != null) {
             Button(
-                enabled = showExchangeIdentity && !isTransportActionActive,
-                onClick = { onExchangeIdentity(device) }
+                onClick = {
+                    onAddOrUpdateContact(
+                        securePeerId,
+                        nearbyContactDisplayName(device),
+                        System.currentTimeMillis(),
+                        hasReadyKeys
+                    )
+                    onExchangeIdentity(device)
+                }
             ) {
-                Text("Exchange keys")
+                Text("Add contact")
             }
         }
-        if (showDebugActions && showReadTransportMarker) {
+        if (actionVisibility.showOpenChat) {
+            Button(
+                onClick = { onOpenPrivateChat(openChatPeerId ?: requireNotNull(securePeerId)) }
+            ) {
+                Text("Open chat")
+            }
+        }
+        if (showDebugActions && actionVisibility.showReadTransportMarker) {
             Button(
                 enabled = isReadTransportMarkerEnabled,
                 onClick = onReadTransportMarker
@@ -800,7 +765,7 @@ private fun BleDiscoveredDeviceRow(
                 Text("Read marker")
             }
         }
-        if (showDebugActions && showReadTransportFrame) {
+        if (showDebugActions && actionVisibility.showReadTransportFrame) {
             Button(
                 enabled = isReadTransportFrameEnabled,
                 onClick = onReadTransportFrame
@@ -808,7 +773,7 @@ private fun BleDiscoveredDeviceRow(
                 Text("Read frame")
             }
         }
-        if (showDebugActions && showWriteTransportMarker) {
+        if (showDebugActions && actionVisibility.showWriteTransportMarker) {
             Button(
                 enabled = isWriteTransportMarkerEnabled,
                 onClick = onWriteTransportMarker
@@ -836,7 +801,7 @@ private fun BleDiscoveredDeviceRow(
                 }
             }
         }
-        if (showDebugActions && showExchangeIdentity) {
+        if (showDebugActions && actionVisibility.showExchangeIdentity) {
             Button(
                 enabled = !isTransportActionActive,
                 onClick = { onExchangeIdentity(device) }
@@ -857,6 +822,50 @@ private fun BleDiscoveredDeviceRow(
             )
         }
     }
+}
+
+internal data class NearbyRowActionVisibility(
+    val showConnect: Boolean,
+    val showDisconnect: Boolean,
+    val showReadTransportMarker: Boolean,
+    val showReadTransportFrame: Boolean,
+    val showWriteTransportMarker: Boolean,
+    val showExchangeIdentity: Boolean,
+    val showAddContact: Boolean,
+    val showOpenChat: Boolean
+)
+
+internal fun nearbyRowActionVisibility(
+    device: BleDiscoveredDevice,
+    existingContact: AuroraContact?,
+    connectionStatus: BleConnectionStatus,
+    activeConnectionDeviceAddress: String?,
+    showDebugActions: Boolean
+): NearbyRowActionVisibility {
+    val isActiveDevice = activeConnectionDeviceAddress == device.address
+    val hasActiveConnection = connectionStatus == BleConnectionStatus.CONNECTING ||
+        connectionStatus == BleConnectionStatus.CONNECTED
+    val showDisconnect = showDebugActions && isActiveDevice && hasActiveConnection
+    val showConnect = showDebugActions &&
+        device.hasAuroraDiscoveryPayload &&
+        !showDisconnect &&
+        (!hasActiveConnection || isActiveDevice)
+    val showConnectedTransportActions =
+        showDebugActions &&
+            isActiveDevice &&
+            connectionStatus == BleConnectionStatus.CONNECTED
+    val hasContactPeerId = nearbyContactPeerId(device) != null
+
+    return NearbyRowActionVisibility(
+        showConnect = showConnect,
+        showDisconnect = showDisconnect,
+        showReadTransportMarker = showConnectedTransportActions,
+        showReadTransportFrame = showConnectedTransportActions,
+        showWriteTransportMarker = showConnectedTransportActions,
+        showExchangeIdentity = showConnectedTransportActions && device.hasAuroraDiscoveryPayload,
+        showAddContact = !showDebugActions && device.hasAuroraDiscoveryPayload && hasContactPeerId && existingContact == null,
+        showOpenChat = !showDebugActions && existingContact != null
+    )
 }
 
 @Composable
@@ -1146,13 +1155,13 @@ internal fun nearbyIdentityExchangeStatusText(
 ): String {
     return when (result) {
         PeerIdentityExchangeSendResult.SubmittedLocally ->
-            "Keys sent. Run on both devices."
+            "Identity sent. Run on both devices."
         PeerIdentityExchangeSendResult.SenderUnavailable ->
-            "Key exchange unavailable."
+            "Identity exchange unavailable."
         is PeerIdentityExchangeSendResult.InvalidLocalIdentity ->
             result.reason
         is PeerIdentityExchangeSendResult.Failed ->
-            "Key exchange failed: ${result.reason}"
+            "Identity exchange failed: ${result.reason}"
     }
 }
 
@@ -1165,16 +1174,11 @@ internal fun nearbyContactPeerId(
 internal fun nearbyContactDisplayName(
     device: BleDiscoveredDevice
 ): String {
-    val name = device.name?.trim()?.takeIf { it.isNotEmpty() }
-    if (name != null) {
-        return name
-    }
-
     val shortPeerId = nearbyContactPeerId(device)?.take(8)
     return if (shortPeerId != null) {
-        "Peer $shortPeerId"
+        "Aurora device $shortPeerId"
     } else if (device.hasAuroraDiscoveryPayload) {
-        "Aurora peer"
+        "Aurora device"
     } else {
         "Unknown BLE device"
     }
@@ -1195,10 +1199,28 @@ internal fun nearbyContactStatusText(
 ): String? {
     if (!isContact) return null
     return if (hasReadyKeys) {
-        "Contact | Keys ready"
+        "Private chat ready"
     } else {
-        "Contact | Keys missing"
+        "Setup needed"
     }
+}
+
+internal fun nearbyProductStatusText(
+    isContact: Boolean,
+    hasReadyKeys: Boolean,
+    isAuroraDevice: Boolean
+): String? {
+    if (!isAuroraDevice) {
+        return null
+    }
+    if (!isContact) {
+        return "Aurora device"
+    }
+
+    return nearbyContactStatusText(
+        isContact = true,
+        hasReadyKeys = hasReadyKeys
+    )
 }
 
 internal fun nearbyOpenChatPeerId(

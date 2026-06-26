@@ -34,6 +34,7 @@ class PrivateChatMessageSendUseCaseTest {
             PrivateChatMessageSendUseCase.send(
                 message = message,
                 senderPeerId = "sender-canonical",
+                senderUsername = "Alice",
                 transportSender = sender,
                 sessionMaterialProvider = FakeOutgoingSessionMaterialProvider(
                     materialByPeerId = mapOf("alex" to material)
@@ -44,12 +45,14 @@ class PrivateChatMessageSendUseCaseTest {
         }
 
         val decodedFrame = decodeRecordedFrame(requireNotNull(sender.capturedPlan), material)
+        val decodedPayload = PrivateChatMessagePayloadCodec.decode(decodedFrame.payload)
 
         assertEquals(PrivateChatMessageSendResult.SubmittedLocally, result)
         assertEquals(MessageFrameType.PRIVATE_TEXT, decodedFrame.type)
         assertEquals("sender-canonical", decodedFrame.senderId)
         assertEquals("alex", decodedFrame.recipientId)
-        assertEquals("hello private", decodedFrame.payload)
+        assertEquals("Alice", decodedPayload.senderUsername)
+        assertEquals("hello private", decodedPayload.body)
         assertEquals("alex", requireNotNull(sender.capturedPlan).targetPeerId)
     }
 
@@ -68,6 +71,7 @@ class PrivateChatMessageSendUseCaseTest {
             PrivateChatMessageSendUseCase.send(
                 message = message,
                 senderPeerId = "sender-canonical",
+                senderUsername = "Alice",
                 transportSender = sender,
                 sessionMaterialProvider = FakeOutgoingSessionMaterialProvider(),
                 activeConnectedPeerId = "alex",
@@ -95,6 +99,7 @@ class PrivateChatMessageSendUseCaseTest {
             PrivateChatMessageSendUseCase.send(
                 message = message,
                 senderPeerId = "sender-canonical",
+                senderUsername = "Alice",
                 transportSender = sender,
                 sessionMaterialProvider = FakeOutgoingSessionMaterialProvider(
                     materialByPeerId = mapOf("alex" to material)
@@ -120,6 +125,7 @@ class PrivateChatMessageSendUseCaseTest {
                     status = MessageStatus.QUEUED
                 ),
                 senderPeerId = "sender-canonical",
+                senderUsername = "Alice",
                 transportSender = null,
                 sessionMaterialProvider = FakeOutgoingSessionMaterialProvider(),
                 activeConnectedPeerId = null,
@@ -148,6 +154,7 @@ class PrivateChatMessageSendUseCaseTest {
             PrivateChatMessageSendUseCase.send(
                 message = message,
                 senderPeerId = "sender-canonical",
+                senderUsername = "Alice",
                 transportSender = sender,
                 sessionMaterialProvider = FakeOutgoingSessionMaterialProvider(
                     materialByPeerId = mapOf("alex" to material)

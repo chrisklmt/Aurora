@@ -7,6 +7,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.navigation.compose.rememberNavController
 import gr.hua.aurora.data.LocalProfileStore
+import gr.hua.aurora.data.persistence.FileAuroraPersistenceStore
 import gr.hua.aurora.navigation.NavGraph
 import gr.hua.aurora.state.AuroraStateViewModel
 import gr.hua.aurora.state.rememberAuroraBleRuntimeState
@@ -17,8 +18,15 @@ class MainActivity : ComponentActivity() {
         LocalProfileStore(this)
     }
 
+    private val auroraPersistenceStore by lazy {
+        FileAuroraPersistenceStore(this)
+    }
+
     private val auroraStateViewModel: AuroraStateViewModel by viewModels {
-        AuroraStateViewModel.factory(localProfileStore)
+        AuroraStateViewModel.factory(
+            localProfileStore = localProfileStore,
+            persistenceStore = auroraPersistenceStore
+        )
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
