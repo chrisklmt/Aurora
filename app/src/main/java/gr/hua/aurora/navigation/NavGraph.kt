@@ -98,15 +98,12 @@ fun NavGraph(
 
         composable(Routes.PRIVATE_ROUTE) { backStackEntry ->
             val peerId = backStackEntry.arguments?.getString(Routes.PRIVATE_ARG) ?: "unknown-peer"
+            val selectedContact = stateHolder.findContactByPeerId(peerId)
             PrivateChatScreen(
-                peerId = peerId,
-                peerDisplayName = stateHolder.displayNameForPeerId(peerId),
+                requestedPeerId = peerId,
+                contact = selectedContact,
                 currentUsername = uiState.privateProfileUsername,
-                messages = stateHolder.privateMessagesForPeerId(peerId),
                 onBack = onNavigateBackOrGlobal,
-                onSendMessage = { text ->
-                    stateHolder.sendPrivatePreviewMessage(peerId, text)
-                },
                 onResetLocalData = stateHolder::resetLocalData
             )
         }

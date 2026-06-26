@@ -21,4 +21,16 @@ class ContactsScreenTest {
         assertEquals("Keys ready", contactsKeyStatusText(readyContact))
         assertEquals("Keys missing", contactsKeyStatusText(missingContact))
     }
+
+    @Test
+    fun contactChatPeerIdUsesCanonicalPeerId() {
+        val contact = AuroraContact(
+            canonicalPeerId = "peer-123",
+            displayName = "Alex",
+            createdAtMillis = 1000L,
+            hasSession = true
+        )
+
+        assertEquals("peer-123", contactChatPeerId(contact))
+    }
 }

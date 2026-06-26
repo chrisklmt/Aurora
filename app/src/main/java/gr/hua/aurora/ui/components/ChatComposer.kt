@@ -37,6 +37,7 @@ fun ChatComposer(
             onValueChange = onValueChange,
             modifier = Modifier.weight(1f),
             placeholder = { Text(hint) },
+            enabled = enabled,
             minLines = 1,
             maxLines = 4,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),

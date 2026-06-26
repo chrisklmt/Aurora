@@ -90,7 +90,7 @@ fun ContactsScreen(
                                     )
                                 }
                                 Button(
-                                    onClick = { onOpenChat(contact.canonicalPeerId) }
+                                    onClick = { onOpenChat(contactChatPeerId(contact)) }
                                 ) {
                                     Text("Open chat")
                                 }
@@ -109,4 +109,8 @@ internal fun contactsKeyStatusText(contact: AuroraContact): String {
     } else {
         "Keys missing"
     }
+}
+
+internal fun contactChatPeerId(contact: AuroraContact): String {
+    return contact.canonicalPeerId
 }

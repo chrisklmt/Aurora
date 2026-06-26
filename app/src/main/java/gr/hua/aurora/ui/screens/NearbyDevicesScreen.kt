@@ -700,6 +700,7 @@ private fun BleDiscoveredDeviceRow(
         isContact = isContact,
         hasReadyKeys = hasReadyKeys
     )
+    val openChatPeerId = nearbyOpenChatPeerId(existingContact)
 
     Column(
         verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -779,7 +780,7 @@ private fun BleDiscoveredDeviceRow(
                 }
             } else {
                 Button(
-                    onClick = { onOpenPrivateChat(securePeerId) }
+                    onClick = { onOpenPrivateChat(openChatPeerId ?: securePeerId) }
                 ) {
                     Text("Open chat")
                 }
@@ -1198,6 +1199,12 @@ internal fun nearbyContactStatusText(
     } else {
         "Contact | Keys missing"
     }
+}
+
+internal fun nearbyOpenChatPeerId(
+    contact: AuroraContact?
+): String? {
+    return contact?.canonicalPeerId?.trim()?.takeIf { it.isNotEmpty() }
 }
 
 internal fun nearbySelectedSecurePeerText(

@@ -8,6 +8,7 @@ import gr.hua.aurora.ble.discovery.BleScanStatus
 import gr.hua.aurora.ble.discovery.BleStablePeerId
 import gr.hua.aurora.ble.gatt.BleGattServerStatus
 import gr.hua.aurora.ble.permissions.BluetoothPermissionStatus
+import gr.hua.aurora.model.AuroraContact
 import gr.hua.aurora.protocol.PeerIdentityExchangeSendResult
 import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
 import gr.hua.aurora.ui.components.DebugInfoCardModel
@@ -187,6 +188,19 @@ class NearbyDevicesScreenTest {
         assertEquals(true, nearbyPeerHasReadyKeys("peer-legacy", diagnostics))
         assertEquals(false, nearbyPeerHasReadyKeys("peer-missing", diagnostics))
         assertEquals(false, nearbyPeerHasReadyKeys(null, diagnostics))
+    }
+
+    @Test
+    fun nearbyOpenChatPeerIdUsesExistingContactEntry() {
+        val contact = AuroraContact(
+            canonicalPeerId = "peer-123",
+            displayName = "Alex",
+            createdAtMillis = 1000L,
+            hasSession = true
+        )
+
+        assertEquals("peer-123", nearbyOpenChatPeerId(contact))
+        assertNull(nearbyOpenChatPeerId(null))
     }
 
     @Test

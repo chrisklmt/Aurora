@@ -72,6 +72,20 @@ class AuroraStateHolderTest {
     }
 
     @Test
+    fun globalChatStillDoesNotRequireContacts() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1"
+        )
+
+        assertTrue(holder.uiState.contacts.isEmpty())
+        val queuedMessage = holder.sendGlobalPreviewMessage("public hello")
+
+        assertEquals("public hello", holder.uiState.globalMessages.last().text)
+        assertEquals("global", requireNotNull(queuedMessage).threadId)
+    }
+
+    @Test
     fun globalSendAppendsPendingMessage() {
         val holder = createHolder(
             store = FakeProfileStore(),
