@@ -2,6 +2,7 @@ package gr.hua.aurora.state
 
 import gr.hua.aurora.data.LocalProfileSettings
 import gr.hua.aurora.data.LocalProfileSettingsStore
+import gr.hua.aurora.model.AuroraContact
 import gr.hua.aurora.model.MessageStatus
 import gr.hua.aurora.model.OutgoingChatMessage
 import gr.hua.aurora.protocol.IncomingTransportMessage
@@ -94,9 +95,18 @@ class IncomingChatMessageIngestorTest {
     }
 
     @Test
-    fun privateIncomingFrameIsExplicitlyUnsupported() {
+    fun privateIncomingFrameAppendsToMatchingPrivateChatOnly() {
         val state = SampleAuroraState.create(
             generatedUsername = "PIAIUFN1"
+        ).copy(
+            contacts = listOf(
+                AuroraContact(
+                    canonicalPeerId = "peer-private",
+                    displayName = "Alex",
+                    createdAtMillis = 1_000L,
+                    hasSession = true
+                )
+            )
         )
         val frame = MessageFrame(
             id = "incoming-private-1",
@@ -104,6 +114,39 @@ class IncomingChatMessageIngestorTest {
             senderId = "peer-private",
             recipientId = "self",
             createdAtMillis = 4_567L,
+            payload = "private hello"
+        )
+
+        val outcome = IncomingChatMessageIngestor.ingest(
+            state = state,
+            frame = frame
+        )
+
+        assertTrue(outcome.result is IncomingMessageIngestionResult.Appended)
+        val appendedMessage = (outcome.result as IncomingMessageIngestionResult.Appended).message
+        assertTrue(outcome.updatedState.globalMessages.isEmpty())
+        assertEquals(1, outcome.updatedState.privateMessagesByPeerId["peer-private"]?.size)
+        assertEquals(frame.id, appendedMessage.id)
+        assertEquals("private:peer-private", appendedMessage.threadId)
+        assertEquals("peer-private", appendedMessage.senderId)
+        assertEquals("Alex", appendedMessage.senderName)
+        assertEquals(frame.payload, appendedMessage.text)
+        assertEquals(frame.createdAtMillis, appendedMessage.createdAtMillis)
+        assertEquals(MessageStatus.RECEIVED, appendedMessage.status)
+        assertEquals(false, appendedMessage.isOutgoing)
+    }
+
+    @Test
+    fun privateIncomingFrameWithBlankSenderIsRejected() {
+        val state = SampleAuroraState.create(
+            generatedUsername = "PIAIUFN1"
+        )
+        val frame = MessageFrame(
+            id = "incoming-private-blank",
+            type = MessageFrameType.PRIVATE_TEXT,
+            senderId = "   ",
+            recipientId = "self",
+            createdAtMillis = 4_568L,
             payload = "private hello"
         )
 

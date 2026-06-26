@@ -1,6 +1,7 @@
 package gr.hua.aurora.ui.screens
 
 import gr.hua.aurora.model.AuroraContact
+import gr.hua.aurora.protocol.PrivateChatMessageSendResult
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -13,11 +14,11 @@ class PrivateChatScreenTest {
         val contact = AuroraContact(
             canonicalPeerId = "0d61e4a3c3441947",
             displayName = "Alex",
-            createdAtMillis = 1000L,
+            createdAtMillis = 1_000L,
             hasSession = true
         )
 
-        val content = buildPrivateChatPlaceholderContent(
+        val content = buildPrivateChatScreenContent(
             requestedPeerId = contact.canonicalPeerId,
             contact = contact
         )
@@ -28,34 +29,35 @@ class PrivateChatScreenTest {
     }
 
     @Test
-    fun privateChatShowsKeysReadyWhenSessionExists() {
+    fun privateChatComposerIsEnabledWhenKeysAreReady() {
         val contact = AuroraContact(
             canonicalPeerId = "peer-123",
             displayName = "Alex",
-            createdAtMillis = 1000L,
+            createdAtMillis = 1_000L,
             hasSession = true
         )
 
-        val content = buildPrivateChatPlaceholderContent(
+        val content = buildPrivateChatScreenContent(
             requestedPeerId = contact.canonicalPeerId,
             contact = contact
         )
 
         assertEquals("Keys ready", content.keyStatusText)
         assertEquals("Private chat setup is ready.", content.setupText)
-        assertFalse(content.isComposerEnabled)
+        assertTrue(content.isComposerEnabled)
+        assertEquals("Private message", content.composerHint)
     }
 
     @Test
-    fun privateChatShowsKeysMissingHintWhenSessionIsMissing() {
+    fun privateChatComposerIsDisabledWhenKeysAreMissing() {
         val contact = AuroraContact(
             canonicalPeerId = "peer-123",
             displayName = "Alex",
-            createdAtMillis = 1000L,
+            createdAtMillis = 1_000L,
             hasSession = false
         )
 
-        val content = buildPrivateChatPlaceholderContent(
+        val content = buildPrivateChatScreenContent(
             requestedPeerId = contact.canonicalPeerId,
             contact = contact
         )
@@ -66,11 +68,15 @@ class PrivateChatScreenTest {
             content.setupText
         )
         assertFalse(content.isComposerEnabled)
+        assertEquals(
+            "Exchange keys from Nearby before sending private messages.",
+            content.composerHint
+        )
     }
 
     @Test
     fun privateChatHandlesMissingContactGracefully() {
-        val content = buildPrivateChatPlaceholderContent(
+        val content = buildPrivateChatScreenContent(
             requestedPeerId = "missing-peer-123456",
             contact = null
         )
@@ -83,6 +89,28 @@ class PrivateChatScreenTest {
             content.setupText
         )
         assertTrue(content.isMissingContact)
+        assertFalse(content.shouldShowComposer)
         assertFalse(content.isComposerEnabled)
+    }
+
+    @Test
+    fun privateChatDeliveryStringsStaySafeAndShort() {
+        assertEquals(
+            "Keys unavailable.",
+            privateChatDeliveryStatusText(PrivateChatMessageSendResult.KeysUnavailable)
+        )
+        assertEquals(
+            "Contact not reachable.",
+            privateChatDeliveryStatusText(PrivateChatMessageSendResult.ContactNotReachable)
+        )
+        assertFalse(
+            privateChatDeliveryStatusText(PrivateChatMessageSendResult.KeysUnavailable)
+                .contains("private key", ignoreCase = true)
+        )
+        assertFalse(
+            privateChatDeliveryStatusText(
+                PrivateChatMessageSendResult.Failed("transport failed")
+            ).contains("session material", ignoreCase = true)
+        )
     }
 }

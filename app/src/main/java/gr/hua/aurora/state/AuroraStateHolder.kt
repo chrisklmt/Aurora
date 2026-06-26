@@ -17,6 +17,7 @@ import gr.hua.aurora.protocol.GlobalMeshDeliveryResult
 import gr.hua.aurora.protocol.IncomingTransportMessage
 import gr.hua.aurora.protocol.OutgoingMessageFrameBuilder
 import gr.hua.aurora.protocol.OutgoingMessageFrameDraft
+import gr.hua.aurora.protocol.PrivateChatMessageSendResult
 
 class AuroraStateHolder(
     initialState: AuroraUiState,
@@ -52,37 +53,47 @@ class AuroraStateHolder(
             isDebugModeEnabled = uiState.isDebugModeEnabled,
             desiredAvailability = uiState.desiredAvailability,
             selectedSecurePeerId = uiState.selectedSecurePeerId,
-            globalMeshDeliveryResult = null
+            globalMeshDeliveryResult = null,
+            privateChatDeliveryResultsByPeerId = uiState.privateChatDeliveryResultsByPeerId
         )
 
         return queuedMessage
     }
 
-    fun sendPrivatePreviewMessage(peerId: String, text: String) {
+    fun sendPrivateChatMessage(peerId: String, text: String): OutgoingChatMessage? {
         val sanitizedText = text.trim()
-        if (sanitizedText.isEmpty()) return
+        if (sanitizedText.isEmpty()) return null
+        val sanitizedPeerId = peerId.trim()
+        if (sanitizedPeerId.isEmpty()) return null
 
-        val updatedMessages = privateMessagesForPeerId(peerId) + createOutgoingMessage(
-            threadId = "private:$peerId",
+        val outgoingMessage = createOutgoingMessage(
+            threadId = "private:$sanitizedPeerId",
             senderName = uiState.privateProfileUsername,
             text = sanitizedText,
-            status = MessageStatus.LOCAL_ONLY
+            status = MessageStatus.QUEUED
         )
+        val queuedMessage = createQueuedOutgoingChatMessage(
+            message = outgoingMessage
+        )
+        val updatedMessages = privateMessagesForPeerId(sanitizedPeerId) + outgoingMessage
 
         uiState = AuroraUiState(
             contacts = uiState.contacts,
             nearbyDevices = uiState.nearbyDevices,
             globalMessages = uiState.globalMessages,
-            pendingOutgoingMessages = uiState.pendingOutgoingMessages,
-            privateMessagesByPeerId = uiState.privateMessagesByPeerId + (peerId to updatedMessages),
+            pendingOutgoingMessages = uiState.pendingOutgoingMessages + queuedMessage,
+            privateMessagesByPeerId = uiState.privateMessagesByPeerId + (sanitizedPeerId to updatedMessages),
             generatedUsername = uiState.generatedUsername,
             customUsername = uiState.customUsername,
             useCustomUsernameInGlobalChat = uiState.useCustomUsernameInGlobalChat,
             isDebugModeEnabled = uiState.isDebugModeEnabled,
             desiredAvailability = uiState.desiredAvailability,
             selectedSecurePeerId = uiState.selectedSecurePeerId,
-            globalMeshDeliveryResult = uiState.globalMeshDeliveryResult
+            globalMeshDeliveryResult = uiState.globalMeshDeliveryResult,
+            privateChatDeliveryResultsByPeerId = uiState.privateChatDeliveryResultsByPeerId - sanitizedPeerId
         )
+
+        return queuedMessage
     }
 
     fun updateUsername(username: String) {
@@ -101,7 +112,8 @@ class AuroraStateHolder(
             isDebugModeEnabled = uiState.isDebugModeEnabled,
             desiredAvailability = uiState.desiredAvailability,
             selectedSecurePeerId = uiState.selectedSecurePeerId,
-            globalMeshDeliveryResult = uiState.globalMeshDeliveryResult
+            globalMeshDeliveryResult = uiState.globalMeshDeliveryResult,
+            privateChatDeliveryResultsByPeerId = uiState.privateChatDeliveryResultsByPeerId
         )
 
         localProfileStore.saveCustomUsername(sanitizedUsername)
@@ -120,7 +132,8 @@ class AuroraStateHolder(
             isDebugModeEnabled = uiState.isDebugModeEnabled,
             desiredAvailability = uiState.desiredAvailability,
             selectedSecurePeerId = uiState.selectedSecurePeerId,
-            globalMeshDeliveryResult = uiState.globalMeshDeliveryResult
+            globalMeshDeliveryResult = uiState.globalMeshDeliveryResult,
+            privateChatDeliveryResultsByPeerId = uiState.privateChatDeliveryResultsByPeerId
         )
 
         localProfileStore.saveUseCustomUsernameInGlobalChat(enabled)
@@ -236,6 +249,14 @@ class AuroraStateHolder(
         return findContactByPeerId(peerId)?.displayName ?: peerId
     }
 
+    fun latestPrivateChatDeliveryResultForPeerId(
+        peerId: String
+    ): PrivateChatMessageSendResult? {
+        val sanitizedPeerId = peerId.trim()
+        if (sanitizedPeerId.isEmpty()) return null
+        return uiState.privateChatDeliveryResultsByPeerId[sanitizedPeerId]
+    }
+
     fun pendingOutgoingMessagesForThread(threadId: String): List<OutgoingChatMessage> {
         return uiState.pendingOutgoingMessages.filter { it.threadId == threadId }
     }
@@ -262,6 +283,33 @@ class AuroraStateHolder(
                 }
             },
             globalMeshDeliveryResult = result
+        )
+    }
+
+    fun handlePrivateChatDeliveryResult(
+        peerId: String,
+        messageId: String,
+        result: PrivateChatMessageSendResult
+    ) {
+        val sanitizedPeerId = peerId.trim()
+        if (sanitizedPeerId.isEmpty()) return
+
+        val updatedMessages = uiState.privateMessagesByPeerId[sanitizedPeerId]
+            ?.map { message ->
+                if (message.id == messageId && message.isOutgoing) {
+                    message.copy(
+                        status = visiblePrivateMessageStatusForSendResult(result)
+                    )
+                } else {
+                    message
+                }
+            }
+            ?: return
+
+        uiState = uiState.copy(
+            privateMessagesByPeerId = uiState.privateMessagesByPeerId + (sanitizedPeerId to updatedMessages),
+            privateChatDeliveryResultsByPeerId =
+                uiState.privateChatDeliveryResultsByPeerId + (sanitizedPeerId to result)
         )
     }
 
@@ -326,6 +374,18 @@ private fun visibleGlobalMessageStatusForMeshResult(
         is GlobalMeshDeliveryResult.SkippedDuplicate,
         is GlobalMeshDeliveryResult.SkippedSourcePeer,
         is GlobalMeshDeliveryResult.SkippedTtlExpired -> currentStatus
+    }
+}
+
+private fun visiblePrivateMessageStatusForSendResult(
+    result: PrivateChatMessageSendResult
+): MessageStatus {
+    return when (result) {
+        PrivateChatMessageSendResult.SubmittedLocally -> MessageStatus.SENT
+        PrivateChatMessageSendResult.KeysUnavailable,
+        PrivateChatMessageSendResult.ContactUnavailable,
+        PrivateChatMessageSendResult.ContactNotReachable,
+        is PrivateChatMessageSendResult.Failed -> MessageStatus.FAILED
     }
 }
 

@@ -103,7 +103,24 @@ fun NavGraph(
                 requestedPeerId = peerId,
                 contact = selectedContact,
                 currentUsername = uiState.privateProfileUsername,
+                messages = stateHolder.privateMessagesForPeerId(peerId),
+                lastDeliveryResult = stateHolder.latestPrivateChatDeliveryResultForPeerId(peerId),
                 onBack = onNavigateBackOrGlobal,
+                onSendMessage = { text ->
+                    val queuedMessage = stateHolder.sendPrivateChatMessage(peerId, text)
+                    if (queuedMessage != null) {
+                        sendScope.launch {
+                            val transportResult = bleRuntimeState.submitPrivateChatMessage(
+                                queuedMessage
+                            )
+                            stateHolder.handlePrivateChatDeliveryResult(
+                                peerId = peerId,
+                                messageId = queuedMessage.messageId,
+                                result = transportResult
+                            )
+                        }
+                    }
+                },
                 onResetLocalData = stateHolder::resetLocalData
             )
         }

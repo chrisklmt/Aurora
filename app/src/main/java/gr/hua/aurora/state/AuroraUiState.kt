@@ -5,6 +5,7 @@ import gr.hua.aurora.model.AuroraContact
 import gr.hua.aurora.model.NearbyDevicePreview
 import gr.hua.aurora.model.OutgoingChatMessage
 import gr.hua.aurora.protocol.GlobalMeshDeliveryResult
+import gr.hua.aurora.protocol.PrivateChatMessageSendResult
 
 // Το AuroraUiState κρατά μόνο app/UI-level μνήμη για τις οθόνες και όχι πραγματική ροή δεδομένων.
 data class AuroraUiState(
@@ -19,7 +20,8 @@ data class AuroraUiState(
     val isDebugModeEnabled: Boolean,
     val desiredAvailability: AuroraAvailabilityPreference,
     val selectedSecurePeerId: String? = null,
-    val globalMeshDeliveryResult: GlobalMeshDeliveryResult? = null
+    val globalMeshDeliveryResult: GlobalMeshDeliveryResult? = null,
+    val privateChatDeliveryResultsByPeerId: Map<String, PrivateChatMessageSendResult> = emptyMap()
 ) {
     val privateProfileUsername: String
         get() = customUsername?.takeIf { it.isNotBlank() } ?: generatedUsername

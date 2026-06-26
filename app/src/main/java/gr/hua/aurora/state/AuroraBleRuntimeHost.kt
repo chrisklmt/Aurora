@@ -61,6 +61,9 @@ import gr.hua.aurora.protocol.PeerIdentityExchangeHandler
 import gr.hua.aurora.protocol.PeerIdentityExchangeHandlingResult
 import gr.hua.aurora.protocol.PeerSessionRegistry
 import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
+import gr.hua.aurora.protocol.PeerSessionPeerId
+import gr.hua.aurora.protocol.PrivateChatMessageSendResult
+import gr.hua.aurora.protocol.PrivateChatMessageSendUseCase
 import gr.hua.aurora.state.IncomingMessageIngestionResult.Appended
 import gr.hua.aurora.state.IncomingMessageIngestionResult.Duplicate
 import gr.hua.aurora.state.IncomingMessageIngestionResult.UnsupportedThread
@@ -93,6 +96,7 @@ data class AuroraBleRuntimeState(
     val lastConnectOnSendStatus: String?,
     val lastGlobalMeshStatus: String?,
     val submitGlobalMeshMessage: suspend (OutgoingChatMessage, String) -> GlobalMeshDeliveryResult,
+    val submitPrivateChatMessage: suspend (OutgoingChatMessage) -> PrivateChatMessageSendResult,
     val connectToTransportPeer: (String, String?) -> Unit,
     val disconnectTransportPeer: () -> Unit
 )
@@ -201,6 +205,11 @@ fun rememberAuroraBleRuntimeState(
     val localIdentityMaterial = (
         localIdentityMaterialLoadResult as? LocalPeerSessionIdentityMaterialLoadResult.Ready
     )?.material
+    val localPeerId = remember(localIdentityMaterial) {
+        localIdentityMaterial?.let { identity ->
+            PeerSessionPeerId.deriveFromPublicKey(identity.publicKeyBytes())
+        }
+    }
     val incomingSessionMaterialProvider = remember(peerSessionRegistry) {
         peerSessionRegistry as IncomingSessionMaterialProvider
     }
@@ -456,6 +465,17 @@ fun rememberAuroraBleRuntimeState(
             lastGlobalMeshStatus = globalMeshStatusText(result)
             result
         }
+    val submitPrivateChatMessage: suspend (OutgoingChatMessage) -> PrivateChatMessageSendResult =
+        { queuedMessage ->
+            submitPrivateEncryptedMessage(
+                message = queuedMessage,
+                senderPeerId = localPeerId,
+                transportSender = bleTransportSender,
+                sessionMaterialProvider = peerSessionRegistry,
+                activeTransportPeerId = activeTransportPeerId,
+                isActiveTransportConnected = bleConnectionStatus == BleConnectionStatus.CONNECTED
+            )
+        }
 
     val connectToTransportPeer: (String, String?) -> Unit = { deviceAddress, peerId ->
         startRuntimeTransportConnection(
@@ -650,6 +670,7 @@ fun rememberAuroraBleRuntimeState(
         lastConnectOnSendStatus = lastConnectOnSendStatus,
         lastGlobalMeshStatus = lastGlobalMeshStatus,
         submitGlobalMeshMessage = submitGlobalMeshMessage,
+        submitPrivateChatMessage = submitPrivateChatMessage,
         connectToTransportPeer = connectToTransportPeer,
         disconnectTransportPeer = disconnectTransportPeer
     )
@@ -742,6 +763,24 @@ internal fun choosePublicMeshConnectOnSendPeer(
     return candidates.firstOrNull { device ->
         runtimeReachablePeerId(device) == sanitizedPreferredPeerId
     } ?: candidates.first()
+}
+
+internal suspend fun submitPrivateEncryptedMessage(
+    message: OutgoingChatMessage,
+    senderPeerId: String?,
+    transportSender: BleTransportSender?,
+    sessionMaterialProvider: gr.hua.aurora.protocol.OutgoingSessionMaterialProvider,
+    activeTransportPeerId: String?,
+    isActiveTransportConnected: Boolean
+): PrivateChatMessageSendResult {
+    return PrivateChatMessageSendUseCase.send(
+        message = message,
+        senderPeerId = senderPeerId,
+        transportSender = transportSender,
+        sessionMaterialProvider = sessionMaterialProvider,
+        activeConnectedPeerId = activeTransportPeerId,
+        isActiveTransportConnected = isActiveTransportConnected
+    )
 }
 
 internal suspend fun submitPublicGlobalMeshMessage(

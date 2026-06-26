@@ -8,15 +8,15 @@ import gr.hua.aurora.data.LocalProfileSettingsStore
 import gr.hua.aurora.model.MessageStatus
 import gr.hua.aurora.protocol.EncryptedMessageEnvelopeBuilder
 import gr.hua.aurora.protocol.EncryptedMessageEnvelopeCodec
+import gr.hua.aurora.protocol.IncomingMessageReceiveDecryptionMaterial
 import gr.hua.aurora.protocol.IncomingSessionMaterialLookupResult
 import gr.hua.aurora.protocol.IncomingSessionMaterialProvider
-import gr.hua.aurora.protocol.IncomingMessageReceiveDecryptionMaterial
-import gr.hua.aurora.protocol.PeerIdentityExchangeHandlingResult
 import gr.hua.aurora.protocol.IncomingTransportMessage
 import gr.hua.aurora.protocol.IncomingTransportReceiveResult
 import gr.hua.aurora.protocol.MessageFrame
 import gr.hua.aurora.protocol.MessageFrameCodec
 import gr.hua.aurora.protocol.MessageFrameType
+import gr.hua.aurora.protocol.PeerIdentityExchangeHandlingResult
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -166,7 +166,7 @@ class IncomingTransportFrameProcessorTest {
     }
 
     @Test
-    fun unsupportedPrivateFrameReturnsExplicitUnsupportedResult() {
+    fun privateFrameIsReceivedIntoPrivateChatWithoutTouchingGlobalChat() {
         val holder = createHolder()
         val queuedMessage = requireNotNull(holder.sendGlobalPreviewMessage("queued outgoing"))
         val queueBefore = holder.uiState.pendingOutgoingMessages.toList()
@@ -203,10 +203,15 @@ class IncomingTransportFrameProcessorTest {
         assertTrue(result is IncomingTransportFrameProcessingResult.Received)
         val ingestionResult =
             (result as IncomingTransportFrameProcessingResult.Received).ingestionResult
-        assertTrue(ingestionResult is IncomingMessageIngestionResult.UnsupportedThread)
+        assertTrue(ingestionResult is IncomingMessageIngestionResult.Appended)
         assertEquals(globalCountBefore, holder.uiState.globalMessages.size)
         assertEquals(queueBefore, holder.uiState.pendingOutgoingMessages)
         assertEquals(queuedMessage.messageId, holder.uiState.pendingOutgoingMessages.single().messageId)
+        val privateMessage = holder.privateMessagesForPeerId("peer-private").single()
+        assertEquals(frame.id, privateMessage.id)
+        assertEquals("private:peer-private", privateMessage.threadId)
+        assertEquals(frame.payload, privateMessage.text)
+        assertEquals(MessageStatus.RECEIVED, privateMessage.status)
     }
 
     @Test

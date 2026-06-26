@@ -8,6 +8,7 @@ import gr.hua.aurora.model.MessageStatus
 import gr.hua.aurora.protocol.GlobalMeshDeliveryResult
 import gr.hua.aurora.protocol.MessageFrameType
 import gr.hua.aurora.protocol.OutgoingMessageFrameResolver
+import gr.hua.aurora.protocol.PrivateChatMessageSendResult
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
@@ -459,10 +460,101 @@ class AuroraStateHolderTest {
             customUsername = "John"
         )
 
-        holder.sendPrivatePreviewMessage("alex", "hello")
+        holder.sendPrivateChatMessage("alex", "hello")
 
         assertEquals("John", holder.uiState.privateProfileUsername)
         assertEquals("John", holder.privateMessagesForPeerId("alex").last().senderName)
+    }
+
+    @Test
+    fun privateSendAppendsOnlyToSelectedPrivateChatAndQueuesOutgoingMessage() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1"
+        )
+
+        val queuedMessage = requireNotNull(holder.sendPrivateChatMessage("alex", " hello "))
+
+        val privateMessages = holder.privateMessagesForPeerId("alex")
+        assertEquals(1, privateMessages.size)
+        assertTrue(holder.uiState.globalMessages.isEmpty())
+        assertEquals("private:alex", privateMessages.single().threadId)
+        assertEquals("hello", privateMessages.single().text)
+        assertEquals(MessageStatus.QUEUED, privateMessages.single().status)
+        assertEquals(queuedMessage.messageId, holder.uiState.pendingOutgoingMessages.single().messageId)
+        assertEquals("private:alex", holder.uiState.pendingOutgoingMessages.single().threadId)
+        assertNotEquals(MessageStatus.DELIVERED, privateMessages.single().status)
+    }
+
+    @Test
+    fun privateSendMarkedSubmittedLocallyPromotesVisibleMessageToSentWithoutConsumingQueue() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1"
+        )
+        val queuedMessage = requireNotNull(holder.sendPrivateChatMessage("alex", "hello"))
+
+        holder.handlePrivateChatDeliveryResult(
+            peerId = "alex",
+            messageId = queuedMessage.messageId,
+            result = PrivateChatMessageSendResult.SubmittedLocally
+        )
+
+        val visibleMessage = holder.privateMessagesForPeerId("alex").single()
+        assertEquals(MessageStatus.SENT, visibleMessage.status)
+        assertEquals(
+            PrivateChatMessageSendResult.SubmittedLocally,
+            holder.latestPrivateChatDeliveryResultForPeerId("alex")
+        )
+        assertEquals(1, holder.uiState.pendingOutgoingMessages.size)
+        assertEquals(MessageStatus.QUEUED, holder.uiState.pendingOutgoingMessages.single().status)
+        assertNotEquals(MessageStatus.DELIVERED, visibleMessage.status)
+    }
+
+    @Test
+    fun privateSendMarkedMissingKeysFailsVisibleMessageWithoutConsumingQueue() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1"
+        )
+        val queuedMessage = requireNotNull(holder.sendPrivateChatMessage("alex", "hello"))
+
+        holder.handlePrivateChatDeliveryResult(
+            peerId = "alex",
+            messageId = queuedMessage.messageId,
+            result = PrivateChatMessageSendResult.KeysUnavailable
+        )
+
+        val visibleMessage = holder.privateMessagesForPeerId("alex").single()
+        assertEquals(MessageStatus.FAILED, visibleMessage.status)
+        assertEquals(
+            PrivateChatMessageSendResult.KeysUnavailable,
+            holder.latestPrivateChatDeliveryResultForPeerId("alex")
+        )
+        assertEquals(1, holder.uiState.pendingOutgoingMessages.size)
+        assertEquals(MessageStatus.QUEUED, holder.uiState.pendingOutgoingMessages.single().status)
+    }
+
+    @Test
+    fun privateSendMarkedUnreachableFailsVisibleMessageWithoutLeakingToGlobalChat() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1"
+        )
+        val queuedMessage = requireNotNull(holder.sendPrivateChatMessage("alex", "hello"))
+
+        holder.handlePrivateChatDeliveryResult(
+            peerId = "alex",
+            messageId = queuedMessage.messageId,
+            result = PrivateChatMessageSendResult.ContactNotReachable
+        )
+
+        assertTrue(holder.uiState.globalMessages.isEmpty())
+        assertEquals(MessageStatus.FAILED, holder.privateMessagesForPeerId("alex").single().status)
+        assertEquals(
+            PrivateChatMessageSendResult.ContactNotReachable,
+            holder.latestPrivateChatDeliveryResultForPeerId("alex")
+        )
     }
 
     @Test

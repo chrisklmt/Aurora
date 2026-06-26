@@ -40,11 +40,9 @@ object IncomingChatMessageIngestor {
                 state = state,
                 frame = frame
             )
-            MessageFrameType.PRIVATE_TEXT -> IncomingMessageIngestionOutcome(
-                updatedState = state,
-                result = IncomingMessageIngestionResult.UnsupportedThread(
-                    reason = "Incoming private text frames need recipient-thread support before chat ingestion."
-                )
+            MessageFrameType.PRIVATE_TEXT -> appendPrivateMessage(
+                state = state,
+                frame = frame
             )
             MessageFrameType.IDENTITY_EXCHANGE -> IncomingMessageIngestionOutcome(
                 updatedState = state,
@@ -79,6 +77,42 @@ object IncomingChatMessageIngestor {
         return IncomingMessageIngestionOutcome(
             updatedState = state.copy(
                 globalMessages = state.globalMessages + chatMessage
+            ),
+            result = IncomingMessageIngestionResult.Appended(
+                message = chatMessage
+            )
+        )
+    }
+
+    private fun appendPrivateMessage(
+        state: AuroraUiState,
+        frame: MessageFrame
+    ): IncomingMessageIngestionOutcome {
+        val peerId = frame.senderId.trim()
+        if (peerId.isEmpty()) {
+            return IncomingMessageIngestionOutcome(
+                updatedState = state,
+                result = IncomingMessageIngestionResult.UnsupportedThread(
+                    reason = "Incoming private text frame senderId must not be blank."
+                )
+            )
+        }
+
+        val chatMessage = ChatMessage(
+            id = frame.id,
+            threadId = "private:$peerId",
+            senderId = peerId,
+            senderName = state.contacts.firstOrNull { it.canonicalPeerId == peerId }?.displayName ?: peerId,
+            text = frame.payload,
+            createdAtMillis = frame.createdAtMillis,
+            status = MessageStatus.RECEIVED,
+            isOutgoing = false
+        )
+        val updatedMessages = state.privateMessagesByPeerId[peerId].orEmpty() + chatMessage
+
+        return IncomingMessageIngestionOutcome(
+            updatedState = state.copy(
+                privateMessagesByPeerId = state.privateMessagesByPeerId + (peerId to updatedMessages)
             ),
             result = IncomingMessageIngestionResult.Appended(
                 message = chatMessage
