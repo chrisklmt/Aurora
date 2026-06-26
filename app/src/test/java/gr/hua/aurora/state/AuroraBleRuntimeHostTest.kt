@@ -32,8 +32,11 @@ import gr.hua.aurora.protocol.MessageFrameType
 import gr.hua.aurora.protocol.GlobalMeshDeliveryCoordinator
 import gr.hua.aurora.protocol.GlobalMeshDeliveryResult
 import gr.hua.aurora.protocol.OutgoingSessionMaterialLookupResult
+import gr.hua.aurora.protocol.OutgoingSessionMaterialProvider
+import gr.hua.aurora.protocol.OutgoingMessageSendEncryptionMaterial
 import gr.hua.aurora.protocol.PeerIdentityExchangeMessage
 import gr.hua.aurora.protocol.PeerIdentityExchangeHandlingResult
+import gr.hua.aurora.protocol.PrivateChatMessageSendResult
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -279,6 +282,183 @@ class AuroraBleRuntimeHostTest {
 
         assertEquals(GlobalMeshDeliveryResult.NoReachablePeers, result)
         assertEquals(0, transportSender.sendCallCount)
+    }
+
+    @Test
+    fun privateChatSendsImmediatelyWhenActivePeerMatchesSelectedContact() {
+        val targetPeerId = "5032547611223344"
+        val material = testPrivateEncryptionMaterial()
+        val transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally)
+
+        val result = runSuspending {
+            submitPrivateEncryptedMessage(
+                message = privateMessage(targetPeerId),
+                senderPeerId = "sender-private",
+                transportSender = transportSender,
+                sessionMaterialProvider = FakeOutgoingSessionMaterialProvider(
+                    materialByPeerId = mapOf(targetPeerId to material)
+                ),
+                activeTransportPeerId = targetPeerId,
+                isActiveTransportConnected = true,
+                reachablePeers = emptyList(),
+                connectToReachablePeer = {
+                    error("private connect-on-send should not run when the active peer already matches")
+                }
+            )
+        }
+
+        assertEquals(PrivateChatMessageSendResult.SubmittedLocally, result)
+        assertEquals(1, transportSender.sendCallCount)
+        val decodedFrame = decodePrivateFrame(
+            plan = requireNotNull(transportSender.capturedPlan),
+            material = material
+        )
+        assertEquals(MessageFrameType.PRIVATE_TEXT, decodedFrame.type)
+        assertEquals(targetPeerId, decodedFrame.recipientId)
+    }
+
+    @Test
+    fun privateChatAttemptsExactConnectOnSendWhenTargetIsReachableButInactive() {
+        val targetPeerId = "6032547611223344"
+        val material = testPrivateEncryptionMaterial()
+        val transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally)
+        val reachableTarget = reachableAuroraPeer(
+            address = "AA:BB:CC:00:00:05",
+            stableIdHex = targetPeerId
+        )
+        var connectedPeerId: String? = null
+
+        val result = runSuspending {
+            submitPrivateEncryptedMessage(
+                message = privateMessage(targetPeerId),
+                senderPeerId = "sender-private",
+                transportSender = transportSender,
+                sessionMaterialProvider = FakeOutgoingSessionMaterialProvider(
+                    materialByPeerId = mapOf(targetPeerId to material)
+                ),
+                activeTransportPeerId = null,
+                isActiveTransportConnected = false,
+                reachablePeers = listOf(reachableTarget),
+                connectToReachablePeer = {
+                    connectedPeerId = runtimeReachablePeerId(it)
+                    PublicMeshConnectOnSendResult.Connected(peerId = connectedPeerId!!)
+                }
+            )
+        }
+
+        assertEquals(targetPeerId, connectedPeerId)
+        assertEquals(PrivateChatMessageSendResult.SubmittedLocally, result)
+        assertEquals(1, transportSender.sendCallCount)
+    }
+
+    @Test
+    fun privateChatMarksFailedWhenReachableTargetConnectFails() {
+        val targetPeerId = "7032547611223344"
+        val material = testPrivateEncryptionMaterial()
+        val transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally)
+        val reachableTarget = reachableAuroraPeer(
+            address = "AA:BB:CC:00:00:06",
+            stableIdHex = targetPeerId
+        )
+
+        val result = runSuspending {
+            submitPrivateEncryptedMessage(
+                message = privateMessage(targetPeerId),
+                senderPeerId = "sender-private",
+                transportSender = transportSender,
+                sessionMaterialProvider = FakeOutgoingSessionMaterialProvider(
+                    materialByPeerId = mapOf(targetPeerId to material)
+                ),
+                activeTransportPeerId = null,
+                isActiveTransportConnected = false,
+                reachablePeers = listOf(reachableTarget),
+                connectToReachablePeer = {
+                    PublicMeshConnectOnSendResult.Failed(
+                        peerId = runtimeReachablePeerId(it),
+                        reason = "connection did not reach ready state"
+                    )
+                }
+            )
+        }
+
+        assertEquals(
+            PrivateChatMessageSendResult.Failed("connection did not reach ready state"),
+            result
+        )
+        assertEquals(0, transportSender.sendCallCount)
+    }
+
+    @Test
+    fun privateChatMarksFailedWhenTargetContactIsNotReachable() {
+        val targetPeerId = "8032547611223344"
+        val material = testPrivateEncryptionMaterial()
+        val transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally)
+        val wrongPeer = reachableAuroraPeer(
+            address = "AA:BB:CC:00:00:07",
+            stableIdHex = "9032547611223344"
+        )
+
+        val result = runSuspending {
+            submitPrivateEncryptedMessage(
+                message = privateMessage(targetPeerId),
+                senderPeerId = "sender-private",
+                transportSender = transportSender,
+                sessionMaterialProvider = FakeOutgoingSessionMaterialProvider(
+                    materialByPeerId = mapOf(targetPeerId to material)
+                ),
+                activeTransportPeerId = wrongPeer.stablePeerId?.toByteArray()?.joinToString("") { byte ->
+                    "%02x".format(byte.toInt() and 0xFF)
+                },
+                isActiveTransportConnected = true,
+                reachablePeers = listOf(wrongPeer),
+                connectToReachablePeer = {
+                    error("private connect-on-send must not connect to a different reachable peer")
+                }
+            )
+        }
+
+        assertEquals(PrivateChatMessageSendResult.ContactNotReachable, result)
+        assertEquals(0, transportSender.sendCallCount)
+    }
+
+    @Test
+    fun privateChatDoesNotSendThroughWrongActivePeerWhenExactTargetIsReachable() {
+        val targetPeerId = "a032547611223344"
+        val material = testPrivateEncryptionMaterial()
+        val transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally)
+        val wrongActivePeerId = "b032547611223344"
+        val reachableTarget = reachableAuroraPeer(
+            address = "AA:BB:CC:00:00:08",
+            stableIdHex = targetPeerId
+        )
+        val reachableWrongPeer = reachableAuroraPeer(
+            address = "AA:BB:CC:00:00:09",
+            stableIdHex = wrongActivePeerId
+        )
+        val connectedPeerIds = mutableListOf<String>()
+
+        val result = runSuspending {
+            submitPrivateEncryptedMessage(
+                message = privateMessage(targetPeerId),
+                senderPeerId = "sender-private",
+                transportSender = transportSender,
+                sessionMaterialProvider = FakeOutgoingSessionMaterialProvider(
+                    materialByPeerId = mapOf(targetPeerId to material)
+                ),
+                activeTransportPeerId = wrongActivePeerId,
+                isActiveTransportConnected = true,
+                reachablePeers = listOf(reachableWrongPeer, reachableTarget),
+                connectToReachablePeer = {
+                    connectedPeerIds += runtimeReachablePeerId(it)
+                    PublicMeshConnectOnSendResult.Connected(peerId = runtimeReachablePeerId(it))
+                }
+            )
+        }
+
+        assertEquals(listOf(targetPeerId), connectedPeerIds)
+        assertEquals(PrivateChatMessageSendResult.SubmittedLocally, result)
+        assertEquals(1, transportSender.sendCallCount)
+        assertEquals(targetPeerId, requireNotNull(transportSender.capturedPlan).targetPeerId)
     }
 
     @Test
@@ -796,6 +976,24 @@ class AuroraBleRuntimeHostTest {
         }
     }
 
+    private class FakeOutgoingSessionMaterialProvider(
+        private val materialByPeerId: Map<String, OutgoingMessageSendEncryptionMaterial> = emptyMap()
+    ) : OutgoingSessionMaterialProvider {
+        override fun encryptionMaterialFor(
+            message: OutgoingChatMessage
+        ): OutgoingMessageSendEncryptionMaterial? {
+            return encryptionMaterialForTarget(
+                message.threadId.removePrefix("private:")
+            )
+        }
+
+        override fun encryptionMaterialForTarget(
+            peerId: String
+        ): OutgoingMessageSendEncryptionMaterial? {
+            return materialByPeerId[peerId]
+        }
+    }
+
     private fun generateEcKeyPair(): KeyPair {
         val generator = KeyPairGenerator.getInstance("EC")
         generator.initialize(ECGenParameterSpec("secp256r1"))
@@ -859,6 +1057,30 @@ class AuroraBleRuntimeHostTest {
 
     private fun deterministicKey(offset: Int): ByteArray {
         return ByteArray(32) { index -> (index + offset).toByte() }
+    }
+
+    private fun testPrivateEncryptionMaterial(): OutgoingMessageSendEncryptionMaterial {
+        return OutgoingMessageSendEncryptionMaterial(
+            senderPublicKey = senderPublicKeyBytes(),
+            keyBytes = deterministicKey(191),
+            authenticatedData = "private-connect-on-send".toByteArray(UTF_8)
+        )
+    }
+
+    private fun decodePrivateFrame(
+        plan: OutgoingBleTransportSendPlan,
+        material: OutgoingMessageSendEncryptionMaterial
+    ): MessageFrame {
+        val envelopeBytes = gr.hua.aurora.ble.transport.BleGattTransportFrameReassembler.reassemble(
+            plan.framesInSendOrder()
+        )
+        val envelope = EncryptedMessageEnvelopeCodec.decode(String(envelopeBytes, UTF_8))
+        val frameBytes = gr.hua.aurora.protocol.EncryptedMessageEnvelopeDecryptor.decrypt(
+            envelope = envelope,
+            keyBytes = material.keyBytes,
+            authenticatedData = material.authenticatedData
+        )
+        return MessageFrameCodec.decode(String(frameBytes, UTF_8))
     }
 
     private fun <T> runSuspending(block: suspend () -> T): T {

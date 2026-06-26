@@ -473,7 +473,9 @@ fun rememberAuroraBleRuntimeState(
                 transportSender = bleTransportSender,
                 sessionMaterialProvider = peerSessionRegistry,
                 activeTransportPeerId = activeTransportPeerId,
-                isActiveTransportConnected = bleConnectionStatus == BleConnectionStatus.CONNECTED
+                isActiveTransportConnected = bleConnectionStatus == BleConnectionStatus.CONNECTED,
+                reachablePeers = discoveredAuroraPeers,
+                connectToReachablePeer = ::connectToReachablePeerAndAwait
             )
         }
 
@@ -765,22 +767,101 @@ internal fun choosePublicMeshConnectOnSendPeer(
     } ?: candidates.first()
 }
 
+internal fun chooseExactReachablePeer(
+    reachablePeers: List<BleDiscoveredDevice>,
+    targetPeerId: String
+): BleDiscoveredDevice? {
+    val sanitizedTargetPeerId = targetPeerId.trim().takeIf { it.isNotEmpty() } ?: return null
+    return reachablePeers
+        .filter { device ->
+            device.hasAuroraDiscoveryPayload &&
+                device.address.isNotBlank() &&
+                device.isConnectable != false
+        }
+        .sortedWith(
+            compareBy<BleDiscoveredDevice>(
+                { runtimeReachablePeerId(it) },
+                { it.address.trim() }
+            )
+        )
+        .firstOrNull { device ->
+            runtimeReachablePeerId(device) == sanitizedTargetPeerId
+        }
+}
+
 internal suspend fun submitPrivateEncryptedMessage(
     message: OutgoingChatMessage,
     senderPeerId: String?,
     transportSender: BleTransportSender?,
     sessionMaterialProvider: gr.hua.aurora.protocol.OutgoingSessionMaterialProvider,
     activeTransportPeerId: String?,
-    isActiveTransportConnected: Boolean
+    isActiveTransportConnected: Boolean,
+    reachablePeers: List<BleDiscoveredDevice> = emptyList(),
+    connectToReachablePeer: suspend (BleDiscoveredDevice) -> PublicMeshConnectOnSendResult = {
+        PublicMeshConnectOnSendResult.Failed(
+            peerId = runtimeReachablePeerId(it),
+            reason = "connect-on-send unavailable"
+        )
+    }
 ): PrivateChatMessageSendResult {
-    return PrivateChatMessageSendUseCase.send(
-        message = message,
-        senderPeerId = senderPeerId,
-        transportSender = transportSender,
-        sessionMaterialProvider = sessionMaterialProvider,
-        activeConnectedPeerId = activeTransportPeerId,
-        isActiveTransportConnected = isActiveTransportConnected
-    )
+    val targetPeerId = privateChatTargetPeerId(message)
+        ?: return PrivateChatMessageSendResult.ContactUnavailable
+    val sanitizedSenderPeerId = senderPeerId?.trim()?.takeIf { it.isNotEmpty() }
+        ?: return PrivateChatMessageSendResult.KeysUnavailable
+    if (sessionMaterialProvider.encryptionMaterialForTarget(targetPeerId) == null) {
+        return PrivateChatMessageSendResult.KeysUnavailable
+    }
+    val sanitizedActiveTransportPeerId = activeTransportPeerId?.trim()?.takeIf { it.isNotEmpty() }
+    if (isActiveTransportConnected && sanitizedActiveTransportPeerId == targetPeerId) {
+        return PrivateChatMessageSendUseCase.send(
+            message = message,
+            senderPeerId = sanitizedSenderPeerId,
+            transportSender = transportSender,
+            sessionMaterialProvider = sessionMaterialProvider,
+            activeConnectedPeerId = sanitizedActiveTransportPeerId,
+            isActiveTransportConnected = true
+        )
+    }
+
+    val reachablePeer = chooseExactReachablePeer(
+        reachablePeers = reachablePeers,
+        targetPeerId = targetPeerId
+    ) ?: return PrivateChatMessageSendResult.ContactNotReachable
+
+    return when (val connectResult = connectToReachablePeer(reachablePeer)) {
+        is PublicMeshConnectOnSendResult.Connected -> {
+            if (connectResult.peerId != targetPeerId) {
+                PrivateChatMessageSendResult.ContactNotReachable
+            } else {
+                PrivateChatMessageSendUseCase.send(
+                    message = message,
+                    senderPeerId = sanitizedSenderPeerId,
+                    transportSender = transportSender,
+                    sessionMaterialProvider = sessionMaterialProvider,
+                    activeConnectedPeerId = connectResult.peerId,
+                    isActiveTransportConnected = true
+                )
+            }
+        }
+        is PublicMeshConnectOnSendResult.Failed -> {
+            PrivateChatMessageSendResult.Failed(
+                reason = connectResult.reason
+            )
+        }
+    }
+}
+
+internal fun privateChatTargetPeerId(
+    message: OutgoingChatMessage
+): String? {
+    val draft = runCatching {
+        gr.hua.aurora.protocol.OutgoingMessageFrameBuilder.build(message)
+    }.getOrNull() ?: return null
+    if (draft.type != MessageFrameType.PRIVATE_TEXT) {
+        return null
+    }
+
+    return draft.recipientId?.trim()?.takeIf { it.isNotEmpty() }
 }
 
 internal suspend fun submitPublicGlobalMeshMessage(

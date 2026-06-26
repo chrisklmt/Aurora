@@ -212,7 +212,7 @@ internal fun privateChatDeliveryStatusText(
 ): String {
     return when (result) {
         PrivateChatMessageSendResult.SubmittedLocally ->
-            "Private message handed to local encrypted transport."
+            "Sent."
         PrivateChatMessageSendResult.KeysUnavailable ->
             "Keys unavailable."
         PrivateChatMessageSendResult.ContactUnavailable ->
@@ -220,7 +220,7 @@ internal fun privateChatDeliveryStatusText(
         PrivateChatMessageSendResult.ContactNotReachable ->
             "Contact not reachable."
         is PrivateChatMessageSendResult.Failed ->
-            "Private send failed: ${result.reason}"
+            "Send failed."
     }
 }
 

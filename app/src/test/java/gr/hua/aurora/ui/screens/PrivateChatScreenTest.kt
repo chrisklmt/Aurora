@@ -96,12 +96,22 @@ class PrivateChatScreenTest {
     @Test
     fun privateChatDeliveryStringsStaySafeAndShort() {
         assertEquals(
+            "Sent.",
+            privateChatDeliveryStatusText(PrivateChatMessageSendResult.SubmittedLocally)
+        )
+        assertEquals(
             "Keys unavailable.",
             privateChatDeliveryStatusText(PrivateChatMessageSendResult.KeysUnavailable)
         )
         assertEquals(
             "Contact not reachable.",
             privateChatDeliveryStatusText(PrivateChatMessageSendResult.ContactNotReachable)
+        )
+        assertEquals(
+            "Send failed.",
+            privateChatDeliveryStatusText(
+                PrivateChatMessageSendResult.Failed("transport failed")
+            )
         )
         assertFalse(
             privateChatDeliveryStatusText(PrivateChatMessageSendResult.KeysUnavailable)
@@ -110,7 +120,7 @@ class PrivateChatScreenTest {
         assertFalse(
             privateChatDeliveryStatusText(
                 PrivateChatMessageSendResult.Failed("transport failed")
-            ).contains("session material", ignoreCase = true)
+            ).contains("transport failed", ignoreCase = true)
         )
     }
 }
