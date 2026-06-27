@@ -45,6 +45,22 @@ data class PeerSessionRegistryDiagnostics(
     val canonicalPeerIdByAlias: Map<String, String>
 )
 
+fun PeerSessionRegistryDiagnostics.canonicalPeerIdFor(
+    peerId: String?
+): String? {
+    val sanitizedPeerId = peerId?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    return when {
+        establishedPeerIds.contains(sanitizedPeerId) -> sanitizedPeerId
+        else -> canonicalPeerIdByAlias[sanitizedPeerId]
+    }
+}
+
+fun PeerSessionRegistryDiagnostics.hasSessionForPeer(
+    peerId: String?
+): Boolean {
+    return canonicalPeerIdFor(peerId) != null
+}
+
 class PeerSessionRegistry : OutgoingSessionMaterialProvider, IncomingSessionMaterialProvider {
     private val sessionsByPeerId = LinkedHashMap<String, EstablishedPeerSession>()
     private val peerIdByPublicKeyToken = LinkedHashMap<String, String>()

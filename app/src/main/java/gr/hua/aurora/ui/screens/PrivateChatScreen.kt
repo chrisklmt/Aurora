@@ -38,6 +38,7 @@ fun PrivateChatScreen(
     requestedPeerId: String,
     contact: AuroraContact?,
     privateChatIdentity: PrivateChatIdentity?,
+    hasRuntimeSession: Boolean,
     currentUsername: String,
     messages: List<ChatMessage>,
     lastDeliveryResult: PrivateChatMessageSendResult?,
@@ -52,7 +53,8 @@ fun PrivateChatScreen(
     val content = buildPrivateChatScreenContent(
         requestedPeerId = requestedPeerId,
         contact = contact,
-        privateChatIdentity = privateChatIdentity
+        privateChatIdentity = privateChatIdentity,
+        hasRuntimeSession = hasRuntimeSession
     )
     val mappedMessages = messages.map { it.toMessageListItem() }
     val debugCard = buildPrivateChatDebugCard(
@@ -60,6 +62,7 @@ fun PrivateChatScreen(
         requestedPeerId = requestedPeerId,
         contact = contact,
         privateChatIdentity = privateChatIdentity,
+        hasRuntimeSession = hasRuntimeSession,
         messages = messages,
         lastDeliveryResult = lastDeliveryResult,
         peerSessionDiagnostics = peerSessionDiagnostics,
@@ -148,7 +151,8 @@ fun PrivateChatScreen(
 internal fun buildPrivateChatScreenContent(
     requestedPeerId: String,
     contact: AuroraContact?,
-    privateChatIdentity: PrivateChatIdentity?
+    privateChatIdentity: PrivateChatIdentity?,
+    hasRuntimeSession: Boolean
 ): PrivateChatScreenContent {
     val resolvedPeerId = contact?.canonicalPeerId ?: requestedPeerId
     if (contact == null) {
@@ -164,7 +168,7 @@ internal fun buildPrivateChatScreenContent(
         )
     }
 
-    val hasReadyPrivateChat = contact.hasSession && privateChatIdentity?.isEstablished == true
+    val hasReadyPrivateChat = hasRuntimeSession && privateChatIdentity?.isEstablished == true
     val title = privateChatIdentity?.displayNameOrNull() ?: contact.displayName
     val helperText = when {
         hasReadyPrivateChat -> null
@@ -192,6 +196,7 @@ internal fun buildPrivateChatDebugCard(
     requestedPeerId: String,
     contact: AuroraContact?,
     privateChatIdentity: PrivateChatIdentity?,
+    hasRuntimeSession: Boolean,
     messages: List<ChatMessage>,
     lastDeliveryResult: PrivateChatMessageSendResult?,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
@@ -208,7 +213,6 @@ internal fun buildPrivateChatDebugCard(
         peerId = targetPeerId,
         diagnostics = peerSessionDiagnostics
     )
-    val targetHasSession = canonicalPeerId != null
     val sections = buildList {
         add(
                     DebugInfoSection(
@@ -259,7 +263,7 @@ internal fun buildPrivateChatDebugCard(
             DebugInfoSection(
                 title = "Runtime",
                 items = listOf(
-                    DebugInfoItem("Session", if (targetHasSession) "ready" else "missing"),
+                    DebugInfoItem("Session", if (hasRuntimeSession) "ready" else "missing"),
                     DebugInfoItem(
                         "Active",
                         privateChatActivePeerValue(
@@ -273,7 +277,7 @@ internal fun buildPrivateChatDebugCard(
                     ),
                     DebugInfoItem(
                         "Keys",
-                        contact?.let(::privateChatDebugKeyStatusText) ?: "missing"
+                        privateChatDebugKeyStatusText(hasRuntimeSession)
                     )
                 )
             )
@@ -312,8 +316,8 @@ internal fun buildPrivateChatDebugCard(
     )
 }
 
-internal fun privateChatDebugKeyStatusText(contact: AuroraContact): String {
-    return if (contact.hasSession) {
+internal fun privateChatDebugKeyStatusText(hasRuntimeSession: Boolean): String {
+    return if (hasRuntimeSession) {
         "ready"
     } else {
         "missing"

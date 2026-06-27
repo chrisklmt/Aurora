@@ -42,6 +42,7 @@ import gr.hua.aurora.protocol.PeerIdentityExchangeSendResult
 import gr.hua.aurora.protocol.PrivateChatMessagePayload
 import gr.hua.aurora.protocol.PrivateChatMessagePayloadCodec
 import gr.hua.aurora.protocol.PrivateChatMessageSendResult
+import gr.hua.aurora.protocol.PeerSessionEstablisher
 import gr.hua.aurora.protocol.SeenMessageIdCache
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -990,6 +991,109 @@ class AuroraBleRuntimeHostTest {
         )
 
         assertNull(handler)
+    }
+
+    @Test
+    fun identityHandlerPromotesRecoveredPrivateChatAndRequestsSingleReplyWhenSessionWasMissing() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val local = generateEcKeyPair()
+        val remote = generateEcKeyPair()
+        val remotePublicKey = remote.publicKeyBytes()
+        val canonicalRemotePeerId = gr.hua.aurora.protocol.PeerSessionPeerId
+            .deriveFromPublicKey(remotePublicKey)
+        holder.addOrUpdateContact(
+            canonicalPeerId = canonicalRemotePeerId,
+            displayName = "Alex"
+        )
+        var replyRequest: Pair<String, Boolean>? = null
+        val registry = gr.hua.aurora.protocol.PeerSessionRegistry()
+        val handler = requireNotNull(
+            createAuroraIdentityHandlerOrNull(
+                stateHolder = holder,
+                localIdentity = local.identity(),
+                registry = registry,
+                onIdentityEstablished = { peerId, shouldReply ->
+                    replyRequest = peerId to shouldReply
+                }
+            )
+        )
+
+        val result = handler(
+            IncomingTransportMessage(
+                frame = PeerIdentityExchangeMessage(
+                    peerId = canonicalRemotePeerId,
+                    publicAgreementKeyBytes = remotePublicKey,
+                    createdAtMillis = 1_716_300_111L,
+                    privateChatProposalId = "remote-proposal-1"
+                ).toMessageFrame(frameId = "identity-runtime-recovery"),
+                senderPublicKey = remotePublicKey
+            )
+        )
+
+        assertEquals(
+            PeerIdentityExchangeHandlingResult.Established(canonicalRemotePeerId),
+            result
+        )
+        assertEquals(canonicalRemotePeerId to true, replyRequest)
+        assertTrue(holder.findContactByPeerId(canonicalRemotePeerId)?.hasSession == true)
+        assertEquals(
+            "remote-proposal-1",
+            holder.privateChatIdentityForPeerId(canonicalRemotePeerId)?.remoteProposalId
+        )
+    }
+
+    @Test
+    fun identityHandlerDoesNotRequestReplyWhenSessionAlreadyExists() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val local = generateEcKeyPair()
+        val remote = generateEcKeyPair()
+        val remotePublicKey = remote.publicKeyBytes()
+        val canonicalRemotePeerId = gr.hua.aurora.protocol.PeerSessionPeerId
+            .deriveFromPublicKey(remotePublicKey)
+        val registry = gr.hua.aurora.protocol.PeerSessionRegistry().apply {
+            val establishment = PeerSessionEstablisher.establishAndStore(
+                localIdentity = local.identity(),
+                remotePeerId = canonicalRemotePeerId,
+                remotePeerPublicKeyBytes = remotePublicKey,
+                registry = this
+            )
+            assertTrue(establishment is gr.hua.aurora.protocol.PeerSessionEstablishmentResult.Established)
+        }
+        var replyRequest: Pair<String, Boolean>? = null
+        val handler = requireNotNull(
+            createAuroraIdentityHandlerOrNull(
+                stateHolder = holder,
+                localIdentity = local.identity(),
+                registry = registry,
+                onIdentityEstablished = { peerId, shouldReply ->
+                    replyRequest = peerId to shouldReply
+                }
+            )
+        )
+
+        handler(
+            IncomingTransportMessage(
+                frame = PeerIdentityExchangeMessage(
+                    peerId = canonicalRemotePeerId,
+                    publicAgreementKeyBytes = remotePublicKey,
+                    createdAtMillis = 1_716_300_222L,
+                    privateChatProposalId = "remote-proposal-2"
+                ).toMessageFrame(frameId = "identity-runtime-existing-session"),
+                senderPublicKey = remotePublicKey
+            )
+        )
+
+        assertEquals(canonicalRemotePeerId to false, replyRequest)
     }
 
     @Test

@@ -53,6 +53,7 @@ import gr.hua.aurora.model.PrivateChatIdentity
 import gr.hua.aurora.protocol.PeerIdentityExchangeSendResult
 import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
 import gr.hua.aurora.protocol.PeerSessionPeerId
+import gr.hua.aurora.protocol.hasSessionForPeer
 import gr.hua.aurora.state.AuroraAvailabilityPreference
 import gr.hua.aurora.ui.components.AuroraAvailabilityIndicator
 import gr.hua.aurora.ui.components.AuroraTopBarAction
@@ -528,18 +529,18 @@ private fun DiscoveredBleDevicesCard(
                             val existingContact = contactPeerId?.let { peerId ->
                                 contacts.firstOrNull { it.canonicalPeerId == peerId }
                             }
+                            val hasRuntimeSession = peerSessionDiagnostics.hasSessionForPeer(
+                                contactPeerId
+                            )
                             val isPrivateChatReady = contactPeerId?.let { peerId ->
-                                existingContact?.hasSession == true &&
+                                hasRuntimeSession &&
                                     privateChatIdentitiesByPeerId[peerId]?.isEstablished == true
                             } == true
                             BleDiscoveredDeviceRow(
                                 device = device,
                                 existingContact = existingContact,
                                 privateChatIdentitiesByPeerId = privateChatIdentitiesByPeerId,
-                                hasRuntimeSession = nearbyPeerHasReadyKeys(
-                                    peerId = contactPeerId,
-                                    diagnostics = peerSessionDiagnostics
-                                ),
+                                hasRuntimeSession = hasRuntimeSession,
                                 isPrivateChatReady = isPrivateChatReady,
                                 connectionStatus = connectionStatus,
                                 transportReadStatus = transportReadStatus,
@@ -766,7 +767,12 @@ private fun BleDiscoveredDeviceRow(
                     onExchangeIdentity(device, privateChatProposalId)
                 }
             ) {
-                Text(if (existingContact == null) "Add contact" else "Finish setup")
+                Text(
+                    nearbyAddContactActionLabel(
+                        existingContact = existingContact,
+                        identity = privateChatIdentitiesByPeerId[securePeerId]
+                    )
+                )
             }
         }
         if (actionVisibility.showOpenChat) {
@@ -1224,9 +1230,18 @@ internal fun nearbyPeerHasReadyKeys(
     peerId: String?,
     diagnostics: PeerSessionRegistryDiagnostics
 ): Boolean {
-    val sanitizedPeerId = peerId?.trim()?.takeIf { it.isNotEmpty() } ?: return false
-    return diagnostics.establishedPeerIds.contains(sanitizedPeerId) ||
-        diagnostics.canonicalPeerIdByAlias.containsKey(sanitizedPeerId)
+    return diagnostics.hasSessionForPeer(peerId)
+}
+
+internal fun nearbyAddContactActionLabel(
+    existingContact: AuroraContact?,
+    identity: PrivateChatIdentity?
+): String {
+    return when {
+        existingContact == null -> "Add contact"
+        identity?.isEstablished == true -> "Retry setup"
+        else -> "Finish setup"
+    }
 }
 
 internal fun nearbyContactStatusText(

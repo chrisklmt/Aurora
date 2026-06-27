@@ -6,6 +6,7 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import gr.hua.aurora.protocol.hasSessionForPeer
 import gr.hua.aurora.state.AuroraAvailabilityPreference
 import gr.hua.aurora.state.AuroraBleRuntimeState
 import gr.hua.aurora.state.AuroraStateHolder
@@ -113,10 +114,12 @@ fun NavGraph(
             val peerId = backStackEntry.arguments?.getString(Routes.PRIVATE_ARG) ?: "unknown-peer"
             val selectedContact = stateHolder.findContactByPeerId(peerId)
             val privateChatIdentity = stateHolder.privateChatIdentityForPeerId(peerId)
+            val hasRuntimeSession = bleRuntimeState.peerSessionDiagnostics.hasSessionForPeer(peerId)
             PrivateChatScreen(
                 requestedPeerId = peerId,
                 contact = selectedContact,
                 privateChatIdentity = privateChatIdentity,
+                hasRuntimeSession = hasRuntimeSession,
                 currentUsername = uiState.privateProfileUsername,
                 messages = stateHolder.privateMessagesForPeerId(peerId),
                 lastDeliveryResult = stateHolder.latestPrivateChatDeliveryResultForPeerId(peerId),

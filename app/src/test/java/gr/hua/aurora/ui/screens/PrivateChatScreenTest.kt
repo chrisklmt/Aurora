@@ -28,7 +28,8 @@ class PrivateChatScreenTest {
         val content = buildPrivateChatScreenContent(
             requestedPeerId = contact.canonicalPeerId,
             contact = contact,
-            privateChatIdentity = readyIdentity(contact.canonicalPeerId)
+            privateChatIdentity = readyIdentity(contact.canonicalPeerId),
+            hasRuntimeSession = true
         )
 
         assertEquals("Alex", content.title)
@@ -48,7 +49,8 @@ class PrivateChatScreenTest {
         val content = buildPrivateChatScreenContent(
             requestedPeerId = contact.canonicalPeerId,
             contact = contact,
-            privateChatIdentity = readyIdentity(contact.canonicalPeerId)
+            privateChatIdentity = readyIdentity(contact.canonicalPeerId),
+            hasRuntimeSession = true
         )
 
         assertNull(content.statusText)
@@ -75,7 +77,8 @@ class PrivateChatScreenTest {
                 localProposalId = "local-peer-123",
                 createdAtMillis = 1_000L,
                 lastUpdatedMillis = 2_000L
-            )
+            ),
+            hasRuntimeSession = false
         )
 
         assertEquals("Private chat is not ready yet", content.statusText)
@@ -91,11 +94,34 @@ class PrivateChatScreenTest {
     }
 
     @Test
+    fun privateChatRecoveredRuntimeSessionEnablesComposerAfterRestart() {
+        val contact = AuroraContact(
+            canonicalPeerId = "peer-123",
+            displayName = "Alex",
+            createdAtMillis = 1_000L,
+            hasSession = false
+        )
+
+        val content = buildPrivateChatScreenContent(
+            requestedPeerId = contact.canonicalPeerId,
+            contact = contact,
+            privateChatIdentity = readyIdentity(contact.canonicalPeerId),
+            hasRuntimeSession = true
+        )
+
+        assertNull(content.statusText)
+        assertNull(content.helperText)
+        assertTrue(content.isComposerEnabled)
+        assertEquals("Private message", content.composerHint)
+    }
+
+    @Test
     fun privateChatHandlesMissingContactGracefully() {
         val content = buildPrivateChatScreenContent(
             requestedPeerId = "missing-peer-123456",
             contact = null,
-            privateChatIdentity = null
+            privateChatIdentity = null,
+            hasRuntimeSession = false
         )
 
         assertEquals("Contact not found", content.title)
@@ -136,6 +162,7 @@ class PrivateChatScreenTest {
             requestedPeerId = contact.canonicalPeerId,
             contact = contact,
             privateChatIdentity = readyIdentity(contact.canonicalPeerId),
+            hasRuntimeSession = true,
             messages = messages,
             lastDeliveryResult = PrivateChatMessageSendResult.SubmittedLocally,
             peerSessionDiagnostics = PeerSessionRegistryDiagnostics(
@@ -239,7 +266,8 @@ class PrivateChatScreenTest {
             contact = contact,
             privateChatIdentity = readyIdentity(contact.canonicalPeerId).copy(
                 customChatName = "Family chat"
-            )
+            ),
+            hasRuntimeSession = true
         )
 
         assertEquals("Family chat", content.title)

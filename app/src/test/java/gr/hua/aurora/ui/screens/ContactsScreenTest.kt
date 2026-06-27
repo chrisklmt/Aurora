@@ -51,6 +51,38 @@ class ContactsScreenTest {
     }
 
     @Test
+    fun contactSummaryUsesRuntimeSessionInsteadOfPersistedContactFlag() {
+        val contact = AuroraContact(
+            canonicalPeerId = "peer-123",
+            displayName = "Alex",
+            createdAtMillis = 1_000L,
+            hasSession = false
+        )
+        val identity = PrivateChatIdentity(
+            canonicalPeerId = "peer-123",
+            privateChatId = "chat-123",
+            localProposalId = "local-123",
+            remoteProposalId = "remote-123",
+            createdAtMillis = 1_000L,
+            lastUpdatedMillis = 2_000L
+        )
+
+        val restoringSummary = buildContactChatSummary(
+            contact = contact,
+            identity = identity,
+            hasRuntimeSession = false
+        )
+        val recoveredSummary = buildContactChatSummary(
+            contact = contact,
+            identity = identity,
+            hasRuntimeSession = true
+        )
+
+        assertEquals(false, restoringSummary.isPrivateChatReady)
+        assertEquals(true, recoveredSummary.isPrivateChatReady)
+    }
+
+    @Test
     fun contactsDebugCardIsHiddenWhenDebugModeIsDisabled() {
         assertNull(
             buildContactsDebugCard(

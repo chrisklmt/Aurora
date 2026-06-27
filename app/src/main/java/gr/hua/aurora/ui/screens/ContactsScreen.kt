@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import gr.hua.aurora.model.AuroraContact
 import gr.hua.aurora.model.PrivateChatIdentity
 import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
+import gr.hua.aurora.protocol.hasSessionForPeer
 import gr.hua.aurora.state.AuroraAvailabilityPreference
 import gr.hua.aurora.ui.components.AuroraAvailabilityIndicator
 import gr.hua.aurora.ui.components.AuroraTopBarAction
@@ -112,7 +113,10 @@ fun ContactsScreen(
                 items(contacts) { contact ->
                     val summary = buildContactChatSummary(
                         contact = contact,
-                        identity = privateChatIdentitiesByPeerId[contact.canonicalPeerId]
+                        identity = privateChatIdentitiesByPeerId[contact.canonicalPeerId],
+                        hasRuntimeSession = peerSessionDiagnostics.hasSessionForPeer(
+                            contact.canonicalPeerId
+                        )
                     )
                     Card(
                         modifier = Modifier.fillMaxWidth()
@@ -165,7 +169,8 @@ fun ContactsScreen(
             val summary = contact?.let {
                 buildContactChatSummary(
                     contact = it,
-                    identity = privateChatIdentitiesByPeerId[peerId]
+                    identity = privateChatIdentitiesByPeerId[peerId],
+                    hasRuntimeSession = peerSessionDiagnostics.hasSessionForPeer(peerId)
                 )
             }
             if (summary != null) {
@@ -269,12 +274,13 @@ fun ContactsScreen(
 
 internal fun buildContactChatSummary(
     contact: AuroraContact,
-    identity: PrivateChatIdentity?
+    identity: PrivateChatIdentity?,
+    hasRuntimeSession: Boolean
 ): ContactChatSummary {
     return ContactChatSummary(
         peerId = contact.canonicalPeerId,
         displayName = identity?.displayNameOrNull() ?: contact.displayName,
-        isPrivateChatReady = contact.hasSession && identity?.isEstablished == true,
+        isPrivateChatReady = hasRuntimeSession && identity?.isEstablished == true,
         seenText = contactsSeenStatusText(contact)
     )
 }
@@ -309,7 +315,8 @@ internal fun buildContactsDebugCard(
     }
 
     val readyCount = contacts.count { contact ->
-        contact.hasSession && privateChatIdentitiesByPeerId[contact.canonicalPeerId]?.isEstablished == true
+        peerSessionDiagnostics.hasSessionForPeer(contact.canonicalPeerId) &&
+            privateChatIdentitiesByPeerId[contact.canonicalPeerId]?.isEstablished == true
     }
     val seenCount = contacts.count { it.lastSeenMillis != null }
     val peerListValue = contacts.joinToString(separator = ", ") { contact ->

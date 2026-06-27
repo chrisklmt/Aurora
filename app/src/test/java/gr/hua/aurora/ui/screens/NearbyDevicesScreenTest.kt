@@ -9,6 +9,7 @@ import gr.hua.aurora.ble.discovery.BleStablePeerId
 import gr.hua.aurora.ble.gatt.BleGattServerStatus
 import gr.hua.aurora.ble.permissions.BluetoothPermissionStatus
 import gr.hua.aurora.model.AuroraContact
+import gr.hua.aurora.model.PrivateChatIdentity
 import gr.hua.aurora.protocol.PeerIdentityExchangeSendResult
 import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
 import gr.hua.aurora.ui.components.DebugInfoCardModel
@@ -263,6 +264,34 @@ class NearbyDevicesScreenTest {
         assertEquals(true, visibility.showReadTransportMarker)
         assertEquals(true, visibility.showReadTransportFrame)
         assertEquals(true, visibility.showWriteTransportMarker)
+    }
+
+    @Test
+    fun nearbyAddContactActionLabelUsesRetryForRestartRecovery() {
+        val contact = AuroraContact(
+            canonicalPeerId = "peer-123",
+            displayName = "Alex",
+            createdAtMillis = 1_000L,
+            hasSession = false
+        )
+        val establishedIdentity = PrivateChatIdentity(
+            canonicalPeerId = "peer-123",
+            privateChatId = "chat-123",
+            localProposalId = "local-123",
+            remoteProposalId = "remote-123",
+            createdAtMillis = 1_000L,
+            lastUpdatedMillis = 2_000L
+        )
+
+        assertEquals("Add contact", nearbyAddContactActionLabel(existingContact = null, identity = null))
+        assertEquals(
+            "Finish setup",
+            nearbyAddContactActionLabel(existingContact = contact, identity = null)
+        )
+        assertEquals(
+            "Retry setup",
+            nearbyAddContactActionLabel(existingContact = contact, identity = establishedIdentity)
+        )
     }
 
     @Test

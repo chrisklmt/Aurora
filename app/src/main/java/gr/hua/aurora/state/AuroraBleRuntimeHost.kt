@@ -235,6 +235,9 @@ fun rememberAuroraBleRuntimeState(
             PeerSessionPeerId.deriveFromPublicKey(identity.publicKeyBytes())
         }
     }
+    var pendingIdentityRecoveryReplyPeerId by remember(runtimeGeneration) {
+        mutableStateOf<String?>(null)
+    }
     val incomingSessionMaterialProvider = remember(peerSessionRegistry) {
         peerSessionRegistry as IncomingSessionMaterialProvider
     }
@@ -242,7 +245,12 @@ fun rememberAuroraBleRuntimeState(
         createAuroraIdentityHandlerOrNull(
             stateHolder = stateHolder,
             localIdentity = localIdentityMaterial,
-            registry = peerSessionRegistry
+            registry = peerSessionRegistry,
+            onIdentityEstablished = { peerId, shouldReply ->
+                if (shouldReply) {
+                    pendingIdentityRecoveryReplyPeerId = peerId
+                }
+            }
         )
     }
     val identityHandlerStatus = remember(localIdentityMaterialLoadResult, handleIdentity) {
@@ -362,6 +370,34 @@ fun rememberAuroraBleRuntimeState(
         }
 
         return PublicMeshConnectOnSendResult.Connected(peerId = peerId)
+    }
+
+    LaunchedEffect(
+        pendingIdentityRecoveryReplyPeerId,
+        discoveredAuroraPeers,
+        bleConnectionStatus,
+        activeTransportPeerId,
+        activeTransportDeviceAddress
+    ) {
+        val targetPeerId = pendingIdentityRecoveryReplyPeerId ?: return@LaunchedEffect
+        pendingIdentityRecoveryReplyPeerId = null
+        val privateChatProposalId = stateHolder.privateChatIdentityForPeerId(targetPeerId)
+            ?.localProposalId
+        val replyResult = submitIdentityExchangeToTarget(
+            targetPeerId = targetPeerId,
+            transportSender = bleTransportSender,
+            bleConnectionStatus = bleConnectionStatus,
+            activeTransportPeerId = activeTransportPeerId,
+            activeTransportDeviceAddress = activeTransportDeviceAddress,
+            reachablePeers = discoveredAuroraPeers,
+            connectToReachablePeer = ::connectToReachablePeerAndAwait,
+            localIdentityMaterial = loadLocalPeerIdentityExchangePublicMaterialOrNull(),
+            privateChatProposalId = privateChatProposalId
+        )
+        lastIdentityExchangeStatus = identityExchangeRecoveryStatusText(
+            peerId = targetPeerId,
+            result = replyResult
+        )
     }
 
     val transportFrameReceiver = remember(
@@ -1400,17 +1436,17 @@ internal suspend fun relayReceivedPublicMeshMessage(
     )
 }
 
-internal suspend fun connectAndExchangeIdentityWithPeer(
-    device: BleDiscoveredDevice,
+internal suspend fun submitIdentityExchangeToTarget(
+    targetPeerId: String,
     transportSender: BleTransportSender,
     bleConnectionStatus: BleConnectionStatus,
     activeTransportPeerId: String?,
     activeTransportDeviceAddress: String?,
+    reachablePeers: List<BleDiscoveredDevice>,
     connectToReachablePeer: suspend (BleDiscoveredDevice) -> PublicMeshConnectOnSendResult,
     localIdentityMaterial: RuntimePeerIdentityExchangePublicMaterial?,
     privateChatProposalId: String?
 ): PeerIdentityExchangeSendResult {
-    val targetPeerId = runtimeReachablePeerId(device)
     val identityMaterial = localIdentityMaterial ?: return PeerIdentityExchangeSendResult.InvalidLocalIdentity(
         reason = "Local agreement public key unavailable."
     )
@@ -1421,10 +1457,14 @@ internal suspend fun connectAndExchangeIdentityWithPeer(
     }
     val isActiveTargetConnection =
         bleConnectionStatus == BleConnectionStatus.CONNECTED &&
-            activeTransportPeerId == targetPeerId &&
-            activeTransportDeviceAddress == device.address.trim()
+            activeTransportPeerId == targetPeerId
     if (!isActiveTargetConnection) {
-        when (val connectResult = connectToReachablePeer(device)) {
+        val targetDevice = reachablePeers.firstOrNull { reachablePeer ->
+            runtimeReachablePeerId(reachablePeer) == targetPeerId
+        } ?: return PeerIdentityExchangeSendResult.Failed(
+            reason = "peer is not reachable for identity setup"
+        )
+        when (val connectResult = connectToReachablePeer(targetDevice)) {
             is PublicMeshConnectOnSendResult.Failed -> {
                 return PeerIdentityExchangeSendResult.Failed(
                     reason = connectResult.reason
@@ -1447,6 +1487,29 @@ internal suspend fun connectAndExchangeIdentityWithPeer(
         targetPeerId = targetPeerId,
         transportSender = transportSender,
         createdAtMillis = System.currentTimeMillis()
+    )
+}
+
+internal suspend fun connectAndExchangeIdentityWithPeer(
+    device: BleDiscoveredDevice,
+    transportSender: BleTransportSender,
+    bleConnectionStatus: BleConnectionStatus,
+    activeTransportPeerId: String?,
+    activeTransportDeviceAddress: String?,
+    connectToReachablePeer: suspend (BleDiscoveredDevice) -> PublicMeshConnectOnSendResult,
+    localIdentityMaterial: RuntimePeerIdentityExchangePublicMaterial?,
+    privateChatProposalId: String?
+): PeerIdentityExchangeSendResult {
+    return submitIdentityExchangeToTarget(
+        targetPeerId = runtimeReachablePeerId(device),
+        transportSender = transportSender,
+        bleConnectionStatus = bleConnectionStatus,
+        activeTransportPeerId = activeTransportPeerId,
+        activeTransportDeviceAddress = activeTransportDeviceAddress,
+        reachablePeers = listOf(device),
+        connectToReachablePeer = connectToReachablePeer,
+        localIdentityMaterial = localIdentityMaterial,
+        privateChatProposalId = privateChatProposalId
     )
 }
 
@@ -1641,6 +1704,22 @@ internal fun identityExchangeSendStatusText(
     }
 }
 
+internal fun identityExchangeRecoveryStatusText(
+    peerId: String,
+    result: PeerIdentityExchangeSendResult
+): String {
+    return when (result) {
+        PeerIdentityExchangeSendResult.SubmittedLocally ->
+            "Identity received from $peerId. Setup reply queued."
+        PeerIdentityExchangeSendResult.SenderUnavailable ->
+            "Identity received from $peerId. Setup reply unavailable."
+        is PeerIdentityExchangeSendResult.InvalidLocalIdentity ->
+            result.reason
+        is PeerIdentityExchangeSendResult.Failed ->
+            "Identity received from $peerId. Setup reply failed: ${result.reason}"
+    }
+}
+
 internal fun createAuroraBleTransportSender(
     transportFrameWriter: BleGattTransportFrameWriter?
 ): BleTransportSender {
@@ -1806,11 +1885,13 @@ internal fun loadLocalPeerSessionIdentityMaterialOrNull(
 internal fun createAuroraIdentityHandlerOrNull(
     stateHolder: AuroraStateHolder,
     localIdentity: LocalPeerSessionIdentityMaterial?,
-    registry: PeerSessionRegistry
+    registry: PeerSessionRegistry,
+    onIdentityEstablished: (peerId: String, shouldReply: Boolean) -> Unit = { _, _ -> }
 ): ((IncomingTransportMessage) -> PeerIdentityExchangeHandlingResult)? {
     val identity = localIdentity ?: return null
 
     return { message ->
+        val hadSessionBeforeHandling = registry.hasSessionForPeer(message.frame.senderId)
         val handlingResult = PeerIdentityExchangeHandler.handle(
             frame = message.frame,
             localIdentity = identity,
@@ -1823,6 +1904,17 @@ internal fun createAuroraIdentityHandlerOrNull(
             stateHolder.recordReceivedPrivateChatProposal(
                 peerId = handlingResult.peerId,
                 remoteProposalId = privateChatProposalId
+            )
+            stateHolder.findContactByPeerId(handlingResult.peerId)?.let { existingContact ->
+                stateHolder.promoteContactSession(
+                    canonicalPeerId = handlingResult.peerId,
+                    displayName = existingContact.displayName,
+                    lastSeenMillis = message.frame.createdAtMillis
+                )
+            }
+            onIdentityEstablished(
+                handlingResult.peerId,
+                !hadSessionBeforeHandling
             )
         }
         handlingResult
