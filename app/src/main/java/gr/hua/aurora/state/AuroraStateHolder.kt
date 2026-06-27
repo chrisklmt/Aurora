@@ -572,7 +572,8 @@ private fun visibleGlobalMessageStatusForMeshResult(
     result: GlobalMeshDeliveryResult
 ): MessageStatus {
     return when (result) {
-        is GlobalMeshDeliveryResult.QueuedToActivePeer -> MessageStatus.SENT
+        is GlobalMeshDeliveryResult.QueuedToActivePeer,
+        is GlobalMeshDeliveryResult.QueuedToPeers -> MessageStatus.SENT
         GlobalMeshDeliveryResult.NoReachablePeers,
         GlobalMeshDeliveryResult.SenderUnavailable,
         is GlobalMeshDeliveryResult.ConnectOnSendFailed -> MessageStatus.QUEUED

@@ -7,7 +7,8 @@ object EncryptedMessageEnvelopeBuilder {
         senderPublicKey: ByteArray,
         keyBytes: ByteArray,
         plaintext: ByteArray,
-        authenticatedData: ByteArray? = null
+        authenticatedData: ByteArray? = null,
+        relayMetadata: EncryptedMessageRelayMetadata? = null
     ): EncryptedMessageEnvelope {
         val encryptedPayload = AesGcmCipher.encrypt(
             keyBytes = keyBytes,
@@ -16,7 +17,13 @@ object EncryptedMessageEnvelopeBuilder {
         )
 
         return EncryptedMessageEnvelope(
+            protocolVersion = if (relayMetadata == null) {
+                EncryptedMessageEnvelope.LEGACY_PROTOCOL_VERSION
+            } else {
+                EncryptedMessageEnvelope.RELAY_AWARE_PROTOCOL_VERSION
+            },
             senderPublicKey = senderPublicKey,
+            relayMetadata = relayMetadata,
             payload = EncryptedPayloadFrame(
                 nonce = encryptedPayload.nonce,
                 ciphertext = encryptedPayload.ciphertext

@@ -10,6 +10,14 @@ class BleTransportFrameReceiver(
     fun receive(
         frame: BleGattTransportFrame
     ): BleTransportReceiveResult {
+        return receive(
+            BleTransportIncomingFrame(frame = frame)
+        )
+    }
+
+    fun receive(
+        frame: BleTransportIncomingFrame
+    ): BleTransportReceiveResult {
         return when (val bufferResult = buffer.buffer(frame)) {
             is BleTransportReceiveBuffer.BufferResult.Buffered -> {
                 BleTransportReceiveResult.Buffered(
@@ -23,12 +31,14 @@ class BleTransportFrameReceiver(
                     is IncomingTransportFrameProcessingSuccessResult -> {
                         BleTransportReceiveResult.Processed(
                             groupId = bufferResult.groupId,
+                            sourceDeviceAddress = bufferResult.sourceDeviceAddress,
                             processingResult = processingResult
                         )
                     }
                     is IncomingTransportFrameProcessingResult.ReceiveFailed -> {
                         BleTransportReceiveResult.ProcessorFailed(
                             groupId = bufferResult.groupId,
+                            sourceDeviceAddress = bufferResult.sourceDeviceAddress,
                             processingResult = processingResult
                         )
                     }

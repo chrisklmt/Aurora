@@ -70,6 +70,11 @@ object IncomingTransportFrameProcessor {
                     )
                 }
             }
+            is IncomingTransportReceiveResult.RelayOnlyEncrypted -> {
+                IncomingTransportFrameProcessingResult.RelayOnlyEncrypted(
+                    envelope = receiveResult.envelope
+                )
+            }
             is IncomingTransportReceiveResult.IncompleteChunks,
             is IncomingTransportReceiveResult.InvalidEnvelope,
             is IncomingTransportReceiveResult.SessionMaterialUnavailable,

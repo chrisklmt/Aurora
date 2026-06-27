@@ -52,6 +52,9 @@ object IncomingMessageReceiveUseCase {
                 lookupResult.material
             }
             is IncomingSessionMaterialLookupResult.MaterialUnavailable -> {
+                relayOnlyEncryptedResultOrNull(envelope)?.let { relayOnlyResult ->
+                    return relayOnlyResult
+                }
                 return IncomingTransportReceiveResult.SessionMaterialUnavailable(
                     reason = lookupResult.reason
                 )
@@ -95,8 +98,21 @@ object IncomingMessageReceiveUseCase {
         return IncomingTransportReceiveResult.Received(
             message = IncomingTransportMessage(
                 frame = frame,
-                senderPublicKey = envelope.senderPublicKey
+                senderPublicKey = envelope.senderPublicKey,
+                relayEnvelope = envelope
             )
+        )
+    }
+
+    private fun relayOnlyEncryptedResultOrNull(
+        envelope: EncryptedMessageEnvelope
+    ): IncomingTransportReceiveResult.RelayOnlyEncrypted? {
+        val relayMetadata = envelope.relayMetadata ?: return null
+        if (relayMetadata.messageType != MessageFrameType.PRIVATE_TEXT) {
+            return null
+        }
+        return IncomingTransportReceiveResult.RelayOnlyEncrypted(
+            envelope = envelope
         )
     }
 

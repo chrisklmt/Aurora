@@ -1,5 +1,5 @@
 package gr.hua.aurora.ble.transport
 
 fun interface BleTransportFrameListener {
-    fun onFrameReceived(frame: BleGattTransportFrame)
+    fun onFrameReceived(frame: BleTransportIncomingFrame)
 }

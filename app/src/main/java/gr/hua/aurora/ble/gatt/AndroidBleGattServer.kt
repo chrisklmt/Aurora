@@ -13,6 +13,7 @@ import gr.hua.aurora.ble.transport.BleGattTransportPayload
 import gr.hua.aurora.ble.transport.BleTransportFrameListener
 import android.util.Log
 import java.util.UUID
+import gr.hua.aurora.ble.transport.BleTransportIncomingFrame
 
 class AndroidBleGattServer(
     context: Context,
@@ -160,7 +161,12 @@ class AndroidBleGattServer(
                     writeStatus == BluetoothGatt.GATT_SUCCESS &&
                     parsedFrame != null
                 ) {
-                    transportFrameListener?.onFrameReceived(parsedFrame)
+                    transportFrameListener?.onFrameReceived(
+                        BleTransportIncomingFrame(
+                            frame = parsedFrame,
+                            sourceDeviceAddress = device.address
+                        )
+                    )
                 }
             }
         }

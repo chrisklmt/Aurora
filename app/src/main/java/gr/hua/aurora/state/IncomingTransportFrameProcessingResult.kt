@@ -1,5 +1,6 @@
 package gr.hua.aurora.state
 
+import gr.hua.aurora.protocol.EncryptedMessageEnvelope
 import gr.hua.aurora.protocol.IncomingTransportMessage
 import gr.hua.aurora.protocol.IncomingTransportReceiveResult
 import gr.hua.aurora.protocol.PeerIdentityExchangeHandlingResult
@@ -28,6 +29,10 @@ sealed interface IncomingTransportFrameProcessingResult {
             }
         }
     }
+
+    data class RelayOnlyEncrypted(
+        val envelope: EncryptedMessageEnvelope
+    ) : IncomingTransportFrameProcessingSuccessResult
 
     data class ReceiveFailed(
         val receiveResult: IncomingTransportReceiveResult

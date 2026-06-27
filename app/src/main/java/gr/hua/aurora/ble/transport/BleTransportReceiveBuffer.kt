@@ -16,9 +16,9 @@ class BleTransportReceiveBuffer(
     }
 
     fun buffer(
-        frame: BleGattTransportFrame
+        frame: BleTransportIncomingFrame
     ): BufferResult {
-        val chunk = BleGattTransportChunk.parse(frame)
+        val chunk = BleGattTransportChunk.parse(frame.frame)
             ?: return BufferResult.InvalidChunk(
                 reason = "Transport frame does not contain a valid chunk body."
             )
@@ -36,13 +36,20 @@ class BleTransportReceiveBuffer(
         }
 
         val group = existingGroup ?: GroupState(
-            expectedChunks = chunk.totalChunks
+            expectedChunks = chunk.totalChunks,
+            sourceDeviceAddress = frame.sanitizedSourceDeviceAddress
         ).also { groups[chunk.groupId] = it }
 
         if (group.expectedChunks != chunk.totalChunks) {
             groups.remove(chunk.groupId)
             return BufferResult.InvalidChunk(
                 reason = "Transport chunk group ${chunk.groupId} changed totalChunks from ${group.expectedChunks} to ${chunk.totalChunks}."
+            )
+        }
+        if (group.sourceDeviceAddress != frame.sanitizedSourceDeviceAddress) {
+            groups.remove(chunk.groupId)
+            return BufferResult.InvalidChunk(
+                reason = "Transport chunk group ${chunk.groupId} changed source device address."
             )
         }
         if (group.framesByIndex.containsKey(chunk.chunkIndex)) {
@@ -58,7 +65,7 @@ class BleTransportReceiveBuffer(
             )
         }
 
-        group.framesByIndex[chunk.chunkIndex] = frame
+        group.framesByIndex[chunk.chunkIndex] = frame.frame
         if (group.framesByIndex.size < group.expectedChunks) {
             return BufferResult.Buffered(
                 groupId = chunk.groupId,
@@ -76,6 +83,7 @@ class BleTransportReceiveBuffer(
 
         return BufferResult.Complete(
             groupId = chunk.groupId,
+            sourceDeviceAddress = group.sourceDeviceAddress,
             frames = frames
         )
     }
@@ -97,6 +105,7 @@ class BleTransportReceiveBuffer(
 
         data class Complete(
             val groupId: Int,
+            val sourceDeviceAddress: String?,
             val frames: List<BleGattTransportFrame>
         ) : BufferResult
 
@@ -115,7 +124,8 @@ class BleTransportReceiveBuffer(
     }
 
     private class GroupState(
-        val expectedChunks: Int
+        val expectedChunks: Int,
+        val sourceDeviceAddress: String?
     ) {
         val framesByIndex = LinkedHashMap<Int, BleGattTransportFrame>()
     }

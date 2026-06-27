@@ -65,7 +65,7 @@ class GlobalMeshDeliveryCoordinatorTest {
         val decodedFrame = decodeCapturedFrame(capturedPlan)
         assertEquals(message.messageId, decodedFrame.id)
         assertEquals("sender-1", decodedFrame.senderId)
-        assertEquals(2, decodedFrame.ttl)
+        assertEquals(10, decodedFrame.ttl)
         assertEquals(message.userText, decodedFrame.payload)
         assertEquals(MessageStatus.QUEUED, message.status)
     }

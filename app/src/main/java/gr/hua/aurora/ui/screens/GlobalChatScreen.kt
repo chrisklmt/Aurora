@@ -269,6 +269,8 @@ internal fun globalChatMeshStatusText(
     return when (meshDeliveryResult) {
         is GlobalMeshDeliveryResult.QueuedToActivePeer ->
             "Global mesh queued to active peer ${meshDeliveryResult.peerId}."
+        is GlobalMeshDeliveryResult.QueuedToPeers ->
+            "Global mesh queued to ${meshDeliveryResult.peerIds.size} peers."
 
         GlobalMeshDeliveryResult.NoReachablePeers ->
             "No reachable Aurora peers."
@@ -302,6 +304,7 @@ internal fun globalChatDeliveryValue(
     val status = lastGlobalMeshStatus?.trim()?.takeIf { it.isNotEmpty() }?.removeSuffix(".")
     return when (meshDeliveryResult) {
         is GlobalMeshDeliveryResult.QueuedToActivePeer -> meshDeliveryResult.peerId
+        is GlobalMeshDeliveryResult.QueuedToPeers -> "${meshDeliveryResult.peerIds.size} peers"
         GlobalMeshDeliveryResult.NoReachablePeers -> "failed"
         GlobalMeshDeliveryResult.SenderUnavailable -> "failed"
         is GlobalMeshDeliveryResult.ConnectOnSendFailed -> "failed"

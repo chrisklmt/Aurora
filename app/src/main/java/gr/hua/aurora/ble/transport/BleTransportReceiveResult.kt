@@ -12,6 +12,7 @@ sealed interface BleTransportReceiveResult {
 
     data class Processed(
         val groupId: Int,
+        val sourceDeviceAddress: String? = null,
         val processingResult: IncomingTransportFrameProcessingSuccessResult
     ) : BleTransportReceiveResult
 
@@ -32,6 +33,7 @@ sealed interface BleTransportReceiveResult {
 
     data class ProcessorFailed(
         val groupId: Int,
+        val sourceDeviceAddress: String? = null,
         val processingResult: IncomingTransportFrameProcessingResult.ReceiveFailed
     ) : BleTransportReceiveResult
 

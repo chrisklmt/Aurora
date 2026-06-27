@@ -400,6 +400,49 @@ class IncomingMessageReceiveUseCaseTest {
         assertArrayEquals(senderPublicKey, message.senderPublicKey)
     }
 
+    @Test
+    fun privateRelayEnvelopeWithoutSessionMaterialIsSurfacedForRelayOnly() {
+        val senderPublicKey = senderPublicKeyBytes()
+        val frame = MessageFrame(
+            id = "incoming-private-relay-only",
+            type = MessageFrameType.PRIVATE_TEXT,
+            senderId = "peer-private",
+            recipientId = "peer-target",
+            createdAtMillis = 1_715_401_888L,
+            payload = "encrypted private payload"
+        )
+        val envelope = EncryptedMessageEnvelopeBuilder.build(
+            senderPublicKey = senderPublicKey,
+            keyBytes = deterministicKey(95),
+            plaintext = MessageFrameCodec.encode(frame).toByteArray(UTF_8),
+            authenticatedData = "incoming-relay-only-aad".toByteArray(UTF_8),
+            relayMetadata = EncryptedMessageRelayMetadata(
+                messageId = frame.id,
+                messageType = MessageFrameType.PRIVATE_TEXT,
+                ttl = 4
+            )
+        )
+        val frames = BleGattTransportFrameChunker.chunk(
+            encodedEnvelopeBytes = EncryptedMessageEnvelopeCodec.encode(envelope).toByteArray(UTF_8),
+            groupId = 0x3113
+        )
+
+        val result = IncomingMessageReceiveUseCase.receive(
+            frames = frames,
+            sessionMaterialProvider = fixedProvider(
+                IncomingSessionMaterialLookupResult.MaterialUnavailable(
+                    reason = "Incoming session material is unavailable for the sender."
+                )
+            )
+        )
+
+        assertTrue(result is IncomingTransportReceiveResult.RelayOnlyEncrypted)
+        val relayOnly = result as IncomingTransportReceiveResult.RelayOnlyEncrypted
+        assertEquals(frame.id, requireNotNull(relayOnly.envelope.relayMetadata).messageId)
+        assertEquals(MessageFrameType.PRIVATE_TEXT, relayOnly.envelope.relayMetadata?.messageType)
+        assertEquals(4, relayOnly.envelope.relayMetadata?.ttl)
+    }
+
     private fun transportFramesFor(
         frame: MessageFrame,
         senderPublicKey: ByteArray,

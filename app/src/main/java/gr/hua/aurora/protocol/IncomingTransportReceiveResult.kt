@@ -5,6 +5,10 @@ sealed interface IncomingTransportReceiveResult {
         val message: IncomingTransportMessage
     ) : IncomingTransportReceiveResult
 
+    data class RelayOnlyEncrypted(
+        val envelope: EncryptedMessageEnvelope
+    ) : IncomingTransportReceiveResult
+
     data class IncompleteChunks(
         val reason: String
     ) : IncomingTransportReceiveResult {

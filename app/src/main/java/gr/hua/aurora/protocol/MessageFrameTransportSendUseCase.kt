@@ -19,15 +19,18 @@ object MessageFrameTransportSendUseCase {
             senderPublicKey = encryptionMaterial.senderPublicKey,
             keyBytes = encryptionMaterial.keyBytes,
             plaintext = encodedFrameBytes,
-            authenticatedData = encryptionMaterial.authenticatedData
+            authenticatedData = encryptionMaterial.authenticatedData,
+            relayMetadata = EncryptedMessageRelayMetadata(
+                messageId = frame.id,
+                messageType = frame.type,
+                ttl = frame.ttl
+            )
         )
-        val encodedEnvelopeBytes = EncryptedMessageEnvelopeCodec.encode(envelope).toByteArray(UTF_8)
-        return submitEncodedPayload(
-            messageId = frame.id,
+        return sendEncryptedEnvelope(
+            envelope = envelope,
+            transportSender = transportSender,
             targetPeerId = targetPeerId ?: frame.recipientId,
-            sourceCreatedAtMillis = frame.createdAtMillis,
-            encodedPayloadBytes = encodedEnvelopeBytes,
-            transportSender = transportSender
+            sourceCreatedAtMillis = frame.createdAtMillis
         )
     }
 
@@ -46,10 +49,30 @@ object MessageFrameTransportSendUseCase {
         )
     }
 
+    suspend fun sendEncryptedEnvelope(
+        envelope: EncryptedMessageEnvelope,
+        transportSender: BleTransportSender,
+        targetPeerId: String? = null,
+        sourceCreatedAtMillis: Long? = null
+    ): BleTransportSendResult {
+        val relayMessageId = envelope.relayMetadata?.messageId?.trim()?.takeIf { it.isNotEmpty() }
+            ?: return BleTransportSendResult.Failed(
+                reason = "Encrypted relay metadata is missing the message id."
+            )
+        val encodedEnvelopeBytes = EncryptedMessageEnvelopeCodec.encode(envelope).toByteArray(UTF_8)
+        return submitEncodedPayload(
+            messageId = relayMessageId,
+            targetPeerId = targetPeerId,
+            sourceCreatedAtMillis = sourceCreatedAtMillis,
+            encodedPayloadBytes = encodedEnvelopeBytes,
+            transportSender = transportSender
+        )
+    }
+
     private suspend fun submitEncodedPayload(
         messageId: String,
         targetPeerId: String?,
-        sourceCreatedAtMillis: Long,
+        sourceCreatedAtMillis: Long?,
         encodedPayloadBytes: ByteArray,
         transportSender: BleTransportSender
     ): BleTransportSendResult {

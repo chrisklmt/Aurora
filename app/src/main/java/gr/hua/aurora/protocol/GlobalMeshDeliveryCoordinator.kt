@@ -6,8 +6,7 @@ import gr.hua.aurora.ble.transport.BleTransportSender
 import gr.hua.aurora.model.OutgoingChatMessage
 import gr.hua.aurora.state.IncomingMessageIngestionResult
 
-private const val defaultGlobalMeshTtl = 2
-private const val maxRememberedGlobalMeshMessageIds = 256
+private const val defaultGlobalMeshTtl = 10
 
 data class GlobalMeshDiagnostics(
     val reachablePeerCount: Int,
@@ -21,7 +20,20 @@ data class GlobalMeshDiagnostics(
 sealed interface GlobalMeshDeliveryResult {
     data class QueuedToActivePeer(
         val peerId: String
-    ) : GlobalMeshDeliveryResult
+) : GlobalMeshDeliveryResult
+
+    data class QueuedToPeers(
+        val peerIds: List<String>
+    ) : GlobalMeshDeliveryResult {
+        init {
+            require(peerIds.isNotEmpty()) {
+                "Queued mesh peer list must not be empty."
+            }
+            require(peerIds.none { it.isBlank() }) {
+                "Queued mesh peer ids must not be blank."
+            }
+        }
+    }
 
     data object NoReachablePeers : GlobalMeshDeliveryResult
 
@@ -65,7 +77,7 @@ sealed interface GlobalMeshDeliveryResult {
 }
 
 class GlobalMeshDeliveryCoordinator {
-    private val seenMessageIds = LinkedHashSet<String>()
+    private val seenMessageIds = SeenMessageIdCache()
     private var lastResult: GlobalMeshDeliveryResult? = null
 
     fun diagnosticsSnapshot(
@@ -82,9 +94,64 @@ class GlobalMeshDeliveryCoordinator {
             reachablePeerIds = sanitizedReachablePeerIds,
             activeTransportPeerId = sanitizedActivePeerId,
             seenMessageCount = seenMessageIds.size,
-            onlyOneActiveTransportPeerSupported = true,
+            onlyOneActiveTransportPeerSupported = false,
             lastResult = lastResult
         )
+    }
+
+    fun prepareLocalPublicFrame(
+        message: OutgoingChatMessage,
+        senderId: String
+    ): MessageFrame? {
+        require(message.threadId == globalThreadId) {
+            "Global mesh delivery only supports the global thread."
+        }
+
+        val resolvedFrame = OutgoingMessageFrameResolver.resolve(
+            draft = OutgoingMessageFrameBuilder.build(message),
+            senderId = senderId
+        ).copy(ttl = defaultGlobalMeshTtl)
+        if (!rememberSeenMessageId(resolvedFrame.id)) {
+            record(GlobalMeshDeliveryResult.SkippedDuplicate(messageId = resolvedFrame.id))
+            return null
+        }
+        return resolvedFrame
+    }
+
+    fun evaluateMeshRelay(
+        messageId: String,
+        ttl: Int,
+        ingestionResult: IncomingMessageIngestionResult? = null
+    ): MeshRelayEvaluation {
+        if (!rememberSeenMessageId(messageId) || ingestionResult is IncomingMessageIngestionResult.Duplicate) {
+            return MeshRelayEvaluation(
+                messageId = messageId,
+                shouldForward = false,
+                remainingTtl = null,
+                terminalResult = GlobalMeshDeliveryResult.SkippedDuplicate(messageId = messageId)
+            )
+        }
+        if (ttl <= 1) {
+            return MeshRelayEvaluation(
+                messageId = messageId,
+                shouldForward = false,
+                remainingTtl = null,
+                terminalResult = GlobalMeshDeliveryResult.SkippedTtlExpired(messageId = messageId)
+            )
+        }
+
+        return MeshRelayEvaluation(
+            messageId = messageId,
+            shouldForward = true,
+            remainingTtl = ttl - 1,
+            terminalResult = null
+        )
+    }
+
+    fun recordResult(
+        result: GlobalMeshDeliveryResult
+    ): GlobalMeshDeliveryResult {
+        return record(result)
     }
 
     suspend fun submitLocalMessage(
@@ -93,18 +160,14 @@ class GlobalMeshDeliveryCoordinator {
         transportSender: BleTransportSender?,
         activeTransportPeerId: String?
     ): GlobalMeshDeliveryResult {
-        require(message.threadId == globalThreadId) {
-            "Global mesh delivery only supports the global thread."
-        }
-
         val targetPeerId = sanitizePeerId(activeTransportPeerId)
             ?: return record(GlobalMeshDeliveryResult.NoReachablePeers)
         val sender = resolveTransportSender(transportSender)
             ?: return record(GlobalMeshDeliveryResult.SenderUnavailable)
-        val resolvedFrame = OutgoingMessageFrameResolver.resolve(
-            draft = OutgoingMessageFrameBuilder.build(message),
+        val resolvedFrame = prepareLocalPublicFrame(
+            message = message,
             senderId = senderId
-        ).copy(ttl = defaultGlobalMeshTtl)
+        ) ?: return requireNotNull(lastResult)
         val sendResult = MessageFrameTransportSendUseCase.sendPublic(
             frame = resolvedFrame,
             transportSender = sender,
@@ -112,10 +175,8 @@ class GlobalMeshDeliveryCoordinator {
         )
 
         return when (sendResult) {
-            BleTransportSendResult.QueuedLocally -> {
-                rememberSeenMessageId(resolvedFrame.id)
+            BleTransportSendResult.QueuedLocally ->
                 record(GlobalMeshDeliveryResult.QueuedToActivePeer(peerId = targetPeerId))
-            }
             BleTransportSendResult.NotAvailable ->
                 record(GlobalMeshDeliveryResult.SenderUnavailable)
 
@@ -136,11 +197,13 @@ class GlobalMeshDeliveryCoordinator {
             "Global mesh relay only supports global text frames."
         }
 
-        if (!rememberSeenMessageId(frame.id) || ingestionResult is IncomingMessageIngestionResult.Duplicate) {
-            return record(GlobalMeshDeliveryResult.SkippedDuplicate(messageId = frame.id))
-        }
-        if (frame.ttl <= 1) {
-            return record(GlobalMeshDeliveryResult.SkippedTtlExpired(messageId = frame.id))
+        val relayEvaluation = evaluateMeshRelay(
+            messageId = frame.id,
+            ttl = frame.ttl,
+            ingestionResult = ingestionResult
+        )
+        relayEvaluation.terminalResult?.let { terminalResult ->
+            return record(terminalResult)
         }
 
         val targetPeerId = sanitizePeerId(activeTransportPeerId)
@@ -152,7 +215,7 @@ class GlobalMeshDeliveryCoordinator {
 
         val sender = resolveTransportSender(transportSender)
             ?: return record(GlobalMeshDeliveryResult.SenderUnavailable)
-        val relayFrame = frame.copy(ttl = frame.ttl - 1)
+        val relayFrame = frame.copy(ttl = requireNotNull(relayEvaluation.remainingTtl))
         val sendResult = MessageFrameTransportSendUseCase.sendPublic(
             frame = relayFrame,
             transportSender = sender,
@@ -190,14 +253,7 @@ class GlobalMeshDeliveryCoordinator {
     private fun rememberSeenMessageId(
         messageId: String
     ): Boolean {
-        val wasAdded = seenMessageIds.add(messageId)
-        if (wasAdded && seenMessageIds.size > maxRememberedGlobalMeshMessageIds) {
-            val oldestMessageId = seenMessageIds.firstOrNull()
-            if (oldestMessageId != null) {
-                seenMessageIds.remove(oldestMessageId)
-            }
-        }
-        return wasAdded
+        return seenMessageIds.markSeen(messageId)
     }
 
     private fun record(
@@ -211,3 +267,10 @@ class GlobalMeshDeliveryCoordinator {
         private const val globalThreadId = "global"
     }
 }
+
+data class MeshRelayEvaluation(
+    val messageId: String,
+    val shouldForward: Boolean,
+    val remainingTtl: Int?,
+    val terminalResult: GlobalMeshDeliveryResult?
+)

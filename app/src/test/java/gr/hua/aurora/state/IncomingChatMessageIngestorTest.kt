@@ -98,6 +98,41 @@ class IncomingChatMessageIngestorTest {
     }
 
     @Test
+    fun globalIncomingMessagesWithSameTextButDifferentIdsAreBothAccepted() {
+        val state = SampleAuroraState.create(
+            generatedUsername = "PIAIUFN1"
+        )
+        val firstFrame = MessageFrame(
+            id = "incoming-global-same-text-1",
+            type = MessageFrameType.GLOBAL_TEXT,
+            senderId = "peer-alex",
+            createdAtMillis = 10_001L,
+            payload = "same text"
+        )
+        val secondFrame = firstFrame.copy(
+            id = "incoming-global-same-text-2",
+            createdAtMillis = 10_002L
+        )
+
+        val firstOutcome = IncomingChatMessageIngestor.ingest(
+            state = state,
+            frame = firstFrame
+        )
+        val secondOutcome = IncomingChatMessageIngestor.ingest(
+            state = firstOutcome.updatedState,
+            frame = secondFrame
+        )
+
+        assertTrue(firstOutcome.result is IncomingMessageIngestionResult.Appended)
+        assertTrue(secondOutcome.result is IncomingMessageIngestionResult.Appended)
+        assertEquals(2, secondOutcome.updatedState.globalMessages.size)
+        assertEquals(
+            listOf(firstFrame.id, secondFrame.id),
+            secondOutcome.updatedState.globalMessages.map { it.id }
+        )
+    }
+
+    @Test
     fun privateIncomingFrameAppendsToMatchingPrivateChatOnly() {
         val state = SampleAuroraState.create(
             generatedUsername = "PIAIUFN1"

@@ -24,6 +24,7 @@ import gr.hua.aurora.model.MessageStatus
 import gr.hua.aurora.model.OutgoingChatMessage
 import gr.hua.aurora.protocol.EncryptedMessageEnvelopeBuilder
 import gr.hua.aurora.protocol.EncryptedMessageEnvelopeCodec
+import gr.hua.aurora.protocol.EncryptedMessageRelayMetadata
 import gr.hua.aurora.protocol.IncomingTransportMessage
 import gr.hua.aurora.protocol.IncomingTransportReceiveResult
 import gr.hua.aurora.protocol.LocalPeerSessionIdentityMaterial
@@ -38,7 +39,10 @@ import gr.hua.aurora.protocol.OutgoingMessageSendEncryptionMaterial
 import gr.hua.aurora.protocol.PeerIdentityExchangeMessage
 import gr.hua.aurora.protocol.PeerIdentityExchangeHandlingResult
 import gr.hua.aurora.protocol.PeerIdentityExchangeSendResult
+import gr.hua.aurora.protocol.PrivateChatMessagePayload
+import gr.hua.aurora.protocol.PrivateChatMessagePayloadCodec
 import gr.hua.aurora.protocol.PrivateChatMessageSendResult
+import gr.hua.aurora.protocol.SeenMessageIdCache
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -218,8 +222,8 @@ class AuroraBleRuntimeHostTest {
         assertEquals(1, transportSender.sendCallCount)
         assertEquals(
             listOf(
-                "Public mesh connect-on-send: pending for 3032547611223344.",
-                "Public mesh connect-on-send: succeeded for 3032547611223344."
+                "Mesh connect-on-send: pending for 3032547611223344.",
+                "Mesh connect-on-send: succeeded for 3032547611223344."
             ),
             statusUpdates
         )
@@ -284,6 +288,69 @@ class AuroraBleRuntimeHostTest {
 
         assertEquals(GlobalMeshDeliveryResult.NoReachablePeers, result)
         assertEquals(0, transportSender.sendCallCount)
+    }
+
+    @Test
+    fun publicRelayExcludesImmediatePreviousHopAndForwardsOtherEligibleNeighbors() {
+        val coordinator = GlobalMeshDeliveryCoordinator()
+        val transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally)
+        val sourcePeer = reachableAuroraPeer(
+            address = "AA:BB:CC:00:00:0D",
+            stableIdHex = "d032547611223344"
+        )
+        val otherPeer = reachableAuroraPeer(
+            address = "AA:BB:CC:00:00:0E",
+            stableIdHex = "e032547611223344"
+        )
+        val connectedPeerIds = mutableListOf<String>()
+        val message = IncomingTransportMessage(
+            frame = MessageFrame(
+                id = "relay-global-1",
+                type = MessageFrameType.GLOBAL_TEXT,
+                senderId = "peer-origin",
+                createdAtMillis = 1_716_300_050L,
+                ttl = 5,
+                payload = "relay once"
+            )
+        )
+
+        val result = runSuspending {
+            relayReceivedPublicMeshMessage(
+                message = message,
+                ingestionResult = IncomingMessageIngestionResult.Appended(
+                    message = ChatMessage(
+                        id = message.frame.id,
+                        threadId = "global",
+                        senderId = message.frame.senderId,
+                        senderName = message.frame.senderId,
+                        text = message.frame.payload,
+                        createdAtMillis = message.frame.createdAtMillis,
+                        status = MessageStatus.RECEIVED,
+                        isOutgoing = false
+                    )
+                ),
+                coordinator = coordinator,
+                transportSender = transportSender,
+                activeTransportPeerId = runtimeReachablePeerId(sourcePeer),
+                activeTransportDeviceAddress = sourcePeer.address,
+                isActiveTransportConnected = true,
+                localPeerId = "local-self",
+                reachablePeers = listOf(sourcePeer, otherPeer),
+                immediateSourcePeerId = runtimeReachablePeerId(sourcePeer),
+                immediateSourceDeviceAddress = sourcePeer.address,
+                connectToReachablePeer = {
+                    connectedPeerIds += runtimeReachablePeerId(it)
+                    PublicMeshConnectOnSendResult.Connected(peerId = runtimeReachablePeerId(it))
+                }
+            )
+        }
+
+        assertEquals(
+            GlobalMeshDeliveryResult.QueuedToActivePeer("e032547611223344"),
+            result
+        )
+        assertEquals(listOf("e032547611223344"), connectedPeerIds)
+        assertEquals(listOf("e032547611223344"), transportSender.sentTargetPeerIds)
     }
 
     @Test
@@ -401,11 +468,11 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
-    fun privateChatMarksFailedWhenTargetContactIsNotReachable() {
+    fun privateChatCanRelayThroughReachableNeighborEvenWhenTargetIsNotDirectlyReachable() {
         val targetPeerId = "8032547611223344"
         val material = testPrivateEncryptionMaterial()
         val transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally)
-        val wrongPeer = reachableAuroraPeer(
+        val relayPeer = reachableAuroraPeer(
             address = "AA:BB:CC:00:00:07",
             stableIdHex = "9032547611223344"
         )
@@ -420,23 +487,24 @@ class AuroraBleRuntimeHostTest {
                 sessionMaterialProvider = FakeOutgoingSessionMaterialProvider(
                     materialByPeerId = mapOf(targetPeerId to material)
                 ),
-                activeTransportPeerId = wrongPeer.stablePeerId?.toByteArray()?.joinToString("") { byte ->
+                activeTransportPeerId = relayPeer.stablePeerId?.toByteArray()?.joinToString("") { byte ->
                     "%02x".format(byte.toInt() and 0xFF)
                 },
                 isActiveTransportConnected = true,
-                reachablePeers = listOf(wrongPeer),
+                reachablePeers = listOf(relayPeer),
                 connectToReachablePeer = {
-                    error("private connect-on-send must not connect to a different reachable peer")
+                    error("private mesh relay should use the already-connected relay peer")
                 }
             )
         }
 
-        assertEquals(PrivateChatMessageSendResult.ContactNotReachable, result)
-        assertEquals(0, transportSender.sendCallCount)
+        assertEquals(PrivateChatMessageSendResult.SubmittedLocally, result)
+        assertEquals(1, transportSender.sendCallCount)
+        assertEquals(listOf("9032547611223344"), transportSender.sentTargetPeerIds)
     }
 
     @Test
-    fun privateChatDoesNotSendThroughWrongActivePeerWhenExactTargetIsReachable() {
+    fun privateChatFansOutAcrossReachableMeshNeighbors() {
         val targetPeerId = "a032547611223344"
         val material = testPrivateEncryptionMaterial()
         val transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally)
@@ -473,8 +541,89 @@ class AuroraBleRuntimeHostTest {
 
         assertEquals(listOf(targetPeerId), connectedPeerIds)
         assertEquals(PrivateChatMessageSendResult.SubmittedLocally, result)
-        assertEquals(1, transportSender.sendCallCount)
+        assertEquals(2, transportSender.sendCallCount)
+        assertEquals(
+            listOf(wrongActivePeerId, targetPeerId),
+            transportSender.sentTargetPeerIds
+        )
         assertEquals(targetPeerId, requireNotNull(transportSender.capturedPlan).targetPeerId)
+    }
+
+    @Test
+    fun privateRelayDuplicateMessageIdIsForwardedOnlyOnce() {
+        val transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally)
+        val relayPeer = reachableAuroraPeer(
+            address = "AA:BB:CC:00:00:0F",
+            stableIdHex = "f032547611223344"
+        )
+        val messageId = "relay-private-duplicate"
+        val material = testPrivateEncryptionMaterial()
+        val privateFrame = MessageFrame(
+            id = messageId,
+            type = MessageFrameType.PRIVATE_TEXT,
+            senderId = "peer-origin",
+            recipientId = "peer-target",
+            createdAtMillis = 1_716_300_200L,
+            payload = PrivateChatMessagePayloadCodec.encode(
+                PrivateChatMessagePayload(
+                    privateChatId = "chat-peer-target",
+                    senderUsername = "Alice",
+                    body = "secret"
+                )
+            )
+        )
+        val envelope = EncryptedMessageEnvelopeBuilder.build(
+            senderPublicKey = material.senderPublicKey,
+            keyBytes = material.keyBytes,
+            plaintext = MessageFrameCodec.encode(privateFrame).toByteArray(UTF_8),
+            authenticatedData = material.authenticatedData,
+            relayMetadata = EncryptedMessageRelayMetadata(
+                messageId = messageId,
+                messageType = MessageFrameType.PRIVATE_TEXT,
+                ttl = 4
+            )
+        )
+        val seenMessageIds = SeenMessageIdCache()
+
+        val firstResult = runSuspending {
+            relayPrivateEncryptedMessage(
+                envelope = envelope,
+                seenMessageIds = seenMessageIds,
+                transportSender = transportSender,
+                activeTransportPeerId = null,
+                activeTransportDeviceAddress = null,
+                isActiveTransportConnected = false,
+                localPeerId = "local-self",
+                reachablePeers = listOf(relayPeer),
+                immediateSourcePeerId = "peer-source",
+                immediateSourceDeviceAddress = "AA:BB:CC:00:00:10",
+                connectToReachablePeer = {
+                    PublicMeshConnectOnSendResult.Connected(peerId = runtimeReachablePeerId(it))
+                }
+            )
+        }
+        val secondResult = runSuspending {
+            relayPrivateEncryptedMessage(
+                envelope = envelope,
+                seenMessageIds = seenMessageIds,
+                transportSender = transportSender,
+                activeTransportPeerId = null,
+                activeTransportDeviceAddress = null,
+                isActiveTransportConnected = false,
+                localPeerId = "local-self",
+                reachablePeers = listOf(relayPeer),
+                immediateSourcePeerId = "peer-source",
+                immediateSourceDeviceAddress = "AA:BB:CC:00:00:10",
+                connectToReachablePeer = {
+                    PublicMeshConnectOnSendResult.Connected(peerId = runtimeReachablePeerId(it))
+                }
+            )
+        }
+
+        assertNotNull(firstResult)
+        assertEquals(listOf("f032547611223344"), transportSender.sentTargetPeerIds)
+        assertEquals(1, transportSender.sendCallCount)
+        assertNull(secondResult)
     }
 
     @Test
@@ -1103,6 +1252,7 @@ class AuroraBleRuntimeHostTest {
     ) : BleTransportSender {
         var capturedPlan: OutgoingBleTransportSendPlan? = null
         var sendCallCount: Int = 0
+        val sentTargetPeerIds = mutableListOf<String?>()
 
         override fun send(
             plan: OutgoingBleTransportSendPlan,
@@ -1110,6 +1260,7 @@ class AuroraBleRuntimeHostTest {
         ) {
             sendCallCount += 1
             capturedPlan = plan
+            sentTargetPeerIds += plan.targetPeerId
             listener.onSendResult(result)
         }
     }
