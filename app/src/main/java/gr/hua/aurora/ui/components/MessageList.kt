@@ -15,13 +15,16 @@ data class MessageListItem(
     val text: String,
     val isOutgoing: Boolean = false,
     val timestampLabel: String? = null,
-    val supportingLabel: String? = null
+    val supportingLabel: String? = null,
+    val actionLabel: String? = null,
+    val actionMessageId: String? = null
 )
 
 @Composable
 fun MessageList(
     messages: List<MessageListItem>,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onMessageAction: ((String) -> Unit)? = null
 ) {
     // Σε αυτό το βήμα το list δουλεύει με απλό UI data class ώστε να μείνει ανεξάρτητο από domain models.
     val listState = rememberLazyListState()
@@ -44,7 +47,13 @@ fun MessageList(
                 text = message.text,
                 isOwnMessage = message.isOutgoing,
                 timestampLabel = message.timestampLabel,
-                supportingLabel = message.supportingLabel
+                supportingLabel = message.supportingLabel,
+                actionLabel = message.actionLabel,
+                onActionClick = message.actionMessageId?.let { messageId ->
+                    {
+                        onMessageAction?.invoke(messageId)
+                    }
+                }
             )
         }
     }

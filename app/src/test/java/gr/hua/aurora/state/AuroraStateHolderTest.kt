@@ -149,12 +149,12 @@ class AuroraStateHolderTest {
             holder.uiState.globalMeshDeliveryResult
         )
         assertEquals(1, holder.uiState.pendingOutgoingMessages.size)
-        assertEquals(MessageStatus.QUEUED, holder.uiState.pendingOutgoingMessages.single().status)
+        assertEquals(MessageStatus.SENT, holder.uiState.pendingOutgoingMessages.single().status)
         assertNotEquals(MessageStatus.DELIVERED, visibleMessage.status)
     }
 
     @Test
-    fun missingSessionMeshDeliveryKeepsVisibleGlobalMessagePending() {
+    fun missingSessionMeshDeliveryMarksVisibleGlobalMessageFailedButRetryable() {
         val holder = createHolder(
             store = FakeProfileStore(),
             generatedUsername = "PIAIUFN1"
@@ -168,17 +168,17 @@ class AuroraStateHolderTest {
         )
 
         val visibleMessage = holder.uiState.globalMessages.last()
-        assertEquals(MessageStatus.QUEUED, visibleMessage.status)
+        assertEquals(MessageStatus.FAILED, visibleMessage.status)
         assertEquals(
             GlobalMeshDeliveryResult.SenderUnavailable,
             holder.uiState.globalMeshDeliveryResult
         )
         assertEquals(1, holder.uiState.pendingOutgoingMessages.size)
-        assertEquals(MessageStatus.QUEUED, holder.uiState.pendingOutgoingMessages.single().status)
+        assertEquals(MessageStatus.FAILED, holder.uiState.pendingOutgoingMessages.single().status)
     }
 
     @Test
-    fun noReachablePeerMeshDeliveryKeepsVisibleGlobalMessagePending() {
+    fun noReachablePeerMeshDeliveryMarksVisibleGlobalMessageFailedButRetryable() {
         val holder = createHolder(
             store = FakeProfileStore(),
             generatedUsername = "PIAIUFN1"
@@ -192,13 +192,13 @@ class AuroraStateHolderTest {
         )
 
         val visibleMessage = holder.uiState.globalMessages.last()
-        assertEquals(MessageStatus.QUEUED, visibleMessage.status)
+        assertEquals(MessageStatus.FAILED, visibleMessage.status)
         assertEquals(
             GlobalMeshDeliveryResult.NoReachablePeers,
             holder.uiState.globalMeshDeliveryResult
         )
         assertEquals(1, holder.uiState.pendingOutgoingMessages.size)
-        assertEquals(MessageStatus.QUEUED, holder.uiState.pendingOutgoingMessages.single().status)
+        assertEquals(MessageStatus.FAILED, holder.uiState.pendingOutgoingMessages.single().status)
     }
 
     @Test
@@ -217,8 +217,81 @@ class AuroraStateHolderTest {
 
         assertEquals(MessageStatus.FAILED, holder.uiState.globalMessages.last().status)
         assertEquals(1, holder.uiState.pendingOutgoingMessages.size)
-        assertEquals(MessageStatus.QUEUED, holder.uiState.pendingOutgoingMessages.single().status)
+        assertEquals(MessageStatus.FAILED, holder.uiState.pendingOutgoingMessages.single().status)
         assertNotEquals(MessageStatus.DELIVERED, holder.uiState.globalMessages.last().status)
+    }
+
+    @Test
+    fun globalRetryReusesSameMessageWithoutDuplicatingBubble() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1"
+        )
+
+        val queuedMessage = requireNotNull(holder.sendGlobalPreviewMessage("retry me"))
+        holder.handleGlobalMeshDeliveryResult(
+            messageId = queuedMessage.messageId,
+            result = GlobalMeshDeliveryResult.NoReachablePeers
+        )
+
+        val retriedMessage = requireNotNull(holder.retryGlobalOutgoingMessage(queuedMessage.messageId))
+
+        assertEquals(1, holder.uiState.globalMessages.size)
+        assertEquals(queuedMessage.messageId, retriedMessage.messageId)
+        assertEquals(MessageStatus.QUEUED, holder.uiState.globalMessages.single().status)
+        assertEquals(MessageStatus.QUEUED, holder.uiState.pendingOutgoingMessages.single().status)
+        assertNull(holder.uiState.globalMeshDeliveryResult)
+    }
+
+    @Test
+    fun globalRetryCanPromoteSameMessageToSentOnLaterSuccess() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1"
+        )
+
+        val queuedMessage = requireNotNull(holder.sendGlobalPreviewMessage("retry success"))
+        holder.handleGlobalMeshDeliveryResult(
+            messageId = queuedMessage.messageId,
+            result = GlobalMeshDeliveryResult.SenderUnavailable
+        )
+        requireNotNull(holder.retryGlobalOutgoingMessage(queuedMessage.messageId))
+
+        holder.handleGlobalMeshDeliveryResult(
+            messageId = queuedMessage.messageId,
+            result = GlobalMeshDeliveryResult.QueuedToActivePeer("peer-123")
+        )
+
+        assertEquals(1, holder.uiState.globalMessages.size)
+        assertEquals(MessageStatus.SENT, holder.uiState.globalMessages.single().status)
+        assertEquals(MessageStatus.SENT, holder.uiState.pendingOutgoingMessages.single().status)
+    }
+
+    @Test
+    fun globalRetryCanFailAgainWithoutDuplicatingBubble() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1"
+        )
+
+        val queuedMessage = requireNotNull(holder.sendGlobalPreviewMessage("retry fail again"))
+        holder.handleGlobalMeshDeliveryResult(
+            messageId = queuedMessage.messageId,
+            result = GlobalMeshDeliveryResult.NoReachablePeers
+        )
+        requireNotNull(holder.retryGlobalOutgoingMessage(queuedMessage.messageId))
+
+        holder.handleGlobalMeshDeliveryResult(
+            messageId = queuedMessage.messageId,
+            result = GlobalMeshDeliveryResult.ConnectOnSendFailed(
+                peerId = "peer-123",
+                reason = "connection did not reach ready state"
+            )
+        )
+
+        assertEquals(1, holder.uiState.globalMessages.size)
+        assertEquals(MessageStatus.FAILED, holder.uiState.globalMessages.single().status)
+        assertEquals(MessageStatus.FAILED, holder.uiState.pendingOutgoingMessages.single().status)
     }
 
     @Test
@@ -512,7 +585,7 @@ class AuroraStateHolderTest {
             holder.latestPrivateChatDeliveryResultForPeerId("alex")
         )
         assertEquals(1, holder.uiState.pendingOutgoingMessages.size)
-        assertEquals(MessageStatus.QUEUED, holder.uiState.pendingOutgoingMessages.single().status)
+        assertEquals(MessageStatus.SENT, holder.uiState.pendingOutgoingMessages.single().status)
         assertNotEquals(MessageStatus.DELIVERED, visibleMessage.status)
     }
 
@@ -538,7 +611,7 @@ class AuroraStateHolderTest {
             holder.latestPrivateChatDeliveryResultForPeerId("alex")
         )
         assertEquals(1, holder.uiState.pendingOutgoingMessages.size)
-        assertEquals(MessageStatus.QUEUED, holder.uiState.pendingOutgoingMessages.single().status)
+        assertEquals(MessageStatus.FAILED, holder.uiState.pendingOutgoingMessages.single().status)
     }
 
     @Test
@@ -562,6 +635,79 @@ class AuroraStateHolderTest {
             PrivateChatMessageSendResult.ContactNotReachable,
             holder.latestPrivateChatDeliveryResultForPeerId("alex")
         )
+        assertEquals(MessageStatus.FAILED, holder.uiState.pendingOutgoingMessages.single().status)
+    }
+
+    @Test
+    fun privateSendWithoutReadySessionCanStillFailCleanlyInsteadOfStayingPendingForever() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1"
+        )
+        holder.addOrUpdateContact(
+            canonicalPeerId = "alex",
+            displayName = "Alex",
+            hasSession = false
+        )
+        val queuedMessage = requireNotNull(holder.sendPrivateChatMessage("alex", "hello"))
+
+        holder.handlePrivateChatDeliveryResult(
+            peerId = "alex",
+            messageId = queuedMessage.messageId,
+            result = PrivateChatMessageSendResult.KeysUnavailable
+        )
+
+        assertEquals(MessageStatus.FAILED, holder.privateMessagesForPeerId("alex").single().status)
+        assertEquals(MessageStatus.FAILED, holder.uiState.pendingOutgoingMessages.single().status)
+    }
+
+    @Test
+    fun privateRetryReusesSameMessageWithoutDuplicatingBubble() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1"
+        )
+        prepareReadyPrivateChat(holder, peerId = "alex")
+        val queuedMessage = requireNotNull(holder.sendPrivateChatMessage("alex", "hello"))
+        holder.handlePrivateChatDeliveryResult(
+            peerId = "alex",
+            messageId = queuedMessage.messageId,
+            result = PrivateChatMessageSendResult.ContactNotReachable
+        )
+
+        val retriedMessage = requireNotNull(holder.retryPrivateChatOutgoingMessage("alex", queuedMessage.messageId))
+
+        assertEquals(1, holder.privateMessagesForPeerId("alex").size)
+        assertEquals(queuedMessage.messageId, retriedMessage.messageId)
+        assertEquals(MessageStatus.QUEUED, holder.privateMessagesForPeerId("alex").single().status)
+        assertEquals(MessageStatus.QUEUED, holder.uiState.pendingOutgoingMessages.single().status)
+        assertNull(holder.latestPrivateChatDeliveryResultForPeerId("alex"))
+    }
+
+    @Test
+    fun privateRetryCanPromoteSameMessageToSentAfterRecovery() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1"
+        )
+        prepareReadyPrivateChat(holder, peerId = "alex")
+        val queuedMessage = requireNotNull(holder.sendPrivateChatMessage("alex", "hello"))
+        holder.handlePrivateChatDeliveryResult(
+            peerId = "alex",
+            messageId = queuedMessage.messageId,
+            result = PrivateChatMessageSendResult.ContactNotReachable
+        )
+        requireNotNull(holder.retryPrivateChatOutgoingMessage("alex", queuedMessage.messageId))
+
+        holder.handlePrivateChatDeliveryResult(
+            peerId = "alex",
+            messageId = queuedMessage.messageId,
+            result = PrivateChatMessageSendResult.SubmittedLocally
+        )
+
+        assertEquals(1, holder.privateMessagesForPeerId("alex").size)
+        assertEquals(MessageStatus.SENT, holder.privateMessagesForPeerId("alex").single().status)
+        assertEquals(MessageStatus.SENT, holder.uiState.pendingOutgoingMessages.single().status)
     }
 
     @Test
@@ -714,7 +860,7 @@ class AuroraStateHolderTest {
     }
 
     @Test
-    fun globalAndPrivateMessagesSurviveStateRecreationWithoutRestoringOutgoingQueue() {
+    fun globalAndPrivateMessagesSurviveStateRecreationWithRetryableOutboxRestored() {
         val profileStore = FakeProfileStore().apply {
             generatedUsername = "PIAIUFN1"
         }
@@ -739,7 +885,11 @@ class AuroraStateHolderTest {
         assertEquals(1, restoredHolder.privateMessagesForPeerId("peer-123").size)
         assertEquals("hello private", restoredHolder.privateMessagesForPeerId("peer-123").single().text)
         assertEquals(MessageStatus.FAILED, restoredHolder.privateMessagesForPeerId("peer-123").single().status)
-        assertTrue(restoredHolder.uiState.pendingOutgoingMessages.isEmpty())
+        assertEquals(
+            listOf("global", "private:peer-123"),
+            restoredHolder.uiState.pendingOutgoingMessages.map { it.threadId }
+        )
+        assertTrue(restoredHolder.uiState.pendingOutgoingMessages.all { it.status == MessageStatus.FAILED })
         assertTrue(restoredHolder.uiState.globalMessages.none { it.status == MessageStatus.DELIVERED })
         assertTrue(restoredHolder.privateMessagesForPeerId("peer-123").none { it.status == MessageStatus.DELIVERED })
     }
@@ -759,6 +909,7 @@ class AuroraStateHolderTest {
         assertTrue(holder.privateMessagesForPeerId("peer-123").isEmpty())
         assertNull(holder.privateChatIdentityForPeerId("peer-123"))
         assertNull(holder.latestPrivateChatDeliveryResultForPeerId("peer-123"))
+        assertTrue(holder.uiState.pendingOutgoingMessages.none { it.threadId == "private:peer-123" })
         assertEquals("Alex", holder.findContactByPeerId("peer-123")?.displayName)
         assertEquals(false, holder.isPrivateChatReadyForPeerId("peer-123"))
     }

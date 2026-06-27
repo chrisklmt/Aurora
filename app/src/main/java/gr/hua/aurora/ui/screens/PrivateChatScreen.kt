@@ -48,6 +48,7 @@ fun PrivateChatScreen(
     lastIdentityExchangeStatus: String?,
     onBack: () -> Unit,
     onSendMessage: (String) -> Unit,
+    onRetryMessage: (String) -> Unit,
     onResetLocalData: () -> Unit
 ) {
     val content = buildPrivateChatScreenContent(
@@ -56,7 +57,7 @@ fun PrivateChatScreen(
         privateChatIdentity = privateChatIdentity,
         hasRuntimeSession = hasRuntimeSession
     )
-    val mappedMessages = messages.map { it.toMessageListItem() }
+    val mappedMessages = messages.map { it.toMessageListItem(showRetryAction = true) }
     val debugCard = buildPrivateChatDebugCard(
         showDebugDiagnostics = showDebugDiagnostics,
         requestedPeerId = requestedPeerId,
@@ -144,7 +145,8 @@ fun PrivateChatScreen(
         composerEnabled = content.isComposerEnabled,
         composerStateKey = contact?.canonicalPeerId ?: requestedPeerId,
         emptyStateText = content.emptyStateText,
-        bodyTop = bodyTopContent
+        bodyTop = bodyTopContent,
+        onRetryMessage = onRetryMessage
     )
 }
 

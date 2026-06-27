@@ -6,6 +6,8 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import gr.hua.aurora.model.OutgoingChatMessage
+import gr.hua.aurora.protocol.GlobalMeshDeliveryResult
 import gr.hua.aurora.protocol.hasSessionForPeer
 import gr.hua.aurora.state.AuroraAvailabilityPreference
 import gr.hua.aurora.state.AuroraBleRuntimeState
@@ -74,9 +76,26 @@ fun NavGraph(
                     val queuedMessage = stateHolder.sendGlobalPreviewMessage(text)
                     if (queuedMessage != null) {
                         sendScope.launch {
-                            val transportResult = bleRuntimeState.submitGlobalMeshMessage(
-                                queuedMessage,
-                                uiState.globalChatUsername
+                            val transportResult = submitGlobalQueuedMessage(
+                                queuedMessage = queuedMessage,
+                                currentUsername = { stateHolder.uiState.globalChatUsername },
+                                submitTransport = bleRuntimeState.submitGlobalMeshMessage
+                            )
+                            stateHolder.handleGlobalMeshDeliveryResult(
+                                messageId = queuedMessage.messageId,
+                                result = transportResult
+                            )
+                        }
+                    }
+                },
+                onRetryMessage = { messageId ->
+                    val queuedMessage = stateHolder.retryGlobalOutgoingMessage(messageId)
+                    if (queuedMessage != null) {
+                        sendScope.launch {
+                            val transportResult = submitGlobalQueuedMessage(
+                                queuedMessage = queuedMessage,
+                                currentUsername = { stateHolder.uiState.globalChatUsername },
+                                submitTransport = bleRuntimeState.submitGlobalMeshMessage
                             )
                             stateHolder.handleGlobalMeshDeliveryResult(
                                 messageId = queuedMessage.messageId,
@@ -131,32 +150,42 @@ fun NavGraph(
                 onSendMessage = { text ->
                     val queuedMessage = stateHolder.sendPrivateChatMessage(peerId, text)
                     if (queuedMessage != null) {
-                        val privateChatId = stateHolder.privateChatIdentityForPeerId(peerId)?.privateChatId
-                        if (privateChatId == null) {
+                        sendScope.launch {
+                            val transportResult = submitPrivateQueuedMessage(
+                                queuedMessage = queuedMessage,
+                                peerId = peerId,
+                                currentUsername = { stateHolder.uiState.privateProfileUsername },
+                                resolvePrivateChatId = { targetPeerId ->
+                                    stateHolder.privateChatIdentityForPeerId(targetPeerId)?.privateChatId
+                                },
+                                submitTransport = bleRuntimeState.submitPrivateChatMessage
+                            )
                             stateHolder.handlePrivateChatDeliveryResult(
                                 peerId = peerId,
                                 messageId = queuedMessage.messageId,
-                                result = PrivateChatMessageSendResult.KeysUnavailable
+                                result = transportResult
                             )
-                        } else {
-                            sendScope.launch {
-                                val transportResult = runCatching {
-                                    bleRuntimeState.submitPrivateChatMessage(
-                                        queuedMessage,
-                                        uiState.privateProfileUsername,
-                                        privateChatId
-                                    )
-                                }.getOrElse { error ->
-                                    PrivateChatMessageSendResult.Failed(
-                                        reason = error.message ?: "Private chat transport submission failed."
-                                    )
-                                }
-                                stateHolder.handlePrivateChatDeliveryResult(
-                                    peerId = peerId,
-                                    messageId = queuedMessage.messageId,
-                                    result = transportResult
-                                )
-                            }
+                        }
+                    }
+                },
+                onRetryMessage = { messageId ->
+                    val queuedMessage = stateHolder.retryPrivateChatOutgoingMessage(peerId, messageId)
+                    if (queuedMessage != null) {
+                        sendScope.launch {
+                            val transportResult = submitPrivateQueuedMessage(
+                                queuedMessage = queuedMessage,
+                                peerId = peerId,
+                                currentUsername = { stateHolder.uiState.privateProfileUsername },
+                                resolvePrivateChatId = { targetPeerId ->
+                                    stateHolder.privateChatIdentityForPeerId(targetPeerId)?.privateChatId
+                                },
+                                submitTransport = bleRuntimeState.submitPrivateChatMessage
+                            )
+                            stateHolder.handlePrivateChatDeliveryResult(
+                                peerId = peerId,
+                                messageId = queuedMessage.messageId,
+                                result = transportResult
+                            )
                         }
                     }
                 },
@@ -228,5 +257,47 @@ fun NavGraph(
                 onBack = onNavigateBackOrGlobal
             )
         }
+    }
+}
+
+internal suspend fun submitGlobalQueuedMessage(
+    queuedMessage: OutgoingChatMessage,
+    currentUsername: () -> String,
+    submitTransport: suspend (OutgoingChatMessage, String) -> GlobalMeshDeliveryResult
+): GlobalMeshDeliveryResult {
+    return runCatching {
+        submitTransport(
+            queuedMessage,
+            currentUsername().trim()
+        )
+    }.getOrElse { error ->
+        GlobalMeshDeliveryResult.Failed(
+            reason = error.message ?: "Public mesh transport submission failed."
+        )
+    }
+}
+
+internal suspend fun submitPrivateQueuedMessage(
+    queuedMessage: OutgoingChatMessage,
+    peerId: String,
+    currentUsername: () -> String,
+    resolvePrivateChatId: (String) -> String?,
+    submitTransport: suspend (OutgoingChatMessage, String, String) -> PrivateChatMessageSendResult
+): PrivateChatMessageSendResult {
+    val privateChatId = resolvePrivateChatId(peerId)
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: return PrivateChatMessageSendResult.KeysUnavailable
+
+    return runCatching {
+        submitTransport(
+            queuedMessage,
+            currentUsername().trim(),
+            privateChatId
+        )
+    }.getOrElse { error ->
+        PrivateChatMessageSendResult.Failed(
+            reason = error.message ?: "Private chat transport submission failed."
+        )
     }
 }

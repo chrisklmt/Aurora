@@ -14,9 +14,10 @@ class ChatMessageUiMapperTest {
             isOutgoing = true
         )
 
-        val item = message.toMessageListItem()
+        val item = message.toMessageListItem(showRetryAction = true)
 
         assertEquals("Pending", item.supportingLabel)
+        assertNull(item.actionLabel)
     }
 
     @Test
@@ -26,9 +27,10 @@ class ChatMessageUiMapperTest {
             isOutgoing = true
         )
 
-        val item = message.toMessageListItem()
+        val item = message.toMessageListItem(showRetryAction = true)
 
         assertEquals("Sent", item.supportingLabel)
+        assertNull(item.actionLabel)
     }
 
     @Test
@@ -38,9 +40,37 @@ class ChatMessageUiMapperTest {
             isOutgoing = false
         )
 
-        val item = message.toMessageListItem()
+        val item = message.toMessageListItem(showRetryAction = true)
 
         assertNull(item.supportingLabel)
+        assertNull(item.actionLabel)
+    }
+
+    @Test
+    fun outgoingFailedMessageShowsRetryAction() {
+        val message = createMessage(
+            status = MessageStatus.FAILED,
+            isOutgoing = true
+        )
+
+        val item = message.toMessageListItem(showRetryAction = true)
+
+        assertEquals("Failed", item.supportingLabel)
+        assertEquals("Retry", item.actionLabel)
+        assertEquals("msg-1", item.actionMessageId)
+    }
+
+    @Test
+    fun outgoingDeliveredMessageFallsBackToSentLabel() {
+        val message = createMessage(
+            status = MessageStatus.DELIVERED,
+            isOutgoing = true
+        )
+
+        val item = message.toMessageListItem(showRetryAction = true)
+
+        assertEquals("Sent", item.supportingLabel)
+        assertNull(item.actionLabel)
     }
 
     private fun createMessage(

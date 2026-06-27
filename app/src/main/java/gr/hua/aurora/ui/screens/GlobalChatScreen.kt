@@ -47,11 +47,12 @@ fun GlobalChatScreen(
     desiredAvailability: AuroraAvailabilityPreference,
     onDesiredAvailabilityChange: (AuroraAvailabilityPreference) -> Unit,
     onSendMessage: (String) -> Unit,
+    onRetryMessage: (String) -> Unit,
     onResetLocalData: () -> Unit
 ) {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
-    val mappedMessages = messages.map { it.toMessageListItem() }
+    val mappedMessages = messages.map { it.toMessageListItem(showRetryAction = true) }
     val availabilityState = rememberAuroraAvailabilityUiState(desiredAvailability)
     val debugCard = buildGlobalChatDebugCard(
         showDebugDiagnostics = showDebugDiagnostics,
@@ -119,7 +120,8 @@ fun GlobalChatScreen(
                     },
                     composerHint = "Write a message",
                     bodyTop = bodyTopContent,
-                    onSend = onSendMessage
+                    onSend = onSendMessage,
+                    onRetryMessage = onRetryMessage
                 )
             }
         }

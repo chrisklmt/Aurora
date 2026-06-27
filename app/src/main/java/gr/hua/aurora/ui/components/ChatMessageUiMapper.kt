@@ -7,13 +7,27 @@ import java.util.Date
 import java.util.Locale
 
 // Ο mapper ανήκει στο UI layer γιατί μετατρέπει app-level models σε έτοιμα στοιχεία παρουσίασης.
-fun ChatMessage.toMessageListItem(): MessageListItem {
+fun ChatMessage.toMessageListItem(
+    showRetryAction: Boolean = false
+): MessageListItem {
+    val retryActionMessageId = if (
+        showRetryAction &&
+        isOutgoing &&
+        status == MessageStatus.FAILED
+    ) {
+        id
+    } else {
+        null
+    }
+
     return MessageListItem(
         sender = senderName,
         text = text,
         isOutgoing = isOutgoing,
         timestampLabel = createdAtMillis.toPreviewTimeLabel(),
-        supportingLabel = status.toPreviewStatusLabel(isOutgoing = isOutgoing)
+        supportingLabel = status.toPreviewStatusLabel(isOutgoing = isOutgoing),
+        actionLabel = if (retryActionMessageId != null) "Retry" else null,
+        actionMessageId = retryActionMessageId
     )
 }
 
@@ -34,7 +48,7 @@ private fun MessageStatus.toPreviewStatusLabel(
         MessageStatus.QUEUED,
         MessageStatus.LOCAL_ONLY -> "Pending"
         MessageStatus.SENT -> "Sent"
-        MessageStatus.DELIVERED -> "Delivered"
+        MessageStatus.DELIVERED -> "Sent"
         MessageStatus.FAILED -> "Failed"
     }
 }

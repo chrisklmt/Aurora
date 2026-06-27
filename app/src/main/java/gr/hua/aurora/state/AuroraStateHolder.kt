@@ -51,7 +51,10 @@ class AuroraStateHolder(
 
         uiState = uiState.copy(
             globalMessages = sortVisibleMessages(uiState.globalMessages + outgoingMessage),
-            pendingOutgoingMessages = uiState.pendingOutgoingMessages + queuedMessage,
+            pendingOutgoingMessages = upsertPendingOutgoingMessage(
+                uiState.pendingOutgoingMessages,
+                queuedMessage
+            ),
             globalMeshDeliveryResult = null
         )
         persistRestorableState()
@@ -64,7 +67,7 @@ class AuroraStateHolder(
         if (sanitizedText.isEmpty()) return null
         val sanitizedPeerId = peerId.trim()
         if (sanitizedPeerId.isEmpty()) return null
-        if (!isPrivateChatReadyForPeerId(sanitizedPeerId)) return null
+        if (findContactByPeerId(sanitizedPeerId) == null) return null
 
         val outgoingMessage = createOutgoingMessage(
             threadId = "private:$sanitizedPeerId",
@@ -80,13 +83,77 @@ class AuroraStateHolder(
         )
 
         uiState = uiState.copy(
-            pendingOutgoingMessages = uiState.pendingOutgoingMessages + queuedMessage,
+            pendingOutgoingMessages = upsertPendingOutgoingMessage(
+                uiState.pendingOutgoingMessages,
+                queuedMessage
+            ),
             privateMessagesByPeerId = uiState.privateMessagesByPeerId + (sanitizedPeerId to updatedMessages),
             privateChatDeliveryResultsByPeerId = uiState.privateChatDeliveryResultsByPeerId - sanitizedPeerId
         )
         persistRestorableState()
 
         return queuedMessage
+    }
+
+    fun retryGlobalOutgoingMessage(messageId: String): OutgoingChatMessage? {
+        val retryMessage = uiState.globalMessages
+            .firstOrNull { it.id == messageId && it.isOutgoing }
+            ?.takeIf { canRetryOutgoingMessage(it.status) }
+            ?: return null
+
+        val refreshedQueueEntry = createQueuedOutgoingChatMessage(
+            message = retryMessage.copy(status = MessageStatus.QUEUED)
+        )
+        uiState = uiState.copy(
+            globalMessages = uiState.globalMessages.map { message ->
+                if (message.id == messageId && message.isOutgoing) {
+                    message.copy(status = MessageStatus.QUEUED)
+                } else {
+                    message
+                }
+            },
+            pendingOutgoingMessages = upsertPendingOutgoingMessage(
+                uiState.pendingOutgoingMessages,
+                refreshedQueueEntry
+            ),
+            globalMeshDeliveryResult = null
+        )
+        persistRestorableState()
+        return refreshedQueueEntry
+    }
+
+    fun retryPrivateChatOutgoingMessage(
+        peerId: String,
+        messageId: String
+    ): OutgoingChatMessage? {
+        val sanitizedPeerId = peerId.trim()
+        if (sanitizedPeerId.isEmpty()) return null
+        val threadId = "private:$sanitizedPeerId"
+        val retryMessage = uiState.privateMessagesByPeerId[sanitizedPeerId]
+            ?.firstOrNull { it.id == messageId && it.isOutgoing && it.threadId == threadId }
+            ?.takeIf { canRetryOutgoingMessage(it.status) }
+            ?: return null
+
+        val refreshedQueueEntry = createQueuedOutgoingChatMessage(
+            message = retryMessage.copy(status = MessageStatus.QUEUED)
+        )
+        val updatedMessages = requireNotNull(uiState.privateMessagesByPeerId[sanitizedPeerId]).map { message ->
+            if (message.id == messageId && message.isOutgoing) {
+                message.copy(status = MessageStatus.QUEUED)
+            } else {
+                message
+            }
+        }
+        uiState = uiState.copy(
+            pendingOutgoingMessages = upsertPendingOutgoingMessage(
+                uiState.pendingOutgoingMessages,
+                refreshedQueueEntry
+            ),
+            privateMessagesByPeerId = uiState.privateMessagesByPeerId + (sanitizedPeerId to updatedMessages),
+            privateChatDeliveryResultsByPeerId = uiState.privateChatDeliveryResultsByPeerId - sanitizedPeerId
+        )
+        persistRestorableState()
+        return refreshedQueueEntry
     }
 
     fun updateUsername(username: String) {
@@ -255,7 +322,10 @@ class AuroraStateHolder(
         uiState = uiState.copy(
             privateMessagesByPeerId = uiState.privateMessagesByPeerId - sanitizedPeerId,
             privateChatIdentitiesByPeerId = uiState.privateChatIdentitiesByPeerId - sanitizedPeerId,
-            privateChatDeliveryResultsByPeerId = uiState.privateChatDeliveryResultsByPeerId - sanitizedPeerId
+            privateChatDeliveryResultsByPeerId = uiState.privateChatDeliveryResultsByPeerId - sanitizedPeerId,
+            pendingOutgoingMessages = uiState.pendingOutgoingMessages.filterNot {
+                it.threadId == "private:$sanitizedPeerId"
+            }
         )
         persistRestorableState()
     }
@@ -343,6 +413,17 @@ class AuroraStateHolder(
                     message
                 }
             },
+            pendingOutgoingMessages = updatePendingOutgoingMessageStatus(
+                messages = uiState.pendingOutgoingMessages,
+                messageId = messageId,
+                status = pendingOutgoingStatusForGlobalMeshResult(
+                    currentStatus = uiState.pendingOutgoingMessages
+                        .firstOrNull { it.messageId == messageId }
+                        ?.status
+                        ?: MessageStatus.QUEUED,
+                    result = result
+                )
+            ),
             globalMeshDeliveryResult = result
         )
         persistRestorableState()
@@ -369,6 +450,11 @@ class AuroraStateHolder(
             ?: return
 
         uiState = uiState.copy(
+            pendingOutgoingMessages = updatePendingOutgoingMessageStatus(
+                messages = uiState.pendingOutgoingMessages,
+                messageId = messageId,
+                status = pendingOutgoingStatusForPrivateSendResult(result)
+            ),
             privateMessagesByPeerId = uiState.privateMessagesByPeerId + (sanitizedPeerId to updatedMessages),
             privateChatDeliveryResultsByPeerId =
                 uiState.privateChatDeliveryResultsByPeerId + (sanitizedPeerId to result)
@@ -438,7 +524,7 @@ class AuroraStateHolder(
             threadId = message.threadId,
             userText = message.text,
             createdAtMillis = message.createdAtMillis,
-            status = MessageStatus.QUEUED
+            status = message.status
         )
     }
 
@@ -576,7 +662,24 @@ private fun visibleGlobalMessageStatusForMeshResult(
         is GlobalMeshDeliveryResult.QueuedToPeers -> MessageStatus.SENT
         GlobalMeshDeliveryResult.NoReachablePeers,
         GlobalMeshDeliveryResult.SenderUnavailable,
-        is GlobalMeshDeliveryResult.ConnectOnSendFailed -> MessageStatus.QUEUED
+        is GlobalMeshDeliveryResult.ConnectOnSendFailed,
+        is GlobalMeshDeliveryResult.Failed -> MessageStatus.FAILED
+        is GlobalMeshDeliveryResult.SkippedDuplicate,
+        is GlobalMeshDeliveryResult.SkippedSourcePeer,
+        is GlobalMeshDeliveryResult.SkippedTtlExpired -> currentStatus
+    }
+}
+
+private fun pendingOutgoingStatusForGlobalMeshResult(
+    currentStatus: MessageStatus,
+    result: GlobalMeshDeliveryResult
+): MessageStatus {
+    return when (result) {
+        is GlobalMeshDeliveryResult.QueuedToActivePeer,
+        is GlobalMeshDeliveryResult.QueuedToPeers -> MessageStatus.SENT
+        GlobalMeshDeliveryResult.NoReachablePeers,
+        GlobalMeshDeliveryResult.SenderUnavailable,
+        is GlobalMeshDeliveryResult.ConnectOnSendFailed,
         is GlobalMeshDeliveryResult.Failed -> MessageStatus.FAILED
         is GlobalMeshDeliveryResult.SkippedDuplicate,
         is GlobalMeshDeliveryResult.SkippedSourcePeer,
@@ -585,6 +688,18 @@ private fun visibleGlobalMessageStatusForMeshResult(
 }
 
 private fun visiblePrivateMessageStatusForSendResult(
+    result: PrivateChatMessageSendResult
+): MessageStatus {
+    return when (result) {
+        PrivateChatMessageSendResult.SubmittedLocally -> MessageStatus.SENT
+        PrivateChatMessageSendResult.KeysUnavailable,
+        PrivateChatMessageSendResult.ContactUnavailable,
+        PrivateChatMessageSendResult.ContactNotReachable,
+        is PrivateChatMessageSendResult.Failed -> MessageStatus.FAILED
+    }
+}
+
+private fun pendingOutgoingStatusForPrivateSendResult(
     result: PrivateChatMessageSendResult
 ): MessageStatus {
     return when (result) {
@@ -662,7 +777,7 @@ internal fun restoreAuroraUiState(
     return baseState.copy(
         contacts = restoredContacts,
         globalMessages = restoredGlobalMessages,
-        pendingOutgoingMessages = emptyList(),
+        pendingOutgoingMessages = restoredRetryableOutgoingMessages(restoredMessages),
         privateMessagesByPeerId = restoredPrivateMessages,
         privateChatIdentitiesByPeerId = restoredPrivateChats,
         selectedSecurePeerId = null,
@@ -677,6 +792,62 @@ internal fun sortVisibleMessages(
     return messages.sortedWith(
         compareBy<ChatMessage>({ it.createdAtMillis }, { it.id })
     )
+}
+
+private fun restoredRetryableOutgoingMessages(
+    messages: List<ChatMessage>
+): List<OutgoingChatMessage> {
+    return messages
+        .filter { it.isOutgoing && canRetryOutgoingMessage(it.status) }
+        .map { message ->
+            OutgoingChatMessage(
+                messageId = message.id,
+                threadId = message.threadId,
+                userText = message.text,
+                createdAtMillis = message.createdAtMillis,
+                status = message.status
+            )
+        }
+        .sortedWith(
+            compareBy<OutgoingChatMessage>({ it.createdAtMillis }, { it.messageId })
+        )
+}
+
+private fun canRetryOutgoingMessage(
+    status: MessageStatus
+): Boolean {
+    return when (status) {
+        MessageStatus.QUEUED,
+        MessageStatus.LOCAL_ONLY,
+        MessageStatus.FAILED -> true
+        MessageStatus.DRAFT,
+        MessageStatus.RECEIVED,
+        MessageStatus.SENT,
+        MessageStatus.DELIVERED -> false
+    }
+}
+
+private fun upsertPendingOutgoingMessage(
+    messages: List<OutgoingChatMessage>,
+    message: OutgoingChatMessage
+): List<OutgoingChatMessage> {
+    return (messages.filterNot { it.messageId == message.messageId } + message).sortedWith(
+        compareBy<OutgoingChatMessage>({ it.createdAtMillis }, { it.messageId })
+    )
+}
+
+private fun updatePendingOutgoingMessageStatus(
+    messages: List<OutgoingChatMessage>,
+    messageId: String,
+    status: MessageStatus
+): List<OutgoingChatMessage> {
+    return messages.map { message ->
+        if (message.messageId == messageId) {
+            message.copy(status = status)
+        } else {
+            message
+        }
+    }
 }
 
 private fun ensureGeneratedUsername(

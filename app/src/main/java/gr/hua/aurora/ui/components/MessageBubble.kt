@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -23,7 +24,9 @@ fun MessageBubble(
     modifier: Modifier = Modifier,
     isOwnMessage: Boolean = false,
     timestampLabel: String? = null,
-    supportingLabel: String? = null
+    supportingLabel: String? = null,
+    actionLabel: String? = null,
+    onActionClick: (() -> Unit)? = null
 ) {
     // Η οπτική διάκριση βασίζεται μόνο στο αν το μήνυμα ανήκει τοπικά ή όχι, χωρίς επιπλέον σημασιολογία.
     Row(
@@ -71,6 +74,16 @@ fun MessageBubble(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+                if (!actionLabel.isNullOrBlank() && onActionClick != null) {
+                    TextButton(
+                        onClick = onActionClick
+                    ) {
+                        Text(
+                            text = actionLabel,
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
                 }
             }
         }

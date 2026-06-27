@@ -36,7 +36,8 @@ fun ChatScaffold(
     composerEnabled: Boolean = true,
     composerStateKey: Any? = Unit,
     emptyStateText: String? = null,
-    bodyTop: (@Composable ColumnScope.() -> Unit)? = null
+    bodyTop: (@Composable ColumnScope.() -> Unit)? = null,
+    onRetryMessage: ((String) -> Unit)? = null
 ) {
     // Το scaffold οργανώνει μόνο επαναχρησιμοποιήσιμες περιοχές chat UI χωρίς γνώση για state ή transport layers.
     var composerValue by rememberSaveable(composerStateKey) { mutableStateOf("") }
@@ -85,7 +86,8 @@ fun ChatScaffold(
                     messages = messages,
                     modifier = Modifier
                         .weight(1f)
-                        .fillMaxWidth()
+                        .fillMaxWidth(),
+                    onMessageAction = onRetryMessage
                 )
             }
 
