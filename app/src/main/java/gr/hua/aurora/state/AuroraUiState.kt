@@ -4,6 +4,7 @@ import gr.hua.aurora.model.ChatMessage
 import gr.hua.aurora.model.AuroraContact
 import gr.hua.aurora.model.NearbyDevicePreview
 import gr.hua.aurora.model.OutgoingChatMessage
+import gr.hua.aurora.model.PrivateChatIdentity
 import gr.hua.aurora.protocol.GlobalMeshDeliveryResult
 import gr.hua.aurora.protocol.PrivateChatMessageSendResult
 
@@ -14,6 +15,7 @@ data class AuroraUiState(
     val globalMessages: List<ChatMessage>,
     val pendingOutgoingMessages: List<OutgoingChatMessage>,
     val privateMessagesByPeerId: Map<String, List<ChatMessage>>,
+    val privateChatIdentitiesByPeerId: Map<String, PrivateChatIdentity>,
     val generatedUsername: String,
     val customUsername: String?,
     val useCustomUsernameInGlobalChat: Boolean,

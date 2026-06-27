@@ -17,6 +17,8 @@ import gr.hua.aurora.protocol.MessageFrame
 import gr.hua.aurora.protocol.MessageFrameCodec
 import gr.hua.aurora.protocol.MessageFrameType
 import gr.hua.aurora.protocol.PeerIdentityExchangeHandlingResult
+import gr.hua.aurora.protocol.PrivateChatMessagePayload
+import gr.hua.aurora.protocol.PrivateChatMessagePayloadCodec
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -169,6 +171,17 @@ class IncomingTransportFrameProcessorTest {
     @Test
     fun privateFrameIsReceivedIntoPrivateChatWithoutTouchingGlobalChat() {
         val holder = createHolder()
+        holder.addOrUpdateContact(
+            canonicalPeerId = "peer-private",
+            displayName = "Alex",
+            hasSession = true
+        )
+        val privateChatIdentity = requireNotNull(
+            holder.recordReceivedPrivateChatProposal(
+                peerId = "peer-private",
+                remoteProposalId = "remote-peer-private"
+            )
+        )
         val queuedMessage = requireNotNull(holder.sendGlobalPreviewMessage("queued outgoing"))
         val queueBefore = holder.uiState.pendingOutgoingMessages.toList()
         val senderPublicKey = senderPublicKeyBytes()
@@ -180,7 +193,13 @@ class IncomingTransportFrameProcessorTest {
             senderId = "peer-private",
             recipientId = "self",
             createdAtMillis = 1_715_500_222L,
-            payload = "private payload"
+            payload = PrivateChatMessagePayloadCodec.encode(
+                PrivateChatMessagePayload(
+                    privateChatId = requireNotNull(privateChatIdentity.privateChatId),
+                    senderUsername = "Alex",
+                    body = "private payload"
+                )
+            )
         )
         val frames = transportFramesFor(
             frame = frame,
@@ -211,7 +230,7 @@ class IncomingTransportFrameProcessorTest {
         val privateMessage = holder.privateMessagesForPeerId("peer-private").single()
         assertEquals(frame.id, privateMessage.id)
         assertEquals("private:peer-private", privateMessage.threadId)
-        assertEquals(frame.payload, privateMessage.text)
+        assertEquals("private payload", privateMessage.text)
         assertEquals(MessageStatus.RECEIVED, privateMessage.status)
     }
 

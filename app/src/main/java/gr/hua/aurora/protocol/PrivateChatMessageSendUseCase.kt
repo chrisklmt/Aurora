@@ -24,6 +24,7 @@ sealed interface PrivateChatMessageSendResult {
 object PrivateChatMessageSendUseCase {
     suspend fun send(
         message: OutgoingChatMessage,
+        privateChatId: String,
         senderPeerId: String?,
         senderUsername: String,
         transportSender: BleTransportSender?,
@@ -59,6 +60,7 @@ object PrivateChatMessageSendUseCase {
         val encodedPrivatePayload = runCatching {
             PrivateChatMessagePayloadCodec.encode(
                 PrivateChatMessagePayload(
+                    privateChatId = privateChatId,
                     senderUsername = senderUsername.trim(),
                     body = draft.payload
                 )

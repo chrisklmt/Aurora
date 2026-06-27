@@ -9,6 +9,7 @@ import androidx.navigation.compose.composable
 import gr.hua.aurora.state.AuroraAvailabilityPreference
 import gr.hua.aurora.state.AuroraBleRuntimeState
 import gr.hua.aurora.state.AuroraStateHolder
+import gr.hua.aurora.protocol.PrivateChatMessageSendResult
 import gr.hua.aurora.ui.screens.ContactsScreen
 import gr.hua.aurora.ui.screens.GlobalChatScreen
 import gr.hua.aurora.ui.screens.NearbyDevicesScreen
@@ -90,6 +91,7 @@ fun NavGraph(
         composable(Routes.CONTACTS) {
             ContactsScreen(
                 contacts = uiState.contacts,
+                privateChatIdentitiesByPeerId = uiState.privateChatIdentitiesByPeerId,
                 currentUsername = uiState.privateProfileUsername,
                 desiredAvailability = uiState.desiredAvailability,
                 showDebugDiagnostics = uiState.isDebugModeEnabled,
@@ -98,6 +100,10 @@ fun NavGraph(
                 onOpenChat = { peerId ->
                     navController.navigate(Routes.privateChat(peerId))
                 },
+                onRenameChat = { peerId, customName ->
+                    stateHolder.renamePrivateChat(peerId, customName)
+                },
+                onDeleteChat = stateHolder::deletePrivateChat,
                 onResetLocalData = onResetLocalData,
                 onBack = onNavigateBackOrGlobal
             )
@@ -106,9 +112,11 @@ fun NavGraph(
         composable(Routes.PRIVATE_ROUTE) { backStackEntry ->
             val peerId = backStackEntry.arguments?.getString(Routes.PRIVATE_ARG) ?: "unknown-peer"
             val selectedContact = stateHolder.findContactByPeerId(peerId)
+            val privateChatIdentity = stateHolder.privateChatIdentityForPeerId(peerId)
             PrivateChatScreen(
                 requestedPeerId = peerId,
                 contact = selectedContact,
+                privateChatIdentity = privateChatIdentity,
                 currentUsername = uiState.privateProfileUsername,
                 messages = stateHolder.privateMessagesForPeerId(peerId),
                 lastDeliveryResult = stateHolder.latestPrivateChatDeliveryResultForPeerId(peerId),
@@ -120,16 +128,32 @@ fun NavGraph(
                 onSendMessage = { text ->
                     val queuedMessage = stateHolder.sendPrivateChatMessage(peerId, text)
                     if (queuedMessage != null) {
-                        sendScope.launch {
-                            val transportResult = bleRuntimeState.submitPrivateChatMessage(
-                                queuedMessage,
-                                uiState.privateProfileUsername
-                            )
+                        val privateChatId = stateHolder.privateChatIdentityForPeerId(peerId)?.privateChatId
+                        if (privateChatId == null) {
                             stateHolder.handlePrivateChatDeliveryResult(
                                 peerId = peerId,
                                 messageId = queuedMessage.messageId,
-                                result = transportResult
+                                result = PrivateChatMessageSendResult.KeysUnavailable
                             )
+                        } else {
+                            sendScope.launch {
+                                val transportResult = runCatching {
+                                    bleRuntimeState.submitPrivateChatMessage(
+                                        queuedMessage,
+                                        uiState.privateProfileUsername,
+                                        privateChatId
+                                    )
+                                }.getOrElse { error ->
+                                    PrivateChatMessageSendResult.Failed(
+                                        reason = error.message ?: "Private chat transport submission failed."
+                                    )
+                                }
+                                stateHolder.handlePrivateChatDeliveryResult(
+                                    peerId = peerId,
+                                    messageId = queuedMessage.messageId,
+                                    result = transportResult
+                                )
+                            }
                         }
                     }
                 },
@@ -151,6 +175,7 @@ fun NavGraph(
                 showDebugDiagnostics = uiState.isDebugModeEnabled,
                 bleConnectionStatus = bleRuntimeState.bleConnectionStatus,
                 bleConnector = bleRuntimeState.bleConnector,
+                privateChatIdentitiesByPeerId = uiState.privateChatIdentitiesByPeerId,
                 transportSenderSourceLabel = bleRuntimeState.transportSenderSourceLabel,
                 identityHandlerStatus = bleRuntimeState.identityHandlerStatus,
                 peerSessionDiagnostics = bleRuntimeState.peerSessionDiagnostics,
@@ -167,6 +192,14 @@ fun NavGraph(
                         displayName = displayName,
                         lastSeenMillis = lastSeenMillis,
                         hasSession = hasSession
+                    )
+                    stateHolder.privateChatIdentityForPeerId(peerId)?.localProposalId
+                },
+                onPromoteContactSession = { peerId, displayName, lastSeenMillis ->
+                    stateHolder.promoteContactSession(
+                        canonicalPeerId = peerId,
+                        displayName = displayName,
+                        lastSeenMillis = lastSeenMillis
                     )
                 },
                 onSelectSecurePeer = stateHolder::selectSecurePeer,

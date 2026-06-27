@@ -33,6 +33,7 @@ class PrivateChatMessageSendUseCaseTest {
         val result = runSuspending {
             PrivateChatMessageSendUseCase.send(
                 message = message,
+                privateChatId = "chat-alex",
                 senderPeerId = "sender-canonical",
                 senderUsername = "Alice",
                 transportSender = sender,
@@ -53,6 +54,7 @@ class PrivateChatMessageSendUseCaseTest {
         assertEquals("alex", decodedFrame.recipientId)
         assertEquals("Alice", decodedPayload.senderUsername)
         assertEquals("hello private", decodedPayload.body)
+        assertEquals("chat-alex", decodedPayload.privateChatId)
         assertEquals("alex", requireNotNull(sender.capturedPlan).targetPeerId)
     }
 
@@ -70,6 +72,7 @@ class PrivateChatMessageSendUseCaseTest {
         val result = runSuspending {
             PrivateChatMessageSendUseCase.send(
                 message = message,
+                privateChatId = "chat-alex",
                 senderPeerId = "sender-canonical",
                 senderUsername = "Alice",
                 transportSender = sender,
@@ -98,6 +101,7 @@ class PrivateChatMessageSendUseCaseTest {
         val result = runSuspending {
             PrivateChatMessageSendUseCase.send(
                 message = message,
+                privateChatId = "chat-alex",
                 senderPeerId = "sender-canonical",
                 senderUsername = "Alice",
                 transportSender = sender,
@@ -124,6 +128,7 @@ class PrivateChatMessageSendUseCaseTest {
                     createdAtMillis = 1_715_260_004L,
                     status = MessageStatus.QUEUED
                 ),
+                privateChatId = "chat-global",
                 senderPeerId = "sender-canonical",
                 senderUsername = "Alice",
                 transportSender = null,
@@ -153,6 +158,7 @@ class PrivateChatMessageSendUseCaseTest {
         val result = runSuspending {
             PrivateChatMessageSendUseCase.send(
                 message = message,
+                privateChatId = "chat-alex",
                 senderPeerId = "sender-canonical",
                 senderUsername = "Alice",
                 transportSender = sender,
@@ -166,6 +172,41 @@ class PrivateChatMessageSendUseCaseTest {
 
         assertTrue(result is PrivateChatMessageSendResult.Failed)
         assertEquals("writer unavailable", (result as PrivateChatMessageSendResult.Failed).reason)
+    }
+
+    @Test
+    fun privateSendFailsCleanlyWhenEncodedPayloadExceedsTransportChunkLimit() {
+        val material = testEncryptionMaterial()
+        val sender = RecordingTransportSender(BleTransportSendResult.QueuedLocally)
+        val oversizedBody = "x".repeat(8_000)
+        val message = OutgoingChatMessage(
+            messageId = "private-send-oversized",
+            threadId = "private:alex",
+            userText = oversizedBody,
+            createdAtMillis = 1_715_260_006L,
+            status = MessageStatus.QUEUED
+        )
+
+        val result = runSuspending {
+            PrivateChatMessageSendUseCase.send(
+                message = message,
+                privateChatId = "chat-alex",
+                senderPeerId = "sender-canonical",
+                senderUsername = "Alice",
+                transportSender = sender,
+                sessionMaterialProvider = FakeOutgoingSessionMaterialProvider(
+                    materialByPeerId = mapOf("alex" to material)
+                ),
+                activeConnectedPeerId = "alex",
+                isActiveTransportConnected = true
+            )
+        }
+
+        assertTrue(result is PrivateChatMessageSendResult.Failed)
+        assertTrue(
+            requireNotNull((result as PrivateChatMessageSendResult.Failed).reason)
+                .contains("supported limit")
+        )
     }
 
     private class FakeOutgoingSessionMaterialProvider(

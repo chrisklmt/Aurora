@@ -3,6 +3,7 @@ package gr.hua.aurora.ui.screens
 import gr.hua.aurora.model.AuroraContact
 import gr.hua.aurora.model.ChatMessage
 import gr.hua.aurora.model.MessageStatus
+import gr.hua.aurora.model.PrivateChatIdentity
 import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
 import gr.hua.aurora.protocol.PrivateChatMessageSendResult
 import gr.hua.aurora.ui.components.DebugInfoCardModel
@@ -26,7 +27,8 @@ class PrivateChatScreenTest {
 
         val content = buildPrivateChatScreenContent(
             requestedPeerId = contact.canonicalPeerId,
-            contact = contact
+            contact = contact,
+            privateChatIdentity = readyIdentity(contact.canonicalPeerId)
         )
 
         assertEquals("Alex", content.title)
@@ -45,7 +47,8 @@ class PrivateChatScreenTest {
 
         val content = buildPrivateChatScreenContent(
             requestedPeerId = contact.canonicalPeerId,
-            contact = contact
+            contact = contact,
+            privateChatIdentity = readyIdentity(contact.canonicalPeerId)
         )
 
         assertNull(content.statusText)
@@ -66,7 +69,13 @@ class PrivateChatScreenTest {
 
         val content = buildPrivateChatScreenContent(
             requestedPeerId = contact.canonicalPeerId,
-            contact = contact
+            contact = contact,
+            privateChatIdentity = PrivateChatIdentity(
+                canonicalPeerId = contact.canonicalPeerId,
+                localProposalId = "local-peer-123",
+                createdAtMillis = 1_000L,
+                lastUpdatedMillis = 2_000L
+            )
         )
 
         assertEquals("Private chat is not ready yet", content.statusText)
@@ -85,7 +94,8 @@ class PrivateChatScreenTest {
     fun privateChatHandlesMissingContactGracefully() {
         val content = buildPrivateChatScreenContent(
             requestedPeerId = "missing-peer-123456",
-            contact = null
+            contact = null,
+            privateChatIdentity = null
         )
 
         assertEquals("Contact not found", content.title)
@@ -125,6 +135,7 @@ class PrivateChatScreenTest {
             showDebugDiagnostics = true,
             requestedPeerId = contact.canonicalPeerId,
             contact = contact,
+            privateChatIdentity = readyIdentity(contact.canonicalPeerId),
             messages = messages,
             lastDeliveryResult = PrivateChatMessageSendResult.SubmittedLocally,
             peerSessionDiagnostics = PeerSessionRegistryDiagnostics(
@@ -144,6 +155,10 @@ class PrivateChatScreenTest {
                         title = "Target",
                         items = listOf(
                             DebugInfoItem("Peer", "peer-123"),
+                            DebugInfoItem("Chat", "ready"),
+                            DebugInfoItem("Local prop", "local-peer-1..."),
+                            DebugInfoItem("Remote prop", "remote-peer-..."),
+                            DebugInfoItem("Chat id", "chat-peer-12..."),
                             DebugInfoItem("Messages", "1"),
                             DebugInfoItem("Seen", "recent")
                         )
@@ -201,6 +216,43 @@ class PrivateChatScreenTest {
             privateChatDebugDeliveryValue(
                 PrivateChatMessageSendResult.Failed("transport failed")
             )
+        )
+    }
+
+    @Test
+    fun privateChatDebugIdentifierValueStaysShortAndSafe() {
+        assertEquals("missing", privateChatDebugIdentifierValue(null))
+        assertEquals("chat-peer-12...", privateChatDebugIdentifierValue("chat-peer-123"))
+        assertEquals("peer-123", privateChatDebugIdentifierValue("peer-123"))
+    }
+
+    @Test
+    fun customChatNameOverridesContactTitleWhenPresent() {
+        val contact = AuroraContact(
+            canonicalPeerId = "peer-123",
+            displayName = "Alex",
+            createdAtMillis = 1_000L,
+            hasSession = true
+        )
+        val content = buildPrivateChatScreenContent(
+            requestedPeerId = contact.canonicalPeerId,
+            contact = contact,
+            privateChatIdentity = readyIdentity(contact.canonicalPeerId).copy(
+                customChatName = "Family chat"
+            )
+        )
+
+        assertEquals("Family chat", content.title)
+    }
+
+    private fun readyIdentity(peerId: String): PrivateChatIdentity {
+        return PrivateChatIdentity(
+            canonicalPeerId = peerId,
+            privateChatId = "chat-$peerId",
+            localProposalId = "local-$peerId",
+            remoteProposalId = "remote-$peerId",
+            createdAtMillis = 1_000L,
+            lastUpdatedMillis = 2_000L
         )
     }
 }

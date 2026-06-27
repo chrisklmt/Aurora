@@ -24,7 +24,7 @@ class BleTransportReceiveBuffer(
             )
         if (chunk.totalChunks > maxFramesPerGroup) {
             return BufferResult.BufferOverflow(
-                reason = "Transport chunk group ${chunk.groupId} exceeds the receive frame limit."
+                reason = "Transport chunk group ${chunk.groupId} has ${chunk.totalChunks} chunks and exceeds the receive frame limit of $maxFramesPerGroup."
             )
         }
 
@@ -54,7 +54,7 @@ class BleTransportReceiveBuffer(
         if (group.framesByIndex.size >= maxFramesPerGroup) {
             groups.remove(chunk.groupId)
             return BufferResult.BufferOverflow(
-                reason = "Transport chunk group ${chunk.groupId} exceeded the receive frame limit."
+                reason = "Transport chunk group ${chunk.groupId} exceeded the receive frame limit of $maxFramesPerGroup."
             )
         }
 
@@ -122,6 +122,7 @@ class BleTransportReceiveBuffer(
 
     companion object {
         const val DEFAULT_MAX_GROUPS: Int = 8
-        const val DEFAULT_MAX_FRAMES_PER_GROUP: Int = 64
+        const val DEFAULT_MAX_FRAMES_PER_GROUP: Int =
+            BleGattTransportFrameChunker.MAX_SUPPORTED_FRAMES_PER_GROUP
     }
 }

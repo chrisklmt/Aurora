@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import gr.hua.aurora.model.AuroraContact
 import gr.hua.aurora.model.ChatMessage
+import gr.hua.aurora.model.PrivateChatIdentity
 import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
 import gr.hua.aurora.protocol.PrivateChatMessageSendResult
 import gr.hua.aurora.ui.components.AuroraTopBarAction
@@ -36,6 +37,7 @@ internal data class PrivateChatScreenContent(
 fun PrivateChatScreen(
     requestedPeerId: String,
     contact: AuroraContact?,
+    privateChatIdentity: PrivateChatIdentity?,
     currentUsername: String,
     messages: List<ChatMessage>,
     lastDeliveryResult: PrivateChatMessageSendResult?,
@@ -49,13 +51,15 @@ fun PrivateChatScreen(
 ) {
     val content = buildPrivateChatScreenContent(
         requestedPeerId = requestedPeerId,
-        contact = contact
+        contact = contact,
+        privateChatIdentity = privateChatIdentity
     )
     val mappedMessages = messages.map { it.toMessageListItem() }
     val debugCard = buildPrivateChatDebugCard(
         showDebugDiagnostics = showDebugDiagnostics,
         requestedPeerId = requestedPeerId,
         contact = contact,
+        privateChatIdentity = privateChatIdentity,
         messages = messages,
         lastDeliveryResult = lastDeliveryResult,
         peerSessionDiagnostics = peerSessionDiagnostics,
@@ -143,11 +147,12 @@ fun PrivateChatScreen(
 
 internal fun buildPrivateChatScreenContent(
     requestedPeerId: String,
-    contact: AuroraContact?
+    contact: AuroraContact?,
+    privateChatIdentity: PrivateChatIdentity?
 ): PrivateChatScreenContent {
     val resolvedPeerId = contact?.canonicalPeerId ?: requestedPeerId
-    return if (contact == null) {
-        PrivateChatScreenContent(
+    if (contact == null) {
+        return PrivateChatScreenContent(
             title = "Contact not found",
             shortPeerId = privateChatShortPeerId(resolvedPeerId),
             statusText = "Contact not found",
@@ -157,33 +162,36 @@ internal fun buildPrivateChatScreenContent(
             composerHint = "Private messaging coming next",
             emptyStateText = "Contact not found"
         )
-    } else {
-        val hasReadyKeys = contact.hasSession
-        PrivateChatScreenContent(
-            title = contact.displayName,
-            shortPeerId = privateChatShortPeerId(contact.canonicalPeerId),
-            statusText = if (hasReadyKeys) null else "Private chat is not ready yet",
-            helperText = if (hasReadyKeys) {
-                null
-            } else {
-                "Setup needed. Open Nearby to finish private chat setup."
-            },
-            isMissingContact = false,
-            isComposerEnabled = hasReadyKeys,
-            composerHint = if (hasReadyKeys) {
-                "Private message"
-            } else {
-                "Setup needed before sending"
-            },
-            emptyStateText = "No private messages yet."
-        )
     }
+
+    val hasReadyPrivateChat = contact.hasSession && privateChatIdentity?.isEstablished == true
+    val title = privateChatIdentity?.displayNameOrNull() ?: contact.displayName
+    val helperText = when {
+        hasReadyPrivateChat -> null
+        privateChatIdentity == null -> "Add this device from Nearby to start a private chat."
+        else -> "Setup needed. Open Nearby to finish private chat setup."
+    }
+    return PrivateChatScreenContent(
+        title = title,
+        shortPeerId = privateChatShortPeerId(contact.canonicalPeerId),
+        statusText = if (hasReadyPrivateChat) null else "Private chat is not ready yet",
+        helperText = helperText,
+        isMissingContact = false,
+        isComposerEnabled = hasReadyPrivateChat,
+        composerHint = if (hasReadyPrivateChat) {
+            "Private message"
+        } else {
+            "Setup needed before sending"
+        },
+        emptyStateText = "No private messages yet."
+    )
 }
 
 internal fun buildPrivateChatDebugCard(
     showDebugDiagnostics: Boolean,
     requestedPeerId: String,
     contact: AuroraContact?,
+    privateChatIdentity: PrivateChatIdentity?,
     messages: List<ChatMessage>,
     lastDeliveryResult: PrivateChatMessageSendResult?,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
@@ -203,22 +211,46 @@ internal fun buildPrivateChatDebugCard(
     val targetHasSession = canonicalPeerId != null
     val sections = buildList {
         add(
-            DebugInfoSection(
-                title = "Target",
-                items = buildList {
-                    add(DebugInfoItem("Peer", privateChatShortPeerId(targetPeerId)))
-                    if (canonicalPeerId != null && canonicalPeerId != targetPeerId) {
+                    DebugInfoSection(
+                        title = "Target",
+                        items = buildList {
+                            add(DebugInfoItem("Peer", privateChatShortPeerId(targetPeerId)))
+                            add(
+                        DebugInfoItem(
+                            "Chat",
+                                    if (privateChatIdentity?.isEstablished == true) "ready" else "missing"
+                                )
+                            )
+                            add(
+                                DebugInfoItem(
+                                    "Local prop",
+                                    privateChatDebugIdentifierValue(privateChatIdentity?.localProposalId)
+                                )
+                            )
+                            add(
+                                DebugInfoItem(
+                                    "Remote prop",
+                                    privateChatDebugIdentifierValue(privateChatIdentity?.remoteProposalId)
+                                )
+                            )
+                            add(
+                                DebugInfoItem(
+                                    "Chat id",
+                                    privateChatDebugIdentifierValue(privateChatIdentity?.privateChatId)
+                                )
+                            )
+                            add(DebugInfoItem("Messages", messages.size.toString()))
+                            contact?.lastSeenMillis?.let {
+                                add(DebugInfoItem("Seen", "recent"))
+                            }
+                            privateChatIdentity?.customChatName?.let { customName ->
                         add(
                             DebugInfoItem(
-                                "Canonical",
-                                canonicalPeerId,
+                                "Custom",
+                                customName,
                                 preferFullWidth = true
                             )
                         )
-                    }
-                    add(DebugInfoItem("Messages", messages.size.toString()))
-                    contact?.lastSeenMillis?.let {
-                        add(DebugInfoItem("Seen", "recent"))
                     }
                 }
             )
@@ -323,6 +355,13 @@ internal fun privateChatActivePeerValue(
     } else {
         privateChatShortPeerId(sanitizedActivePeerId)
     }
+}
+
+internal fun privateChatDebugIdentifierValue(
+    value: String?
+): String {
+    val sanitizedValue = value?.trim()?.takeIf { it.isNotEmpty() } ?: return "missing"
+    return privateChatShortPeerId(sanitizedValue)
 }
 
 internal fun privateChatShortPeerId(peerId: String): String {

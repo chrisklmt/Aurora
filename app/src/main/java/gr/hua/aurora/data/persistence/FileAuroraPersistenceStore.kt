@@ -27,7 +27,8 @@ class FileAuroraPersistenceStore(
             writeUnlocked(
                 PersistedAuroraState(
                     contacts = updatedContacts,
-                    messages = currentState.messages
+                    messages = currentState.messages,
+                    privateChats = currentState.privateChats
                 )
             )
         }
@@ -41,7 +42,23 @@ class FileAuroraPersistenceStore(
             writeUnlocked(
                 PersistedAuroraState(
                     contacts = currentState.contacts,
-                    messages = updatedMessages
+                    messages = updatedMessages,
+                    privateChats = currentState.privateChats
+                )
+            )
+        }
+    }
+
+    override fun savePrivateChat(privateChat: PersistedPrivateChat) {
+        synchronized(lock) {
+            val currentState = loadUnlocked()
+            val updatedPrivateChats = currentState.privateChats
+                .filterNot { it.canonicalPeerId == privateChat.canonicalPeerId } + privateChat.copy()
+            writeUnlocked(
+                PersistedAuroraState(
+                    contacts = currentState.contacts,
+                    messages = currentState.messages,
+                    privateChats = updatedPrivateChats
                 )
             )
         }
@@ -78,6 +95,9 @@ class FileAuroraPersistenceStore(
             ),
             messages = state.messages.sortedWith(
                 compareBy<PersistedChatMessage>({ it.createdAtMillis }, { it.messageId })
+            ),
+            privateChats = state.privateChats.sortedWith(
+                compareBy<PersistedPrivateChat>({ it.lastUpdatedMillis }, { it.canonicalPeerId })
             )
         )
         val parentDirectory = stateFile.parentFile
@@ -103,6 +123,7 @@ class FileAuroraPersistenceStore(
 
         val contacts = mutableListOf<PersistedContact>()
         val messages = mutableListOf<PersistedChatMessage>()
+        val privateChats = mutableListOf<PersistedPrivateChat>()
         lines.drop(1)
             .filter { it.isNotBlank() }
             .forEach { line ->
@@ -113,6 +134,9 @@ class FileAuroraPersistenceStore(
                     line.startsWith("$messagePrefix\t") -> {
                         decodeMessage(line)?.let(messages::add)
                     }
+                    line.startsWith("$privateChatPrefix\t") -> {
+                        decodePrivateChat(line)?.let(privateChats::add)
+                    }
                 }
             }
 
@@ -122,6 +146,9 @@ class FileAuroraPersistenceStore(
             ),
             messages = messages.sortedWith(
                 compareBy<PersistedChatMessage>({ it.createdAtMillis }, { it.messageId })
+            ),
+            privateChats = privateChats.sortedWith(
+                compareBy<PersistedPrivateChat>({ it.lastUpdatedMillis }, { it.canonicalPeerId })
             )
         )
     }
@@ -153,6 +180,21 @@ class FileAuroraPersistenceStore(
                         message.status.name,
                         encodeToken(message.senderId),
                         encodeToken(message.senderName)
+                    ).joinToString(separator = "\t")
+                )
+            }
+            state.privateChats.forEach { privateChat ->
+                add(
+                    listOf(
+                        privateChatPrefix,
+                        encodeToken(privateChat.canonicalPeerId),
+                        privateChat.privateChatId?.let(::encodeToken).orEmpty(),
+                        privateChat.localProposalId?.let(::encodeToken).orEmpty(),
+                        privateChat.remoteProposalId?.let(::encodeToken).orEmpty(),
+                        privateChat.customChatName?.let(::encodeToken).orEmpty(),
+                        privateChat.lastKnownRemoteUsername?.let(::encodeToken).orEmpty(),
+                        privateChat.createdAtMillis.toString(),
+                        privateChat.lastUpdatedMillis.toString()
                     ).joinToString(separator = "\t")
                 )
             }
@@ -194,6 +236,26 @@ class FileAuroraPersistenceStore(
                 status = gr.hua.aurora.model.MessageStatus.valueOf(parts[7]),
                 senderId = decodeToken(parts[8]),
                 senderName = decodeToken(parts[9])
+            )
+        }.getOrNull()
+    }
+
+    private fun decodePrivateChat(line: String): PersistedPrivateChat? {
+        val parts = line.split('\t')
+        if (parts.size != expectedPrivateChatPartCount) {
+            return null
+        }
+
+        return runCatching {
+            PersistedPrivateChat(
+                canonicalPeerId = decodeToken(parts[1]),
+                privateChatId = parts[2].takeIf { it.isNotEmpty() }?.let(::decodeToken),
+                localProposalId = parts[3].takeIf { it.isNotEmpty() }?.let(::decodeToken),
+                remoteProposalId = parts[4].takeIf { it.isNotEmpty() }?.let(::decodeToken),
+                customChatName = parts[5].takeIf { it.isNotEmpty() }?.let(::decodeToken),
+                lastKnownRemoteUsername = parts[6].takeIf { it.isNotEmpty() }?.let(::decodeToken),
+                createdAtMillis = parts[7].toLong(),
+                lastUpdatedMillis = parts[8].toLong()
             )
         }.getOrNull()
     }
@@ -242,8 +304,10 @@ class FileAuroraPersistenceStore(
         private const val fileFormatHeader = "AURORA_STATE_V1"
         private const val contactPrefix = "CONTACT"
         private const val messagePrefix = "MESSAGE"
+        private const val privateChatPrefix = "PRIVATE_CHAT"
         private const val expectedContactPartCount = 5
         private const val expectedMessagePartCount = 10
+        private const val expectedPrivateChatPartCount = 9
         private val hexDigits = "0123456789abcdef".toCharArray()
     }
 }

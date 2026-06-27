@@ -3,10 +3,12 @@ package gr.hua.aurora.data.persistence
 import gr.hua.aurora.model.AuroraContact
 import gr.hua.aurora.model.ChatMessage
 import gr.hua.aurora.model.MessageStatus
+import gr.hua.aurora.model.PrivateChatIdentity
 
 data class PersistedAuroraState(
     val contacts: List<PersistedContact> = emptyList(),
-    val messages: List<PersistedChatMessage> = emptyList()
+    val messages: List<PersistedChatMessage> = emptyList(),
+    val privateChats: List<PersistedPrivateChat> = emptyList()
 )
 
 data class PersistedContact(
@@ -122,6 +124,57 @@ data class PersistedChatMessage(
     }
 }
 
+data class PersistedPrivateChat(
+    val canonicalPeerId: String,
+    val privateChatId: String? = null,
+    val localProposalId: String? = null,
+    val remoteProposalId: String? = null,
+    val customChatName: String? = null,
+    val lastKnownRemoteUsername: String? = null,
+    val createdAtMillis: Long,
+    val lastUpdatedMillis: Long
+) {
+    init {
+        require(canonicalPeerId.isNotBlank()) {
+            "PersistedPrivateChat canonicalPeerId must not be blank."
+        }
+        require(privateChatId?.isNotBlank() != false) {
+            "PersistedPrivateChat privateChatId must not be blank when present."
+        }
+        require(localProposalId?.isNotBlank() != false) {
+            "PersistedPrivateChat localProposalId must not be blank when present."
+        }
+        require(remoteProposalId?.isNotBlank() != false) {
+            "PersistedPrivateChat remoteProposalId must not be blank when present."
+        }
+        require(customChatName?.isNotBlank() != false) {
+            "PersistedPrivateChat customChatName must not be blank when present."
+        }
+        require(lastKnownRemoteUsername?.isNotBlank() != false) {
+            "PersistedPrivateChat lastKnownRemoteUsername must not be blank when present."
+        }
+        require(createdAtMillis >= 0L) {
+            "PersistedPrivateChat createdAtMillis must be non-negative."
+        }
+        require(lastUpdatedMillis >= 0L) {
+            "PersistedPrivateChat lastUpdatedMillis must be non-negative."
+        }
+    }
+
+    fun toRestoredPrivateChatIdentity(): PrivateChatIdentity {
+        return PrivateChatIdentity(
+            canonicalPeerId = canonicalPeerId,
+            privateChatId = privateChatId,
+            localProposalId = localProposalId,
+            remoteProposalId = remoteProposalId,
+            customChatName = customChatName,
+            lastKnownRemoteUsername = lastKnownRemoteUsername,
+            createdAtMillis = createdAtMillis,
+            lastUpdatedMillis = lastUpdatedMillis
+        )
+    }
+}
+
 interface AuroraPersistenceStore {
     fun load(): PersistedAuroraState
 
@@ -129,12 +182,15 @@ interface AuroraPersistenceStore {
 
     fun saveMessage(message: PersistedChatMessage)
 
+    fun savePrivateChat(privateChat: PersistedPrivateChat)
+
     fun clear()
 
     fun replaceAll(state: PersistedAuroraState) {
         clear()
         state.contacts.forEach(::saveContact)
         state.messages.forEach(::saveMessage)
+        state.privateChats.forEach(::savePrivateChat)
     }
 }
 
@@ -173,5 +229,18 @@ fun ChatMessage.toPersistedChatMessage(): PersistedChatMessage {
         status = status,
         senderId = senderId,
         senderName = senderName
+    )
+}
+
+fun PrivateChatIdentity.toPersistedPrivateChat(): PersistedPrivateChat {
+    return PersistedPrivateChat(
+        canonicalPeerId = canonicalPeerId,
+        privateChatId = privateChatId,
+        localProposalId = localProposalId,
+        remoteProposalId = remoteProposalId,
+        customChatName = customChatName,
+        lastKnownRemoteUsername = lastKnownRemoteUsername,
+        createdAtMillis = createdAtMillis,
+        lastUpdatedMillis = lastUpdatedMillis
     )
 }

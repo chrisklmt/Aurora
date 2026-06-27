@@ -1,6 +1,7 @@
 package gr.hua.aurora.ui.screens
 
 import gr.hua.aurora.model.AuroraContact
+import gr.hua.aurora.model.PrivateChatIdentity
 import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
 import gr.hua.aurora.ui.components.DebugInfoCardModel
 import gr.hua.aurora.ui.components.DebugInfoItem
@@ -24,12 +25,12 @@ class ContactsScreenTest {
             hasSession = false
         )
 
-        assertEquals("Private chat ready", contactsProductStatusText(readyContact))
-        assertEquals("Setup needed", contactsProductStatusText(missingContact))
-        assertFalse(contactsProductStatusText(readyContact).contains("Keys", ignoreCase = true))
-        assertFalse(contactsProductStatusText(missingContact).contains("Session", ignoreCase = true))
-        assertFalse(contactsProductStatusText(missingContact).contains("Transport", ignoreCase = true))
-        assertFalse(contactsProductStatusText(missingContact).contains("Peer", ignoreCase = true))
+        assertEquals("Private chat ready", contactsProductStatusText(isPrivateChatReady = true))
+        assertEquals("Setup needed", contactsProductStatusText(isPrivateChatReady = false))
+        assertFalse(contactsProductStatusText(isPrivateChatReady = true).contains("Keys", ignoreCase = true))
+        assertFalse(contactsProductStatusText(isPrivateChatReady = false).contains("Session", ignoreCase = true))
+        assertFalse(contactsProductStatusText(isPrivateChatReady = false).contains("Transport", ignoreCase = true))
+        assertFalse(contactsProductStatusText(isPrivateChatReady = false).contains("Peer", ignoreCase = true))
     }
 
     @Test
@@ -55,6 +56,7 @@ class ContactsScreenTest {
             buildContactsDebugCard(
                 showDebugDiagnostics = false,
                 contacts = emptyList(),
+                privateChatIdentitiesByPeerId = emptyMap(),
                 peerSessionDiagnostics = PeerSessionRegistryDiagnostics(
                     establishedPeerIds = emptyList(),
                     canonicalPeerIdByAlias = emptyMap()
@@ -85,6 +87,16 @@ class ContactsScreenTest {
         val card = buildContactsDebugCard(
             showDebugDiagnostics = true,
             contacts = contacts,
+            privateChatIdentitiesByPeerId = mapOf(
+                "peer-123456789abc" to PrivateChatIdentity(
+                    canonicalPeerId = "peer-123456789abc",
+                    privateChatId = "chat-123",
+                    localProposalId = "local-123",
+                    remoteProposalId = "remote-123",
+                    createdAtMillis = 1_000L,
+                    lastUpdatedMillis = 2_000L
+                )
+            ),
             peerSessionDiagnostics = PeerSessionRegistryDiagnostics(
                 establishedPeerIds = listOf("peer-123456789abc"),
                 canonicalPeerIdByAlias = mapOf("alex" to "peer-123456789abc")

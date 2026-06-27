@@ -13,10 +13,12 @@ import gr.hua.aurora.data.persistence.AuroraPersistenceStore
 import gr.hua.aurora.data.persistence.PersistedAuroraState
 import gr.hua.aurora.data.persistence.toPersistedChatMessage
 import gr.hua.aurora.data.persistence.toPersistedContact
+import gr.hua.aurora.data.persistence.toPersistedPrivateChat
 import gr.hua.aurora.model.AuroraContact
 import gr.hua.aurora.model.ChatMessage
 import gr.hua.aurora.model.MessageStatus
 import gr.hua.aurora.model.OutgoingChatMessage
+import gr.hua.aurora.model.PrivateChatIdentity
 import gr.hua.aurora.protocol.GlobalMeshDeliveryResult
 import gr.hua.aurora.protocol.IncomingTransportMessage
 import gr.hua.aurora.protocol.OutgoingMessageFrameBuilder
@@ -62,6 +64,7 @@ class AuroraStateHolder(
         if (sanitizedText.isEmpty()) return null
         val sanitizedPeerId = peerId.trim()
         if (sanitizedPeerId.isEmpty()) return null
+        if (!isPrivateChatReadyForPeerId(sanitizedPeerId)) return null
 
         val outgoingMessage = createOutgoingMessage(
             threadId = "private:$sanitizedPeerId",
@@ -96,6 +99,7 @@ class AuroraStateHolder(
             globalMessages = uiState.globalMessages,
             pendingOutgoingMessages = uiState.pendingOutgoingMessages,
             privateMessagesByPeerId = uiState.privateMessagesByPeerId,
+            privateChatIdentitiesByPeerId = uiState.privateChatIdentitiesByPeerId,
             generatedUsername = uiState.generatedUsername,
             customUsername = sanitizedUsername,
             useCustomUsernameInGlobalChat = uiState.useCustomUsernameInGlobalChat,
@@ -116,6 +120,7 @@ class AuroraStateHolder(
             globalMessages = uiState.globalMessages,
             pendingOutgoingMessages = uiState.pendingOutgoingMessages,
             privateMessagesByPeerId = uiState.privateMessagesByPeerId,
+            privateChatIdentitiesByPeerId = uiState.privateChatIdentitiesByPeerId,
             generatedUsername = uiState.generatedUsername,
             customUsername = uiState.customUsername,
             useCustomUsernameInGlobalChat = enabled,
@@ -162,62 +167,126 @@ class AuroraStateHolder(
         lastSeenMillis: Long? = null,
         hasSession: Boolean = false
     ): AuroraContact {
-        val sanitizedPeerId = canonicalPeerId.trim()
-        val sanitizedDisplayName = displayName.trim()
-        require(sanitizedPeerId.isNotEmpty()) {
-            "Aurora contact canonicalPeerId must not be blank."
-        }
-        require(sanitizedDisplayName.isNotEmpty()) {
-            "Aurora contact displayName must not be blank."
-        }
+        return upsertContact(
+            canonicalPeerId = canonicalPeerId,
+            displayName = displayName,
+            lastSeenMillis = lastSeenMillis,
+            hasSession = hasSession,
+            createPrivateChatIdentity = true
+        )
+    }
 
-        val existingContact = uiState.contacts.firstOrNull { it.canonicalPeerId == sanitizedPeerId }
-        val resolvedLastSeenMillis = lastSeenMillis ?: existingContact?.lastSeenMillis
-        val updatedContact = if (existingContact == null) {
-            AuroraContact(
-                canonicalPeerId = sanitizedPeerId,
-                displayName = sanitizedDisplayName,
-                createdAtMillis = System.currentTimeMillis(),
-                lastSeenMillis = resolvedLastSeenMillis,
-                hasSession = hasSession
-            )
-        } else {
-            existingContact.copy(
-                displayName = sanitizedDisplayName,
-                lastSeenMillis = resolvedLastSeenMillis,
-                hasSession = existingContact.hasSession || hasSession
-            )
-        }
-
-        if (existingContact != updatedContact) {
-            val updatedContacts = if (existingContact == null) {
-                uiState.contacts + updatedContact
-            } else {
-                uiState.contacts.map { contact ->
-                    if (contact.canonicalPeerId == sanitizedPeerId) {
-                        updatedContact
-                    } else {
-                        contact
-                    }
-                }
-            }.sortedWith(
-                compareByDescending<AuroraContact> { it.hasSession }
-                    .thenBy { it.displayName.lowercase() }
-            )
-
-            uiState = uiState.copy(
-                contacts = updatedContacts
-            )
-            persistRestorableState()
-        }
-
-        return updatedContact
+    fun promoteContactSession(
+        canonicalPeerId: String,
+        displayName: String,
+        lastSeenMillis: Long? = null
+    ): AuroraContact {
+        return upsertContact(
+            canonicalPeerId = canonicalPeerId,
+            displayName = displayName,
+            lastSeenMillis = lastSeenMillis,
+            hasSession = true,
+            createPrivateChatIdentity = false
+        )
     }
 
     fun findContactByPeerId(peerId: String): AuroraContact? {
         val sanitizedPeerId = peerId.trim()
         if (sanitizedPeerId.isEmpty()) return null
         return uiState.contacts.firstOrNull { it.canonicalPeerId == sanitizedPeerId }
+    }
+
+    fun privateChatIdentityForPeerId(peerId: String): PrivateChatIdentity? {
+        val sanitizedPeerId = peerId.trim()
+        if (sanitizedPeerId.isEmpty()) return null
+        return uiState.privateChatIdentitiesByPeerId[sanitizedPeerId]
+    }
+
+    fun privateChatDisplayNameForPeerId(peerId: String): String {
+        val sanitizedPeerId = peerId.trim()
+        if (sanitizedPeerId.isEmpty()) return peerId
+        val identity = uiState.privateChatIdentitiesByPeerId[sanitizedPeerId]
+        return identity?.displayNameOrNull()
+            ?: findContactByPeerId(sanitizedPeerId)?.displayName
+            ?: sanitizedPeerId
+    }
+
+    fun isPrivateChatReadyForPeerId(peerId: String): Boolean {
+        val sanitizedPeerId = peerId.trim()
+        if (sanitizedPeerId.isEmpty()) return false
+        val contact = findContactByPeerId(sanitizedPeerId) ?: return false
+        val identity = privateChatIdentityForPeerId(sanitizedPeerId) ?: return false
+        return contact.hasSession && identity.isEstablished
+    }
+
+    fun renamePrivateChat(
+        peerId: String,
+        customChatName: String?
+    ): PrivateChatIdentity? {
+        val sanitizedPeerId = peerId.trim()
+        if (sanitizedPeerId.isEmpty()) return null
+        val existingIdentity = privateChatIdentityForPeerId(sanitizedPeerId) ?: return null
+        val normalizedCustomName = customChatName?.trim()?.takeIf { it.isNotEmpty() }
+        val updatedIdentity = existingIdentity.copy(
+            customChatName = normalizedCustomName,
+            lastUpdatedMillis = System.currentTimeMillis()
+        )
+        if (updatedIdentity == existingIdentity) {
+            return existingIdentity
+        }
+
+        uiState = uiState.copy(
+            privateChatIdentitiesByPeerId =
+                uiState.privateChatIdentitiesByPeerId + (sanitizedPeerId to updatedIdentity)
+        )
+        persistRestorableState()
+        return updatedIdentity
+    }
+
+    fun deletePrivateChat(peerId: String) {
+        val sanitizedPeerId = peerId.trim()
+        if (sanitizedPeerId.isEmpty()) return
+        if (!uiState.privateMessagesByPeerId.containsKey(sanitizedPeerId) &&
+            !uiState.privateChatIdentitiesByPeerId.containsKey(sanitizedPeerId)
+        ) {
+            return
+        }
+
+        uiState = uiState.copy(
+            privateMessagesByPeerId = uiState.privateMessagesByPeerId - sanitizedPeerId,
+            privateChatIdentitiesByPeerId = uiState.privateChatIdentitiesByPeerId - sanitizedPeerId,
+            privateChatDeliveryResultsByPeerId = uiState.privateChatDeliveryResultsByPeerId - sanitizedPeerId
+        )
+        persistRestorableState()
+    }
+
+    fun recordReceivedPrivateChatProposal(
+        peerId: String,
+        remoteProposalId: String?
+    ): PrivateChatIdentity? {
+        val sanitizedPeerId = peerId.trim()
+        val sanitizedRemoteProposalId = remoteProposalId?.trim()?.takeIf { it.isNotEmpty() }
+        if (sanitizedPeerId.isEmpty() || sanitizedRemoteProposalId == null) return null
+        val now = System.currentTimeMillis()
+        val existingIdentity = uiState.privateChatIdentitiesByPeerId[sanitizedPeerId]
+        val updatedIdentity = resolveSharedPrivateChatIdentity(
+            identity = existingIdentity ?: PrivateChatIdentity(
+                canonicalPeerId = sanitizedPeerId,
+                createdAtMillis = now,
+                lastUpdatedMillis = now
+            ),
+            localProposalId = existingIdentity?.localProposalId,
+            remoteProposalId = sanitizedRemoteProposalId,
+            updatedAtMillis = now
+        )
+        if (updatedIdentity != existingIdentity) {
+            uiState = uiState.copy(
+                privateChatIdentitiesByPeerId =
+                    uiState.privateChatIdentitiesByPeerId + (sanitizedPeerId to updatedIdentity)
+            )
+            persistRestorableState()
+        }
+        return updatedIdentity
     }
 
     fun resetLocalData() {
@@ -238,7 +307,7 @@ class AuroraStateHolder(
     }
 
     fun displayNameForPeerId(peerId: String): String {
-        return findContactByPeerId(peerId)?.displayName ?: peerId
+        return privateChatDisplayNameForPeerId(peerId)
     }
 
     fun latestPrivateChatDeliveryResultForPeerId(
@@ -326,7 +395,9 @@ class AuroraStateHolder(
         persistenceStore?.replaceAll(
             PersistedAuroraState(
                 contacts = uiState.contacts.map(AuroraContact::toPersistedContact),
-                messages = restoredVisibleMessages().map(ChatMessage::toPersistedChatMessage)
+                messages = restoredVisibleMessages().map(ChatMessage::toPersistedChatMessage),
+                privateChats = uiState.privateChatIdentitiesByPeerId.values
+                    .map(PrivateChatIdentity::toPersistedPrivateChat)
             )
         )
     }
@@ -368,6 +439,126 @@ class AuroraStateHolder(
             userText = message.text,
             createdAtMillis = message.createdAtMillis,
             status = MessageStatus.QUEUED
+        )
+    }
+
+    private fun upsertContact(
+        canonicalPeerId: String,
+        displayName: String,
+        lastSeenMillis: Long? = null,
+        hasSession: Boolean = false,
+        createPrivateChatIdentity: Boolean
+    ): AuroraContact {
+        val sanitizedPeerId = canonicalPeerId.trim()
+        val sanitizedDisplayName = displayName.trim()
+        require(sanitizedPeerId.isNotEmpty()) {
+            "Aurora contact canonicalPeerId must not be blank."
+        }
+        require(sanitizedDisplayName.isNotEmpty()) {
+            "Aurora contact displayName must not be blank."
+        }
+
+        val existingContact = uiState.contacts.firstOrNull { it.canonicalPeerId == sanitizedPeerId }
+        val resolvedLastSeenMillis = lastSeenMillis ?: existingContact?.lastSeenMillis
+        val now = System.currentTimeMillis()
+        val updatedContact = if (existingContact == null) {
+            AuroraContact(
+                canonicalPeerId = sanitizedPeerId,
+                displayName = sanitizedDisplayName,
+                createdAtMillis = now,
+                lastSeenMillis = resolvedLastSeenMillis,
+                hasSession = hasSession
+            )
+        } else {
+            existingContact.copy(
+                displayName = sanitizedDisplayName,
+                lastSeenMillis = resolvedLastSeenMillis,
+                hasSession = existingContact.hasSession || hasSession
+            )
+        }
+        val updatedContacts = if (existingContact == null) {
+            uiState.contacts + updatedContact
+        } else {
+            uiState.contacts.map { contact ->
+                if (contact.canonicalPeerId == sanitizedPeerId) {
+                    updatedContact
+                } else {
+                    contact
+                }
+            }
+        }.sortedWith(
+            compareByDescending<AuroraContact> { it.hasSession }
+                .thenBy { it.displayName.lowercase() }
+        )
+        val existingIdentity = uiState.privateChatIdentitiesByPeerId[sanitizedPeerId]
+        val updatedIdentity = if (createPrivateChatIdentity) {
+            ensurePrivateChatIdentityForExplicitSetup(
+                peerId = sanitizedPeerId,
+                existingIdentity = existingIdentity,
+                createdAtMillis = now
+            )
+        } else {
+            existingIdentity
+        }
+
+        if (existingContact != updatedContact || updatedIdentity != existingIdentity) {
+            uiState = uiState.copy(
+                contacts = updatedContacts,
+                privateChatIdentitiesByPeerId = if (updatedIdentity != null) {
+                    uiState.privateChatIdentitiesByPeerId + (sanitizedPeerId to updatedIdentity)
+                } else {
+                    uiState.privateChatIdentitiesByPeerId
+                }
+            )
+            persistRestorableState()
+        }
+
+        return updatedContact
+    }
+
+    private fun ensurePrivateChatIdentityForExplicitSetup(
+        peerId: String,
+        existingIdentity: PrivateChatIdentity?,
+        createdAtMillis: Long
+    ): PrivateChatIdentity {
+        val normalizedExistingIdentity = existingIdentity ?: PrivateChatIdentity(
+            canonicalPeerId = peerId,
+            createdAtMillis = createdAtMillis,
+            lastUpdatedMillis = createdAtMillis
+        )
+        if (normalizedExistingIdentity.privateChatId != null) {
+            return normalizedExistingIdentity
+        }
+
+        val localProposalId = normalizedExistingIdentity.localProposalId
+            ?: PrivateChatIdentity.generateProposalId()
+        return resolveSharedPrivateChatIdentity(
+            identity = normalizedExistingIdentity,
+            localProposalId = localProposalId,
+            remoteProposalId = normalizedExistingIdentity.remoteProposalId,
+            updatedAtMillis = createdAtMillis
+        )
+    }
+
+    private fun resolveSharedPrivateChatIdentity(
+        identity: PrivateChatIdentity,
+        localProposalId: String?,
+        remoteProposalId: String?,
+        updatedAtMillis: Long
+    ): PrivateChatIdentity {
+        val sharedChatId = if (!localProposalId.isNullOrBlank() && !remoteProposalId.isNullOrBlank()) {
+            PrivateChatIdentity.deriveSharedChatId(
+                localProposalId = localProposalId,
+                remoteProposalId = remoteProposalId
+            )
+        } else {
+            null
+        }
+        return identity.copy(
+            privateChatId = sharedChatId,
+            localProposalId = localProposalId,
+            remoteProposalId = remoteProposalId,
+            lastUpdatedMillis = updatedAtMillis
         )
     }
 
@@ -463,12 +654,16 @@ internal fun restoreAuroraUiState(
             sortVisibleMessages(messages)
         }
         .toSortedMap()
+    val restoredPrivateChats = persistedState.privateChats
+        .map { it.toRestoredPrivateChatIdentity() }
+        .associateBy { it.canonicalPeerId }
 
     return baseState.copy(
         contacts = restoredContacts,
         globalMessages = restoredGlobalMessages,
         pendingOutgoingMessages = emptyList(),
         privateMessagesByPeerId = restoredPrivateMessages,
+        privateChatIdentitiesByPeerId = restoredPrivateChats,
         selectedSecurePeerId = null,
         globalMeshDeliveryResult = null,
         privateChatDeliveryResultsByPeerId = emptyMap()

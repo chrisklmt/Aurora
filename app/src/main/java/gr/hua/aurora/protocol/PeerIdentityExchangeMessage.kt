@@ -5,7 +5,8 @@ import gr.hua.aurora.crypto.Sec1PublicKeyEncoding
 class PeerIdentityExchangeMessage(
     val peerId: String,
     publicAgreementKeyBytes: ByteArray,
-    val createdAtMillis: Long
+    val createdAtMillis: Long,
+    val privateChatProposalId: String? = null
 ) {
     private val storedPublicAgreementKeyBytes = publicAgreementKeyBytes.copyOf()
 
@@ -15,6 +16,9 @@ class PeerIdentityExchangeMessage(
         }
         require(createdAtMillis >= 0L) {
             "Peer identity exchange createdAtMillis must be non-negative."
+        }
+        require(privateChatProposalId?.isNotBlank() != false) {
+            "Peer identity exchange privateChatProposalId must not be blank when present."
         }
         Sec1PublicKeyEncoding.decodeUncompressed(storedPublicAgreementKeyBytes)
     }

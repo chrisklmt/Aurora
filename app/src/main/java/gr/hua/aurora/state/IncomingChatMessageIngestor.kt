@@ -99,24 +99,59 @@ object IncomingChatMessageIngestor {
             )
         }
         val privatePayload = PrivateChatMessagePayloadCodec.decodeOrNull(frame.payload)
-        val updatedState = privatePayload?.let { payload ->
-            upsertIncomingPrivateContact(
+            ?: return IncomingMessageIngestionOutcome(
+                updatedState = state,
+                result = IncomingMessageIngestionResult.UnsupportedThread(
+                    reason = "Incoming private text payload is invalid or missing a private chat id."
+                )
+            )
+        val existingIdentity = state.privateChatIdentitiesByPeerId[peerId]
+            ?: return IncomingMessageIngestionOutcome(
+                updatedState = state,
+                result = IncomingMessageIngestionResult.UnsupportedThread(
+                    reason = "Incoming private text frame does not match a known private chat."
+                )
+            )
+        val expectedPrivateChatId = existingIdentity.privateChatId
+            ?: return IncomingMessageIngestionOutcome(
+                updatedState = state,
+                result = IncomingMessageIngestionResult.UnsupportedThread(
+                    reason = "Incoming private text frame arrived before private chat setup completed."
+                )
+            )
+        if (privatePayload.privateChatId != expectedPrivateChatId) {
+            return IncomingMessageIngestionOutcome(
+                updatedState = state,
+                result = IncomingMessageIngestionResult.UnsupportedThread(
+                    reason = "Incoming private text frame does not match the active private chat id."
+                )
+            )
+        }
+        val updatedState = run {
+            val payload = privatePayload
+            val withContact = upsertIncomingPrivateContact(
                 state = state,
                 peerId = peerId,
                 displayName = payload.senderUsername,
                 lastSeenMillis = frame.createdAtMillis
             )
-        } ?: state
-        val senderDisplayName = privatePayload?.senderUsername
-            ?: updatedState.contacts.firstOrNull { it.canonicalPeerId == peerId }?.displayName
-            ?: peerId
+            withContact.copy(
+                privateChatIdentitiesByPeerId = withContact.privateChatIdentitiesByPeerId + (
+                    peerId to existingIdentity.copy(
+                        lastKnownRemoteUsername = payload.senderUsername.trim(),
+                        lastUpdatedMillis = frame.createdAtMillis
+                    )
+                )
+            )
+        }
+        val senderDisplayName = privatePayload.senderUsername
 
         val chatMessage = ChatMessage(
             id = frame.id,
             threadId = "private:$peerId",
             senderId = peerId,
             senderName = senderDisplayName,
-            text = privatePayload?.body ?: frame.payload,
+            text = privatePayload.body,
             createdAtMillis = frame.createdAtMillis,
             status = MessageStatus.RECEIVED,
             isOutgoing = false

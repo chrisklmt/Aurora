@@ -61,6 +61,7 @@ import gr.hua.aurora.protocol.MessageFrameType
 import gr.hua.aurora.protocol.NoOpIncomingSessionMaterialProvider
 import gr.hua.aurora.protocol.PeerIdentityExchangeHandler
 import gr.hua.aurora.protocol.PeerIdentityExchangeHandlingResult
+import gr.hua.aurora.protocol.PeerIdentityExchangeMessage
 import gr.hua.aurora.protocol.PeerIdentityExchangeSendResult
 import gr.hua.aurora.protocol.PeerIdentityExchangeSendUseCase
 import gr.hua.aurora.protocol.PeerSessionRegistry
@@ -100,8 +101,8 @@ data class AuroraBleRuntimeState(
     val lastConnectOnSendStatus: String?,
     val lastGlobalMeshStatus: String?,
     val submitGlobalMeshMessage: suspend (OutgoingChatMessage, String) -> GlobalMeshDeliveryResult,
-    val submitPrivateChatMessage: suspend (OutgoingChatMessage, String) -> PrivateChatMessageSendResult,
-    val exchangeIdentityWithPeer: suspend (BleDiscoveredDevice) -> PeerIdentityExchangeSendResult,
+    val submitPrivateChatMessage: suspend (OutgoingChatMessage, String, String) -> PrivateChatMessageSendResult,
+    val exchangeIdentityWithPeer: suspend (BleDiscoveredDevice, String?) -> PeerIdentityExchangeSendResult,
     val connectToTransportPeer: (String, String?) -> Unit,
     val disconnectTransportPeer: () -> Unit,
     val resetLocalIdentityAndSessions: () -> Unit
@@ -224,6 +225,7 @@ fun rememberAuroraBleRuntimeState(
     }
     val handleIdentity = remember(localIdentityMaterial, peerSessionRegistry) {
         createAuroraIdentityHandlerOrNull(
+            stateHolder = stateHolder,
             localIdentity = localIdentityMaterial,
             registry = peerSessionRegistry
         )
@@ -474,10 +476,11 @@ fun rememberAuroraBleRuntimeState(
             lastGlobalMeshStatus = globalMeshStatusText(result)
             result
         }
-    val submitPrivateChatMessage: suspend (OutgoingChatMessage, String) -> PrivateChatMessageSendResult =
-        { queuedMessage, senderUsername ->
+    val submitPrivateChatMessage: suspend (OutgoingChatMessage, String, String) -> PrivateChatMessageSendResult =
+        { queuedMessage, senderUsername, privateChatId ->
             submitPrivateEncryptedMessage(
                 message = queuedMessage,
+                privateChatId = privateChatId,
                 senderPeerId = localPeerId,
                 senderUsername = senderUsername,
                 transportSender = bleTransportSender,
@@ -488,8 +491,8 @@ fun rememberAuroraBleRuntimeState(
                 connectToReachablePeer = ::connectToReachablePeerAndAwait
             )
         }
-    val exchangeIdentityWithPeer: suspend (BleDiscoveredDevice) -> PeerIdentityExchangeSendResult =
-        { device ->
+    val exchangeIdentityWithPeer: suspend (BleDiscoveredDevice, String?) -> PeerIdentityExchangeSendResult =
+        { device, privateChatProposalId ->
             val result = connectAndExchangeIdentityWithPeer(
                 device = device,
                 transportSender = bleTransportSender,
@@ -497,7 +500,8 @@ fun rememberAuroraBleRuntimeState(
                 activeTransportPeerId = activeTransportPeerId,
                 activeTransportDeviceAddress = activeTransportDeviceAddress,
                 connectToReachablePeer = ::connectToReachablePeerAndAwait,
-                localIdentityMaterial = loadLocalPeerIdentityExchangePublicMaterialOrNull()
+                localIdentityMaterial = loadLocalPeerIdentityExchangePublicMaterialOrNull(),
+                privateChatProposalId = privateChatProposalId
             )
             lastIdentityExchangeStatus = identityExchangeSendStatusText(result)
             result
@@ -836,6 +840,7 @@ internal fun chooseExactReachablePeer(
 
 internal suspend fun submitPrivateEncryptedMessage(
     message: OutgoingChatMessage,
+    privateChatId: String,
     senderPeerId: String?,
     senderUsername: String,
     transportSender: BleTransportSender?,
@@ -861,6 +866,7 @@ internal suspend fun submitPrivateEncryptedMessage(
     if (isActiveTransportConnected && sanitizedActiveTransportPeerId == targetPeerId) {
         return PrivateChatMessageSendUseCase.send(
             message = message,
+            privateChatId = privateChatId,
             senderPeerId = sanitizedSenderPeerId,
             senderUsername = senderUsername,
             transportSender = transportSender,
@@ -882,6 +888,7 @@ internal suspend fun submitPrivateEncryptedMessage(
             } else {
                 PrivateChatMessageSendUseCase.send(
                     message = message,
+                    privateChatId = privateChatId,
                     senderPeerId = sanitizedSenderPeerId,
                     senderUsername = senderUsername,
                     transportSender = transportSender,
@@ -906,7 +913,8 @@ internal suspend fun connectAndExchangeIdentityWithPeer(
     activeTransportPeerId: String?,
     activeTransportDeviceAddress: String?,
     connectToReachablePeer: suspend (BleDiscoveredDevice) -> PublicMeshConnectOnSendResult,
-    localIdentityMaterial: RuntimePeerIdentityExchangePublicMaterial?
+    localIdentityMaterial: RuntimePeerIdentityExchangePublicMaterial?,
+    privateChatProposalId: String?
 ): PeerIdentityExchangeSendResult {
     val targetPeerId = runtimeReachablePeerId(device)
     val identityMaterial = localIdentityMaterial ?: return PeerIdentityExchangeSendResult.InvalidLocalIdentity(
@@ -941,6 +949,7 @@ internal suspend fun connectAndExchangeIdentityWithPeer(
     return PeerIdentityExchangeSendUseCase.send(
         localPeerId = identityMaterial.peerId,
         localPublicAgreementKeyBytes = identityMaterial.publicAgreementKeyBytes(),
+        privateChatProposalId = privateChatProposalId,
         targetPeerId = targetPeerId,
         transportSender = transportSender,
         createdAtMillis = System.currentTimeMillis()
@@ -1304,17 +1313,28 @@ internal fun loadLocalPeerSessionIdentityMaterialOrNull(
 }
 
 internal fun createAuroraIdentityHandlerOrNull(
+    stateHolder: AuroraStateHolder,
     localIdentity: LocalPeerSessionIdentityMaterial?,
     registry: PeerSessionRegistry
 ): ((IncomingTransportMessage) -> PeerIdentityExchangeHandlingResult)? {
     val identity = localIdentity ?: return null
 
     return { message ->
-        PeerIdentityExchangeHandler.handle(
+        val handlingResult = PeerIdentityExchangeHandler.handle(
             frame = message.frame,
             localIdentity = identity,
             registry = registry
         )
+        if (handlingResult is PeerIdentityExchangeHandlingResult.Established) {
+            val privateChatProposalId = runCatching {
+                PeerIdentityExchangeMessage.fromMessageFrame(message.frame).privateChatProposalId
+            }.getOrNull()
+            stateHolder.recordReceivedPrivateChatProposal(
+                peerId = handlingResult.peerId,
+                remoteProposalId = privateChatProposalId
+            )
+        }
+        handlingResult
     }
 }
 

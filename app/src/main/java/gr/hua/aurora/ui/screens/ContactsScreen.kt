@@ -3,18 +3,27 @@ package gr.hua.aurora.ui.screens
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import gr.hua.aurora.model.AuroraContact
+import gr.hua.aurora.model.PrivateChatIdentity
 import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
 import gr.hua.aurora.state.AuroraAvailabilityPreference
 import gr.hua.aurora.ui.components.AuroraAvailabilityIndicator
@@ -25,15 +34,25 @@ import gr.hua.aurora.ui.components.DebugInfoItem
 import gr.hua.aurora.ui.components.DebugInfoSection
 import gr.hua.aurora.ui.components.rememberAuroraAvailabilityUiState
 
+internal data class ContactChatSummary(
+    val peerId: String,
+    val displayName: String,
+    val isPrivateChatReady: Boolean,
+    val seenText: String?
+)
+
 @Composable
 fun ContactsScreen(
     contacts: List<AuroraContact>,
+    privateChatIdentitiesByPeerId: Map<String, PrivateChatIdentity>,
     currentUsername: String,
     desiredAvailability: AuroraAvailabilityPreference,
     showDebugDiagnostics: Boolean,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
     lastIdentityExchangeStatus: String?,
     onOpenChat: (String) -> Unit,
+    onRenameChat: (String, String?) -> Unit,
+    onDeleteChat: (String) -> Unit,
     onResetLocalData: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -41,9 +60,14 @@ fun ContactsScreen(
     val debugCard = buildContactsDebugCard(
         showDebugDiagnostics = showDebugDiagnostics,
         contacts = contacts,
+        privateChatIdentitiesByPeerId = privateChatIdentitiesByPeerId,
         peerSessionDiagnostics = peerSessionDiagnostics,
         lastIdentityExchangeStatus = lastIdentityExchangeStatus
     )
+    var managedPeerId by remember { mutableStateOf<String?>(null) }
+    var renamePeerId by remember { mutableStateOf<String?>(null) }
+    var deletePeerId by remember { mutableStateOf<String?>(null) }
+    var renameDraft by remember { mutableStateOf("") }
 
     PlaceholderScreenScaffold(
         title = "Contacts",
@@ -86,6 +110,10 @@ fun ContactsScreen(
                 }
             } else {
                 items(contacts) { contact ->
+                    val summary = buildContactChatSummary(
+                        contact = contact,
+                        identity = privateChatIdentitiesByPeerId[contact.canonicalPeerId]
+                    )
                     Card(
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -94,36 +122,167 @@ fun ContactsScreen(
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Text(
-                                text = contact.displayName,
+                                text = summary.displayName,
                                 style = MaterialTheme.typography.titleMedium
                             )
                             Text(
-                                text = contactsProductStatusText(contact),
+                                text = contactsProductStatusText(summary.isPrivateChatReady),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            contactsSeenStatusText(contact)?.let { seenText ->
+                            summary.seenText?.let { seenText ->
                                 Text(
                                     text = seenText,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            Button(
-                                onClick = { onOpenChat(contactChatPeerId(contact)) }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text("Open chat")
+                                Button(
+                                    onClick = { onOpenChat(summary.peerId) }
+                                ) {
+                                    Text("Open chat")
+                                }
+                                TextButton(
+                                    onClick = {
+                                        managedPeerId = summary.peerId
+                                    }
+                                ) {
+                                    Text("Manage")
+                                }
                             }
                         }
                     }
                 }
             }
         }
+
+        managedPeerId?.let { peerId ->
+            val contact = contacts.firstOrNull { it.canonicalPeerId == peerId }
+            val summary = contact?.let {
+                buildContactChatSummary(
+                    contact = it,
+                    identity = privateChatIdentitiesByPeerId[peerId]
+                )
+            }
+            if (summary != null) {
+                AlertDialog(
+                    onDismissRequest = { managedPeerId = null },
+                    title = { Text(summary.displayName) },
+                    text = {
+                        Text(
+                            text = if (summary.isPrivateChatReady) {
+                                "Manage this private chat."
+                            } else {
+                                "Manage this contact and finish setup again when needed."
+                            }
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                renameDraft = privateChatIdentitiesByPeerId[peerId]?.customChatName.orEmpty()
+                                renamePeerId = peerId
+                                managedPeerId = null
+                            }
+                        ) {
+                            Text("Rename chat")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = {
+                                deletePeerId = peerId
+                                managedPeerId = null
+                            }
+                        ) {
+                            Text("Delete chat")
+                        }
+                    }
+                )
+            }
+        }
+
+        renamePeerId?.let { peerId ->
+            AlertDialog(
+                onDismissRequest = { renamePeerId = null },
+                title = { Text("Rename chat") },
+                text = {
+                    OutlinedTextField(
+                        value = renameDraft,
+                        onValueChange = { renameDraft = it },
+                        label = { Text("Chat name") },
+                        singleLine = true
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            onRenameChat(peerId, renameDraft)
+                            renamePeerId = null
+                        }
+                    ) {
+                        Text("Save")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { renamePeerId = null }
+                    ) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        deletePeerId?.let { peerId ->
+            AlertDialog(
+                onDismissRequest = { deletePeerId = null },
+                title = { Text("Delete chat") },
+                text = {
+                    Text("This clears private history and setup for this contact.")
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            onDeleteChat(peerId)
+                            deletePeerId = null
+                        }
+                    ) {
+                        Text("Delete")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { deletePeerId = null }
+                    ) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
     }
 }
 
-internal fun contactsProductStatusText(contact: AuroraContact): String {
-    return if (contact.hasSession) {
+internal fun buildContactChatSummary(
+    contact: AuroraContact,
+    identity: PrivateChatIdentity?
+): ContactChatSummary {
+    return ContactChatSummary(
+        peerId = contact.canonicalPeerId,
+        displayName = identity?.displayNameOrNull() ?: contact.displayName,
+        isPrivateChatReady = contact.hasSession && identity?.isEstablished == true,
+        seenText = contactsSeenStatusText(contact)
+    )
+}
+
+internal fun contactsProductStatusText(
+    isPrivateChatReady: Boolean
+): String {
+    return if (isPrivateChatReady) {
         "Private chat ready"
     } else {
         "Setup needed"
@@ -141,6 +300,7 @@ internal fun contactsSeenStatusText(contact: AuroraContact): String? {
 internal fun buildContactsDebugCard(
     showDebugDiagnostics: Boolean,
     contacts: List<AuroraContact>,
+    privateChatIdentitiesByPeerId: Map<String, PrivateChatIdentity>,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
     lastIdentityExchangeStatus: String?
 ): DebugInfoCardModel? {
@@ -148,7 +308,9 @@ internal fun buildContactsDebugCard(
         return null
     }
 
-    val readyCount = contacts.count { it.hasSession }
+    val readyCount = contacts.count { contact ->
+        contact.hasSession && privateChatIdentitiesByPeerId[contact.canonicalPeerId]?.isEstablished == true
+    }
     val seenCount = contacts.count { it.lastSeenMillis != null }
     val peerListValue = contacts.joinToString(separator = ", ") { contact ->
         privateChatShortPeerId(contact.canonicalPeerId)

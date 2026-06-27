@@ -32,6 +32,7 @@ class PeerIdentityExchangeSendUseCaseTest {
             PeerIdentityExchangeSendUseCase.send(
                 localPeerId = "peer-local",
                 localPublicAgreementKeyBytes = local.publicKeyBytes(),
+                privateChatProposalId = null,
                 targetPeerId = null,
                 transportSender = sender,
                 createdAtMillis = 1_716_100_001L
@@ -59,6 +60,7 @@ class PeerIdentityExchangeSendUseCaseTest {
             PeerIdentityExchangeSendUseCase.send(
                 localPeerId = "peer-local-2",
                 localPublicAgreementKeyBytes = local.publicKeyBytes(),
+                privateChatProposalId = null,
                 targetPeerId = "peer-remote",
                 transportSender = sender,
                 createdAtMillis = 1_716_100_002L
@@ -84,6 +86,7 @@ class PeerIdentityExchangeSendUseCaseTest {
             PeerIdentityExchangeSendUseCase.send(
                 localPeerId = "peer-local-3",
                 localPublicAgreementKeyBytes = local.publicKeyBytes(),
+                privateChatProposalId = null,
                 targetPeerId = "peer-remote-3",
                 transportSender = sender,
                 createdAtMillis = 1_716_100_003L
@@ -104,6 +107,7 @@ class PeerIdentityExchangeSendUseCaseTest {
             PeerIdentityExchangeSendUseCase.send(
                 localPeerId = "peer-local-4",
                 localPublicAgreementKeyBytes = generateEcKeyPair().publicKeyBytes(),
+                privateChatProposalId = null,
                 targetPeerId = "peer-remote-4",
                 transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally),
                 createdAtMillis = 1_716_100_004L
@@ -119,6 +123,7 @@ class PeerIdentityExchangeSendUseCaseTest {
             PeerIdentityExchangeSendUseCase.send(
                 localPeerId = "peer-local-5",
                 localPublicAgreementKeyBytes = generateEcKeyPair().publicKeyBytes(),
+                privateChatProposalId = null,
                 targetPeerId = "peer-remote-5",
                 transportSender = RecordingTransportSender(BleTransportSendResult.NotAvailable),
                 createdAtMillis = 1_716_100_005L
@@ -134,6 +139,7 @@ class PeerIdentityExchangeSendUseCaseTest {
             PeerIdentityExchangeSendUseCase.send(
                 localPeerId = "peer-local-6",
                 localPublicAgreementKeyBytes = generateEcKeyPair().publicKeyBytes(),
+                privateChatProposalId = null,
                 targetPeerId = "peer-remote-6",
                 transportSender = RecordingTransportSender(
                     BleTransportSendResult.Failed("manual identity exchange failed")
@@ -154,6 +160,7 @@ class PeerIdentityExchangeSendUseCaseTest {
             PeerIdentityExchangeSendUseCase.send(
                 localPeerId = "   ",
                 localPublicAgreementKeyBytes = generateEcKeyPair().publicKeyBytes(),
+                privateChatProposalId = null,
                 targetPeerId = "peer-remote-7",
                 transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally),
                 createdAtMillis = 1_716_100_007L
@@ -173,6 +180,7 @@ class PeerIdentityExchangeSendUseCaseTest {
             PeerIdentityExchangeSendUseCase.send(
                 localPeerId = "peer-local-8",
                 localPublicAgreementKeyBytes = invalidPublicKey,
+                privateChatProposalId = null,
                 targetPeerId = "peer-remote-8",
                 transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally),
                 createdAtMillis = 1_716_100_008L
@@ -190,6 +198,7 @@ class PeerIdentityExchangeSendUseCaseTest {
             PeerIdentityExchangeSendUseCase.send(
                 localPeerId = "peer-local-9",
                 localPublicAgreementKeyBytes = generateEcKeyPair().publicKeyBytes(),
+                privateChatProposalId = null,
                 targetPeerId = "peer-remote-9",
                 transportSender = sender,
                 createdAtMillis = 1_716_100_009L

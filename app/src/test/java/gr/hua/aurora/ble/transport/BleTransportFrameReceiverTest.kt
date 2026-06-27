@@ -209,6 +209,31 @@ class BleTransportFrameReceiverTest {
         assertEquals(1, receiver.activeGroupCount())
     }
 
+    @Test
+    fun groupLargerThanLegacyLimitIsBufferedAndProcessedWhenWithinSharedLimit() {
+        var processorCalls = 0
+        val receiver = BleTransportFrameReceiver(
+            processFrames = {
+                processorCalls += 1
+                receivedProcessingResult(messageId = "incoming-large-group")
+            }
+        )
+        val frames = multiChunkFrames(
+            groupId = 0x4109,
+            payloadSize = BleGattTransportChunk.MAX_PAYLOAD_SIZE * 65
+        )
+
+        var lastResult: BleTransportReceiveResult? = null
+        frames.forEach { frame ->
+            lastResult = receiver.receive(frame)
+        }
+
+        assertEquals(65, frames.size)
+        assertEquals(1, processorCalls)
+        assertTrue(lastResult is BleTransportReceiveResult.Processed)
+        assertEquals(0, receiver.activeGroupCount())
+    }
+
     private fun singleChunkFrame(
         groupId: Int,
         payloadByte: Int

@@ -7,10 +7,14 @@ import gr.hua.aurora.protocol.EncryptedMessageEnvelopeBuilder
 import gr.hua.aurora.protocol.EncryptedMessageEnvelopeCodec
 import gr.hua.aurora.protocol.EncryptedMessageEnvelopeDecryptor
 import gr.hua.aurora.protocol.MessageFrameCodec
+import gr.hua.aurora.protocol.MessageFrame
 import gr.hua.aurora.protocol.MessageFrameType
 import gr.hua.aurora.protocol.OutgoingMessageFrameBuilder
 import gr.hua.aurora.protocol.OutgoingMessageFrameDraft
 import gr.hua.aurora.protocol.OutgoingMessageFrameResolver
+import gr.hua.aurora.protocol.PeerIdentityExchangeMessage
+import gr.hua.aurora.protocol.PrivateChatMessagePayload
+import gr.hua.aurora.protocol.PrivateChatMessagePayloadCodec
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
@@ -247,6 +251,105 @@ class BleGattTransportFrameChunkerReassemblerTest {
 
         assertTrue(encodedEnvelopeBytes.size > BleGattTransportChunk.MAX_PAYLOAD_SIZE)
         assertTrue(frames.size > 1)
+    }
+
+    @Test
+    fun identityExchangeWithPrivateChatProposalFitsWithinTransportLimit() {
+        val message = PeerIdentityExchangeMessage(
+            peerId = "0d61e4a3c3441947",
+            publicAgreementKeyBytes = senderPublicKeyBytes(),
+            createdAtMillis = 1_715_220_901L,
+            privateChatProposalId = "0123456789abcdeffedcba9876543210"
+        )
+        val encodedFrameBytes = MessageFrameCodec.encode(
+            message.toMessageFrame()
+        ).toByteArray(UTF_8)
+
+        val frames = BleGattTransportFrameChunker.chunk(
+            encodedEnvelopeBytes = encodedFrameBytes,
+            groupId = 0x1210
+        )
+
+        assertTrue(frames.isNotEmpty())
+        assertTrue(
+            frames.size <= BleGattTransportFrameChunker.MAX_SUPPORTED_FRAMES_PER_GROUP
+        )
+    }
+
+    @Test
+    fun encryptedPrivatePayloadLargerThanLegacyReceiveLimitStillRoundTrips() {
+        var bodyLength = 160
+        var encodedEnvelopeBytes = byteArrayOf()
+        var frames = emptyList<BleGattTransportFrame>()
+
+        while (frames.size <= 64) {
+            val frame = oversizedPrivateMessageFrame(bodyLength)
+            val envelope = EncryptedMessageEnvelopeBuilder.build(
+                senderPublicKey = senderPublicKeyBytes(),
+                keyBytes = deterministicKey(91),
+                plaintext = MessageFrameCodec.encode(frame).toByteArray(UTF_8),
+                authenticatedData = "chunked-private-overflow-aad".toByteArray(UTF_8)
+            )
+            encodedEnvelopeBytes = EncryptedMessageEnvelopeCodec.encode(envelope).toByteArray(UTF_8)
+            frames = BleGattTransportFrameChunker.chunk(
+                encodedEnvelopeBytes = encodedEnvelopeBytes,
+                groupId = 0x1211
+            )
+            bodyLength += 40
+            require(bodyLength <= 8_000) {
+                "Test message body did not exceed the legacy transport frame limit."
+            }
+        }
+
+        val reassembledBytes = BleGattTransportFrameReassembler.reassemble(frames.reversed())
+
+        assertTrue(frames.size > 64)
+        assertTrue(
+            frames.size <= BleGattTransportFrameChunker.MAX_SUPPORTED_FRAMES_PER_GROUP
+        )
+        assertArrayEquals(encodedEnvelopeBytes, reassembledBytes)
+    }
+
+    @Test
+    fun payloadAboveSharedTransportFrameLimitIsRejectedClearly() {
+        val oversizedBytes = ByteArray(
+            BleGattTransportChunk.MAX_PAYLOAD_SIZE *
+                (BleGattTransportFrameChunker.MAX_SUPPORTED_FRAMES_PER_GROUP + 1)
+        ) { index ->
+            (index and 0xFF).toByte()
+        }
+
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            BleGattTransportFrameChunker.chunk(
+                encodedEnvelopeBytes = oversizedBytes,
+                groupId = 0x1212
+            )
+        }
+
+        assertTrue(
+            requireNotNull(error.message).contains("exceeds the supported limit")
+        )
+    }
+
+    private fun oversizedPrivateMessageFrame(
+        bodyLength: Int
+    ): MessageFrame {
+        val encodedPrivatePayload = PrivateChatMessagePayloadCodec.encode(
+            PrivateChatMessagePayload(
+                privateChatId = "chat-5032547611223344",
+                senderUsername = "Alice",
+                body = "x".repeat(bodyLength)
+            )
+        )
+
+        return MessageFrame(
+            id = "oversized-private-$bodyLength",
+            type = MessageFrameType.PRIVATE_TEXT,
+            senderId = "sender-private",
+            recipientId = "5032547611223344",
+            createdAtMillis = 1_715_220_902L,
+            payload = encodedPrivatePayload
+        )
     }
 
     private fun senderPublicKeyBytes(): ByteArray {

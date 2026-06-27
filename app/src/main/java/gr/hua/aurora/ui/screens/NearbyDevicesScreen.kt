@@ -49,6 +49,7 @@ import gr.hua.aurora.ble.permissions.rememberBluetoothPermissionStatusState
 import gr.hua.aurora.identity.AndroidKeystoreLocalAgreementPublicKey
 import gr.hua.aurora.model.AuroraContact
 import gr.hua.aurora.model.NearbyDevicePreview
+import gr.hua.aurora.model.PrivateChatIdentity
 import gr.hua.aurora.protocol.PeerIdentityExchangeSendResult
 import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
 import gr.hua.aurora.protocol.PeerSessionPeerId
@@ -109,6 +110,7 @@ private data class NearbyBleSessionState(
 fun NearbyDevicesScreen(
     nearbyDevices: List<NearbyDevicePreview>,
     contacts: List<AuroraContact>,
+    privateChatIdentitiesByPeerId: Map<String, PrivateChatIdentity>,
     currentUsername: String,
     desiredAvailability: AuroraAvailabilityPreference,
     bleAdvertiseStatus: BleAdvertiseStatus,
@@ -126,10 +128,11 @@ fun NearbyDevicesScreen(
     activeTransportDeviceAddress: String?,
     selectedSecurePeerId: String?,
     lastIdentityExchangeStatus: String?,
-    onExchangeIdentityWithPeer: suspend (BleDiscoveredDevice) -> PeerIdentityExchangeSendResult,
+    onExchangeIdentityWithPeer: suspend (BleDiscoveredDevice, String?) -> PeerIdentityExchangeSendResult,
     onConnectTransportPeer: (String, String?) -> Unit,
     onDisconnectTransportPeer: () -> Unit,
-    onAddOrUpdateContact: (String, String, Long?, Boolean) -> Unit,
+    onAddOrUpdateContact: (String, String, Long?, Boolean) -> String?,
+    onPromoteContactSession: (String, String, Long?) -> Unit,
     onSelectSecurePeer: (String) -> Unit,
     onClearSelectedSecurePeer: () -> Unit,
     onOpenPrivateChat: (String) -> Unit,
@@ -177,11 +180,10 @@ fun NearbyDevicesScreen(
         discoveredBleDevices.forEach { device ->
             val contactPeerId = nearbyContactPeerId(device) ?: return@forEach
             if (nearbyPeerHasReadyKeys(contactPeerId, peerSessionDiagnostics)) {
-                onAddOrUpdateContact(
+                onPromoteContactSession(
                     contactPeerId,
                     nearbyContactDisplayName(device),
-                    System.currentTimeMillis(),
-                    true
+                    System.currentTimeMillis()
                 )
             }
         }
@@ -233,6 +235,7 @@ fun NearbyDevicesScreen(
                     devices = bleSessionState.discoveredBleDevices,
                     identityExchangeStatusTexts = identityExchangeStatusTexts,
                     activeIdentityExchangeDeviceKey = activeIdentityExchangeDeviceKey,
+                    privateChatIdentitiesByPeerId = privateChatIdentitiesByPeerId,
                     onAddOrUpdateContact = onAddOrUpdateContact,
                     onSelectSecurePeer = onSelectSecurePeer,
                     onClearSelectedSecurePeer = onClearSelectedSecurePeer,
@@ -242,7 +245,7 @@ fun NearbyDevicesScreen(
                     onReadTransportMarker = bleSessionState.readTransportMarker,
                     onReadTransportFrame = bleSessionState.readTransportFrame,
                     onWriteTransportMarker = bleSessionState.writeTransportMarker,
-                    onExchangeIdentity = { device ->
+                    onExchangeIdentity = { device, privateChatProposalId ->
                         val deviceKey = nearbyBleDeviceIdentityKey(device)
                         Log.d(
                             nearbyDevicesLogTag,
@@ -252,7 +255,7 @@ fun NearbyDevicesScreen(
                         identityExchangeStatusTexts[deviceKey] = "Exchanging identity..."
                         coroutineScope.launch {
                             val result = runCatching {
-                                onExchangeIdentityWithPeer(device)
+                                onExchangeIdentityWithPeer(device, privateChatProposalId)
                             }
                             identityExchangeStatusTexts[deviceKey] = result.fold(
                                 onSuccess = { sendResult ->
@@ -465,7 +468,8 @@ private fun DiscoveredBleDevicesCard(
     devices: List<BleDiscoveredDevice>,
     identityExchangeStatusTexts: Map<String, String>,
     activeIdentityExchangeDeviceKey: String?,
-    onAddOrUpdateContact: (String, String, Long?, Boolean) -> Unit,
+    privateChatIdentitiesByPeerId: Map<String, PrivateChatIdentity>,
+    onAddOrUpdateContact: (String, String, Long?, Boolean) -> String?,
     onSelectSecurePeer: (String) -> Unit,
     onClearSelectedSecurePeer: () -> Unit,
     onOpenPrivateChat: (String) -> Unit,
@@ -474,7 +478,7 @@ private fun DiscoveredBleDevicesCard(
     onReadTransportMarker: () -> Unit,
     onReadTransportFrame: () -> Unit,
     onWriteTransportMarker: () -> Unit,
-    onExchangeIdentity: (BleDiscoveredDevice) -> Unit
+    onExchangeIdentity: (BleDiscoveredDevice, String?) -> Unit
 ) {
     var showDiagnostics by remember(showDebugDiagnostics) {
         mutableStateOf(false)
@@ -524,13 +528,19 @@ private fun DiscoveredBleDevicesCard(
                             val existingContact = contactPeerId?.let { peerId ->
                                 contacts.firstOrNull { it.canonicalPeerId == peerId }
                             }
+                            val isPrivateChatReady = contactPeerId?.let { peerId ->
+                                existingContact?.hasSession == true &&
+                                    privateChatIdentitiesByPeerId[peerId]?.isEstablished == true
+                            } == true
                             BleDiscoveredDeviceRow(
                                 device = device,
                                 existingContact = existingContact,
-                                hasReadyKeys = nearbyPeerHasReadyKeys(
+                                privateChatIdentitiesByPeerId = privateChatIdentitiesByPeerId,
+                                hasRuntimeSession = nearbyPeerHasReadyKeys(
                                     peerId = contactPeerId,
                                     diagnostics = peerSessionDiagnostics
                                 ),
+                                isPrivateChatReady = isPrivateChatReady,
                                 connectionStatus = connectionStatus,
                                 transportReadStatus = transportReadStatus,
                                 transportFrameReadStatus = transportFrameReadStatus,
@@ -613,7 +623,9 @@ private fun DiscoveredBleDevicesCard(
 private fun BleDiscoveredDeviceRow(
     device: BleDiscoveredDevice,
     existingContact: AuroraContact?,
-    hasReadyKeys: Boolean,
+    privateChatIdentitiesByPeerId: Map<String, PrivateChatIdentity>,
+    hasRuntimeSession: Boolean,
+    isPrivateChatReady: Boolean,
     connectionStatus: BleConnectionStatus,
     transportReadStatus: NearbyBleTransportReadStatus,
     transportFrameReadStatus: NearbyBleTransportFrameReadStatus,
@@ -623,7 +635,7 @@ private fun BleDiscoveredDeviceRow(
     selectedSecurePeerId: String?,
     identityExchangeStatusText: String?,
     isIdentityExchangeActive: Boolean,
-    onAddOrUpdateContact: (String, String, Long?, Boolean) -> Unit,
+    onAddOrUpdateContact: (String, String, Long?, Boolean) -> String?,
     onSelectSecurePeer: (String) -> Unit,
     onClearSelectedSecurePeer: () -> Unit,
     onOpenPrivateChat: (String) -> Unit,
@@ -632,11 +644,12 @@ private fun BleDiscoveredDeviceRow(
     onReadTransportMarker: () -> Unit,
     onReadTransportFrame: () -> Unit,
     onWriteTransportMarker: () -> Unit,
-    onExchangeIdentity: (BleDiscoveredDevice) -> Unit
+    onExchangeIdentity: (BleDiscoveredDevice, String?) -> Unit
 ) {
     val actionVisibility = nearbyRowActionVisibility(
         device = device,
         existingContact = existingContact,
+        isPrivateChatReady = isPrivateChatReady,
         connectionStatus = connectionStatus,
         activeConnectionDeviceAddress = activeConnectionDeviceAddress,
         showDebugActions = showDebugActions
@@ -653,7 +666,13 @@ private fun BleDiscoveredDeviceRow(
     val isReadTransportMarkerEnabled = !isTransportActionActive
     val isReadTransportFrameEnabled = !isTransportActionActive
     val isWriteTransportMarkerEnabled = !isTransportActionActive
-    val productDisplayName = existingContact?.displayName ?: nearbyContactDisplayName(device)
+    val productDisplayName =
+        existingContact?.let { contact ->
+            nearbyContactDisplayName(
+                contact = contact,
+                identity = nearbyContactPeerId(device)?.let(privateChatIdentitiesByPeerId::get)
+            )
+        } ?: nearbyContactDisplayName(device)
     val titleText = if (showDebugActions) {
         device.name?.trim()?.takeIf { it.isNotEmpty() } ?: productDisplayName
     } else {
@@ -662,12 +681,12 @@ private fun BleDiscoveredDeviceRow(
     val statusText = if (showDebugActions) {
         nearbyContactStatusText(
             isContact = isContact,
-            hasReadyKeys = hasReadyKeys
+            hasReadyKeys = isPrivateChatReady
         )
     } else {
         nearbyProductStatusText(
             isContact = isContact,
-            hasReadyKeys = hasReadyKeys,
+            hasReadyKeys = isPrivateChatReady,
             isAuroraDevice = device.hasAuroraDiscoveryPayload
         )
     }
@@ -738,16 +757,16 @@ private fun BleDiscoveredDeviceRow(
         if (actionVisibility.showAddContact && securePeerId != null) {
             Button(
                 onClick = {
-                    onAddOrUpdateContact(
+                    val privateChatProposalId = onAddOrUpdateContact(
                         securePeerId,
                         nearbyContactDisplayName(device),
                         System.currentTimeMillis(),
-                        hasReadyKeys
+                        hasRuntimeSession
                     )
-                    onExchangeIdentity(device)
+                    onExchangeIdentity(device, privateChatProposalId)
                 }
             ) {
-                Text("Add contact")
+                Text(if (existingContact == null) "Add contact" else "Finish setup")
             }
         }
         if (actionVisibility.showOpenChat) {
@@ -804,7 +823,12 @@ private fun BleDiscoveredDeviceRow(
         if (showDebugActions && actionVisibility.showExchangeIdentity) {
             Button(
                 enabled = !isTransportActionActive,
-                onClick = { onExchangeIdentity(device) }
+                onClick = {
+                    val privateChatProposalId = securePeerId?.let { peerId ->
+                        privateChatIdentitiesByPeerId[peerId]?.localProposalId
+                    }
+                    onExchangeIdentity(device, privateChatProposalId)
+                }
             ) {
                 Text("Exchange keys")
             }
@@ -838,6 +862,7 @@ internal data class NearbyRowActionVisibility(
 internal fun nearbyRowActionVisibility(
     device: BleDiscoveredDevice,
     existingContact: AuroraContact?,
+    isPrivateChatReady: Boolean,
     connectionStatus: BleConnectionStatus,
     activeConnectionDeviceAddress: String?,
     showDebugActions: Boolean
@@ -863,7 +888,10 @@ internal fun nearbyRowActionVisibility(
         showReadTransportFrame = showConnectedTransportActions,
         showWriteTransportMarker = showConnectedTransportActions,
         showExchangeIdentity = showConnectedTransportActions && device.hasAuroraDiscoveryPayload,
-        showAddContact = !showDebugActions && device.hasAuroraDiscoveryPayload && hasContactPeerId && existingContact == null,
+        showAddContact = !showDebugActions &&
+            device.hasAuroraDiscoveryPayload &&
+            hasContactPeerId &&
+            (existingContact == null || !isPrivateChatReady),
         showOpenChat = !showDebugActions && existingContact != null
     )
 }
@@ -1182,6 +1210,14 @@ internal fun nearbyContactDisplayName(
     } else {
         "Unknown BLE device"
     }
+}
+
+internal fun nearbyContactDisplayName(
+    contact: AuroraContact,
+    identity: PrivateChatIdentity?
+): String {
+    return identity?.displayNameOrNull()
+        ?: contact.displayName
 }
 
 internal fun nearbyPeerHasReadyKeys(

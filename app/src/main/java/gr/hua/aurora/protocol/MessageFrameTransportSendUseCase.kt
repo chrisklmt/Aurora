@@ -53,12 +53,18 @@ object MessageFrameTransportSendUseCase {
         encodedPayloadBytes: ByteArray,
         transportSender: BleTransportSender
     ): BleTransportSendResult {
-        val sendPlan = OutgoingBleTransportSendPlanBuilder.build(
-            messageId = messageId,
-            targetPeerId = targetPeerId,
-            encryptedEnvelopeBytes = encodedPayloadBytes,
-            sourceCreatedAtMillis = sourceCreatedAtMillis
-        )
+        val sendPlan = runCatching {
+            OutgoingBleTransportSendPlanBuilder.build(
+                messageId = messageId,
+                targetPeerId = targetPeerId,
+                encryptedEnvelopeBytes = encodedPayloadBytes,
+                sourceCreatedAtMillis = sourceCreatedAtMillis
+            )
+        }.getOrElse { error ->
+            return BleTransportSendResult.Failed(
+                reason = error.message ?: "Encoded transport payload could not be chunked safely."
+            )
+        }
         return suspendCoroutine { continuation ->
             var hasCompleted = false
             transportSender.send(

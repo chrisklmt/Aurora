@@ -4,10 +4,14 @@ import java.nio.charset.StandardCharsets.UTF_8
 import java.util.Base64
 
 data class PrivateChatMessagePayload(
+    val privateChatId: String,
     val senderUsername: String,
     val body: String
 ) {
     init {
+        require(privateChatId.isNotBlank()) {
+            "Private chat privateChatId must not be blank."
+        }
         require(senderUsername.isNotBlank()) {
             "Private chat senderUsername must not be blank."
         }
@@ -18,15 +22,16 @@ data class PrivateChatMessagePayload(
 }
 
 object PrivateChatMessagePayloadCodec {
-    private const val formatVersion = "AURORA_PRIVATE_CHAT_V1"
+    private const val formatVersion = "AURORA_PRIVATE_CHAT_V2"
     private const val separator = "|"
-    private const val expectedPartCount = 3
+    private const val expectedPartCount = 4
     private val encoder = Base64.getUrlEncoder().withoutPadding()
     private val decoder = Base64.getUrlDecoder()
 
     fun encode(payload: PrivateChatMessagePayload): String {
         return listOf(
             formatVersion,
+            encodeField(payload.privateChatId),
             encodeField(payload.senderUsername),
             encodeField(payload.body)
         ).joinToString(separator)
@@ -42,8 +47,9 @@ object PrivateChatMessagePayloadCodec {
         }
 
         return PrivateChatMessagePayload(
-            senderUsername = decodeField(parts[1], "senderUsername"),
-            body = decodeField(parts[2], "body")
+            privateChatId = decodeField(parts[1], "privateChatId"),
+            senderUsername = decodeField(parts[2], "senderUsername"),
+            body = decodeField(parts[3], "body")
         )
     }
 

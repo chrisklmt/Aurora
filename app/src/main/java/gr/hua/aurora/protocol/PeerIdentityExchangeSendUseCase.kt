@@ -36,6 +36,7 @@ object PeerIdentityExchangeSendUseCase {
     suspend fun send(
         localPeerId: String,
         localPublicAgreementKeyBytes: ByteArray,
+        privateChatProposalId: String?,
         targetPeerId: String?,
         transportSender: BleTransportSender,
         createdAtMillis: Long
@@ -44,7 +45,8 @@ object PeerIdentityExchangeSendUseCase {
             PeerIdentityExchangeMessage(
                 peerId = localPeerId,
                 publicAgreementKeyBytes = localPublicAgreementKeyBytes,
-                createdAtMillis = createdAtMillis
+                createdAtMillis = createdAtMillis,
+                privateChatProposalId = privateChatProposalId
             )
         } catch (error: IllegalArgumentException) {
             return PeerIdentityExchangeSendResult.InvalidLocalIdentity(

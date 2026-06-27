@@ -5,9 +5,12 @@ import gr.hua.aurora.data.LocalProfileSettingsStore
 import gr.hua.aurora.model.AuroraContact
 import gr.hua.aurora.model.MessageStatus
 import gr.hua.aurora.model.OutgoingChatMessage
+import gr.hua.aurora.model.PrivateChatIdentity
 import gr.hua.aurora.protocol.IncomingTransportMessage
 import gr.hua.aurora.protocol.MessageFrame
 import gr.hua.aurora.protocol.MessageFrameType
+import gr.hua.aurora.protocol.PrivateChatMessagePayload
+import gr.hua.aurora.protocol.PrivateChatMessagePayloadCodec
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertSame
@@ -106,6 +109,9 @@ class IncomingChatMessageIngestorTest {
                     createdAtMillis = 1_000L,
                     hasSession = true
                 )
+            ),
+            privateChatIdentitiesByPeerId = mapOf(
+                "peer-private" to establishedPrivateChatIdentity("peer-private")
             )
         )
         val frame = MessageFrame(
@@ -114,7 +120,13 @@ class IncomingChatMessageIngestorTest {
             senderId = "peer-private",
             recipientId = "self",
             createdAtMillis = 4_567L,
-            payload = "private hello"
+            payload = PrivateChatMessagePayloadCodec.encode(
+                PrivateChatMessagePayload(
+                    privateChatId = "chat-peer-private",
+                    senderUsername = "Alex",
+                    body = "private hello"
+                )
+            )
         )
 
         val outcome = IncomingChatMessageIngestor.ingest(
@@ -130,7 +142,7 @@ class IncomingChatMessageIngestorTest {
         assertEquals("private:peer-private", appendedMessage.threadId)
         assertEquals("peer-private", appendedMessage.senderId)
         assertEquals("Alex", appendedMessage.senderName)
-        assertEquals(frame.payload, appendedMessage.text)
+        assertEquals("private hello", appendedMessage.text)
         assertEquals(frame.createdAtMillis, appendedMessage.createdAtMillis)
         assertEquals(MessageStatus.RECEIVED, appendedMessage.status)
         assertEquals(false, appendedMessage.isOutgoing)
@@ -148,6 +160,9 @@ class IncomingChatMessageIngestorTest {
                     createdAtMillis = 1_000L,
                     hasSession = false
                 )
+            ),
+            privateChatIdentitiesByPeerId = mapOf(
+                "peer-private" to establishedPrivateChatIdentity("peer-private")
             )
         )
         val frame = MessageFrame(
@@ -158,6 +173,7 @@ class IncomingChatMessageIngestorTest {
             createdAtMillis = 4_777L,
             payload = gr.hua.aurora.protocol.PrivateChatMessagePayloadCodec.encode(
                 gr.hua.aurora.protocol.PrivateChatMessagePayload(
+                    privateChatId = "chat-peer-private",
                     senderUsername = "Alex",
                     body = "private hello"
                 )
@@ -181,6 +197,47 @@ class IncomingChatMessageIngestorTest {
             true,
             outcome.updatedState.contacts.single { it.canonicalPeerId == "peer-private" }.hasSession
         )
+    }
+
+    @Test
+    fun privateIncomingMessageForDeletedOrUnknownChatIsRejected() {
+        val state = SampleAuroraState.create(
+            generatedUsername = "PIAIUFN1"
+        ).copy(
+            contacts = listOf(
+                AuroraContact(
+                    canonicalPeerId = "peer-private",
+                    displayName = "Alex",
+                    createdAtMillis = 1_000L,
+                    hasSession = true
+                )
+            ),
+            privateChatIdentitiesByPeerId = mapOf(
+                "peer-private" to establishedPrivateChatIdentity("peer-private")
+            )
+        )
+        val frame = MessageFrame(
+            id = "incoming-private-stale",
+            type = MessageFrameType.PRIVATE_TEXT,
+            senderId = "peer-private",
+            recipientId = "self",
+            createdAtMillis = 4_999L,
+            payload = PrivateChatMessagePayloadCodec.encode(
+                PrivateChatMessagePayload(
+                    privateChatId = "chat-deleted-old",
+                    senderUsername = "Alex",
+                    body = "stale hello"
+                )
+            )
+        )
+
+        val outcome = IncomingChatMessageIngestor.ingest(
+            state = state,
+            frame = frame
+        )
+
+        assertTrue(outcome.result is IncomingMessageIngestionResult.UnsupportedThread)
+        assertSame(state, outcome.updatedState)
     }
 
     @Test
@@ -308,5 +365,16 @@ class IncomingChatMessageIngestorTest {
         generator.initialize(java.security.spec.ECGenParameterSpec("secp256r1"))
         val publicKey = generator.generateKeyPair().public as java.security.interfaces.ECPublicKey
         return gr.hua.aurora.crypto.Sec1PublicKeyEncoding.encodeUncompressed(publicKey)
+    }
+
+    private fun establishedPrivateChatIdentity(peerId: String): PrivateChatIdentity {
+        return PrivateChatIdentity(
+            canonicalPeerId = peerId,
+            privateChatId = "chat-$peerId",
+            localProposalId = "local-$peerId",
+            remoteProposalId = "remote-$peerId",
+            createdAtMillis = 1_000L,
+            lastUpdatedMillis = 2_000L
+        )
     }
 }

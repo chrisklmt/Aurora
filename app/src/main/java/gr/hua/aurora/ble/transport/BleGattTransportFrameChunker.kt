@@ -1,6 +1,8 @@
 package gr.hua.aurora.ble.transport
 
 object BleGattTransportFrameChunker {
+    const val MAX_SUPPORTED_FRAMES_PER_GROUP: Int = 128
+
     fun chunk(
         encodedEnvelopeBytes: ByteArray,
         groupId: Int
@@ -11,6 +13,9 @@ object BleGattTransportFrameChunker {
 
         val totalChunks = (encodedEnvelopeBytes.size + BleGattTransportChunk.MAX_PAYLOAD_SIZE - 1) /
             BleGattTransportChunk.MAX_PAYLOAD_SIZE
+        require(totalChunks <= MAX_SUPPORTED_FRAMES_PER_GROUP) {
+            "Encoded payload requires $totalChunks transport frames, which exceeds the supported limit of $MAX_SUPPORTED_FRAMES_PER_GROUP."
+        }
 
         return (0 until totalChunks).map { chunkIndex ->
             val start = chunkIndex * BleGattTransportChunk.MAX_PAYLOAD_SIZE

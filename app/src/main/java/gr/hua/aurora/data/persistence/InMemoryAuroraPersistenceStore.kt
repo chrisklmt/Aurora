@@ -5,10 +5,12 @@ class InMemoryAuroraPersistenceStore(
 ) : AuroraPersistenceStore {
     private val contactsByPeerId = LinkedHashMap<String, PersistedContact>()
     private val messagesById = LinkedHashMap<String, PersistedChatMessage>()
+    private val privateChatsByPeerId = LinkedHashMap<String, PersistedPrivateChat>()
 
     init {
         initialState.contacts.forEach(::saveContact)
         initialState.messages.forEach(::saveMessage)
+        initialState.privateChats.forEach(::savePrivateChat)
     }
 
     override fun load(): PersistedAuroraState {
@@ -22,6 +24,11 @@ class InMemoryAuroraPersistenceStore(
                 .map { it.copy() }
                 .sortedWith(
                     compareBy<PersistedChatMessage>({ it.createdAtMillis }, { it.messageId })
+                ),
+            privateChats = privateChatsByPeerId.values
+                .map { it.copy() }
+                .sortedWith(
+                    compareBy<PersistedPrivateChat>({ it.lastUpdatedMillis }, { it.canonicalPeerId })
                 )
         )
     }
@@ -34,8 +41,13 @@ class InMemoryAuroraPersistenceStore(
         messagesById[message.messageId] = message.copy()
     }
 
+    override fun savePrivateChat(privateChat: PersistedPrivateChat) {
+        privateChatsByPeerId[privateChat.canonicalPeerId] = privateChat.copy()
+    }
+
     override fun clear() {
         contactsByPeerId.clear()
         messagesById.clear()
+        privateChatsByPeerId.clear()
     }
 }

@@ -53,6 +53,7 @@ object SampleAuroraState {
             globalMessages = emptyList(),
             pendingOutgoingMessages = emptyList<OutgoingChatMessage>(),
             privateMessagesByPeerId = emptyMap<String, List<ChatMessage>>(),
+            privateChatIdentitiesByPeerId = emptyMap(),
             generatedUsername = resolvedGeneratedUsername,
             customUsername = resolvedCustomUsername,
             useCustomUsernameInGlobalChat = useCustomUsernameInGlobalChat,

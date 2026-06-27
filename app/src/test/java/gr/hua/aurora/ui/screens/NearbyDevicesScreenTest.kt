@@ -221,6 +221,7 @@ class NearbyDevicesScreenTest {
         val visibility = nearbyRowActionVisibility(
             device = device,
             existingContact = null,
+            isPrivateChatReady = false,
             connectionStatus = BleConnectionStatus.CONNECTED,
             activeConnectionDeviceAddress = device.address,
             showDebugActions = false
@@ -249,6 +250,7 @@ class NearbyDevicesScreenTest {
         val visibility = nearbyRowActionVisibility(
             device = device,
             existingContact = null,
+            isPrivateChatReady = false,
             connectionStatus = BleConnectionStatus.CONNECTED,
             activeConnectionDeviceAddress = device.address,
             showDebugActions = true

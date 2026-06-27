@@ -6,6 +6,7 @@ import gr.hua.aurora.data.LocalProfileSettingsStore
 import gr.hua.aurora.data.persistence.InMemoryAuroraPersistenceStore
 import gr.hua.aurora.model.AuroraContact
 import gr.hua.aurora.model.MessageStatus
+import gr.hua.aurora.model.PrivateChatIdentity
 import gr.hua.aurora.protocol.GlobalMeshDeliveryResult
 import gr.hua.aurora.protocol.MessageFrameType
 import gr.hua.aurora.protocol.OutgoingMessageFrameResolver
@@ -461,6 +462,7 @@ class AuroraStateHolderTest {
             customUsername = "John"
         )
 
+        prepareReadyPrivateChat(holder, peerId = "alex")
         holder.sendPrivateChatMessage("alex", "hello")
 
         assertEquals("John", holder.uiState.privateProfileUsername)
@@ -474,6 +476,7 @@ class AuroraStateHolderTest {
             generatedUsername = "PIAIUFN1"
         )
 
+        prepareReadyPrivateChat(holder, peerId = "alex")
         val queuedMessage = requireNotNull(holder.sendPrivateChatMessage("alex", " hello "))
 
         val privateMessages = holder.privateMessagesForPeerId("alex")
@@ -493,6 +496,7 @@ class AuroraStateHolderTest {
             store = FakeProfileStore(),
             generatedUsername = "PIAIUFN1"
         )
+        prepareReadyPrivateChat(holder, peerId = "alex")
         val queuedMessage = requireNotNull(holder.sendPrivateChatMessage("alex", "hello"))
 
         holder.handlePrivateChatDeliveryResult(
@@ -518,6 +522,7 @@ class AuroraStateHolderTest {
             store = FakeProfileStore(),
             generatedUsername = "PIAIUFN1"
         )
+        prepareReadyPrivateChat(holder, peerId = "alex")
         val queuedMessage = requireNotNull(holder.sendPrivateChatMessage("alex", "hello"))
 
         holder.handlePrivateChatDeliveryResult(
@@ -542,6 +547,7 @@ class AuroraStateHolderTest {
             store = FakeProfileStore(),
             generatedUsername = "PIAIUFN1"
         )
+        prepareReadyPrivateChat(holder, peerId = "alex")
         val queuedMessage = requireNotNull(holder.sendPrivateChatMessage("alex", "hello"))
 
         holder.handlePrivateChatDeliveryResult(
@@ -589,6 +595,10 @@ class AuroraStateHolderTest {
             canonicalPeerId = "peer-123",
             displayName = "Alex",
             hasSession = true
+        )
+        holder.recordReceivedPrivateChatProposal(
+            peerId = "peer-123",
+            remoteProposalId = "remote-peer-123"
         )
         holder.selectSecurePeer("peer-123")
         val globalQueuedMessage = requireNotNull(holder.sendGlobalPreviewMessage("hello global"))
@@ -676,6 +686,34 @@ class AuroraStateHolderTest {
     }
 
     @Test
+    fun privateChatIdentityAndCustomNameSurviveRestartWithoutFakeReadyState() {
+        val profileStore = FakeProfileStore().apply {
+            generatedUsername = "PIAIUFN1"
+        }
+        val persistenceStore = InMemoryAuroraPersistenceStore()
+        val holder = createAuroraStateHolder(
+            localProfileStore = profileStore,
+            persistenceStore = persistenceStore
+        )
+        val establishedIdentity = prepareReadyPrivateChat(holder, peerId = "peer-123")
+        holder.renamePrivateChat("peer-123", "Family chat")
+
+        val restoredHolder = createAuroraStateHolder(
+            localProfileStore = profileStore,
+            persistenceStore = persistenceStore
+        )
+        val restoredIdentity = restoredHolder.privateChatIdentityForPeerId("peer-123")
+
+        assertEquals(establishedIdentity.privateChatId, restoredIdentity?.privateChatId)
+        assertEquals(establishedIdentity.localProposalId, restoredIdentity?.localProposalId)
+        assertEquals(establishedIdentity.remoteProposalId, restoredIdentity?.remoteProposalId)
+        assertEquals("Family chat", restoredIdentity?.customChatName)
+        assertEquals("Family chat", restoredHolder.displayNameForPeerId("peer-123"))
+        assertEquals(false, restoredHolder.findContactByPeerId("peer-123")?.hasSession)
+        assertEquals(false, restoredHolder.isPrivateChatReadyForPeerId("peer-123"))
+    }
+
+    @Test
     fun globalAndPrivateMessagesSurviveStateRecreationWithoutRestoringOutgoingQueue() {
         val profileStore = FakeProfileStore().apply {
             generatedUsername = "PIAIUFN1"
@@ -687,6 +725,7 @@ class AuroraStateHolderTest {
         )
 
         holder.sendGlobalPreviewMessage("hello global")
+        prepareReadyPrivateChat(holder, peerId = "peer-123")
         holder.sendPrivateChatMessage("peer-123", "hello private")
 
         val restoredHolder = createAuroraStateHolder(
@@ -703,6 +742,25 @@ class AuroraStateHolderTest {
         assertTrue(restoredHolder.uiState.pendingOutgoingMessages.isEmpty())
         assertTrue(restoredHolder.uiState.globalMessages.none { it.status == MessageStatus.DELIVERED })
         assertTrue(restoredHolder.privateMessagesForPeerId("peer-123").none { it.status == MessageStatus.DELIVERED })
+    }
+
+    @Test
+    fun deletingPrivateChatClearsHistoryIdentityAndLeavesKnownContact() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1"
+        )
+        prepareReadyPrivateChat(holder, peerId = "peer-123")
+        requireNotNull(holder.sendPrivateChatMessage("peer-123", "hello private"))
+        holder.renamePrivateChat("peer-123", "Family chat")
+
+        holder.deletePrivateChat("peer-123")
+
+        assertTrue(holder.privateMessagesForPeerId("peer-123").isEmpty())
+        assertNull(holder.privateChatIdentityForPeerId("peer-123"))
+        assertNull(holder.latestPrivateChatDeliveryResultForPeerId("peer-123"))
+        assertEquals("Alex", holder.findContactByPeerId("peer-123")?.displayName)
+        assertEquals(false, holder.isPrivateChatReadyForPeerId("peer-123"))
     }
 
     @Test
@@ -748,6 +806,7 @@ class AuroraStateHolderTest {
             displayName = "Alex"
         )
         holder.sendGlobalPreviewMessage("hello")
+        prepareReadyPrivateChat(holder, peerId = "peer-123")
         holder.sendPrivateChatMessage("peer-123", "private")
 
         holder.resetLocalData()
@@ -813,6 +872,7 @@ class AuroraStateHolderTest {
         )
 
         holder.updateUsername("Alex")
+        prepareReadyPrivateChat(holder, peerId = "peer-123")
         holder.sendPrivateChatMessage("peer-123", "first")
         holder.updateUsername("Maria")
         holder.sendPrivateChatMessage("peer-123", "second")
@@ -837,6 +897,7 @@ class AuroraStateHolderTest {
             localProfileStore = profileStore,
             persistenceStore = persistenceStore
         )
+        prepareReadyPrivateChat(holder, peerId = "peer-123", displayName = "Aurora device 10325476")
         holder.ingestIncomingTransportMessage(
             gr.hua.aurora.protocol.IncomingTransportMessage(
                 frame = gr.hua.aurora.protocol.MessageFrame(
@@ -847,6 +908,9 @@ class AuroraStateHolderTest {
                     createdAtMillis = 1_000L,
                     payload = gr.hua.aurora.protocol.PrivateChatMessagePayloadCodec.encode(
                         gr.hua.aurora.protocol.PrivateChatMessagePayload(
+                            privateChatId = requireNotNull(
+                                holder.privateChatIdentityForPeerId("peer-123")?.privateChatId
+                            ),
                             senderUsername = "Alex",
                             body = "hello"
                         )
@@ -865,6 +929,9 @@ class AuroraStateHolderTest {
                     createdAtMillis = 2_000L,
                     payload = gr.hua.aurora.protocol.PrivateChatMessagePayloadCodec.encode(
                         gr.hua.aurora.protocol.PrivateChatMessagePayload(
+                            privateChatId = requireNotNull(
+                                holder.privateChatIdentityForPeerId("peer-123")?.privateChatId
+                            ),
                             senderUsername = "Maria",
                             body = "hi again"
                         )
@@ -884,6 +951,40 @@ class AuroraStateHolderTest {
         assertEquals("Maria", restoredHolder.findContactByPeerId("peer-123")?.displayName)
     }
 
+    @Test
+    fun customChatNameWinsOverIncomingRemoteUsernameUpdates() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1"
+        )
+        val establishedIdentity = prepareReadyPrivateChat(holder, peerId = "peer-123", displayName = "Alex")
+        holder.renamePrivateChat("peer-123", "Family chat")
+
+        holder.ingestIncomingTransportMessage(
+            gr.hua.aurora.protocol.IncomingTransportMessage(
+                frame = gr.hua.aurora.protocol.MessageFrame(
+                    id = "private-custom-1",
+                    type = MessageFrameType.PRIVATE_TEXT,
+                    senderId = "peer-123",
+                    recipientId = "self",
+                    createdAtMillis = 3_000L,
+                    payload = gr.hua.aurora.protocol.PrivateChatMessagePayloadCodec.encode(
+                        gr.hua.aurora.protocol.PrivateChatMessagePayload(
+                            privateChatId = requireNotNull(establishedIdentity.privateChatId),
+                            senderUsername = "Maria",
+                            body = "hello after rename"
+                        )
+                    )
+                ),
+                senderPublicKey = byteArrayOf(1, 2, 3, 6)
+            )
+        )
+
+        assertEquals("Family chat", holder.displayNameForPeerId("peer-123"))
+        assertEquals("Maria", holder.findContactByPeerId("peer-123")?.displayName)
+        assertEquals("Maria", holder.privateMessagesForPeerId("peer-123").single().senderName)
+    }
+
     private fun createHolder(
         store: FakeProfileStore,
         generatedUsername: String,
@@ -901,6 +1002,24 @@ class AuroraStateHolderTest {
             ),
             localProfileStore = store,
             persistenceStore = persistenceStore
+        )
+    }
+
+    private fun prepareReadyPrivateChat(
+        holder: AuroraStateHolder,
+        peerId: String,
+        displayName: String = "Alex"
+    ): PrivateChatIdentity {
+        holder.addOrUpdateContact(
+            canonicalPeerId = peerId,
+            displayName = displayName,
+            hasSession = true
+        )
+        return requireNotNull(
+            holder.recordReceivedPrivateChatProposal(
+                peerId = peerId,
+                remoteProposalId = "remote-$peerId"
+            )
         )
     }
 

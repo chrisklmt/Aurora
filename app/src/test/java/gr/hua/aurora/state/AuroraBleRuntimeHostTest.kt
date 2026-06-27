@@ -295,6 +295,7 @@ class AuroraBleRuntimeHostTest {
         val result = runSuspending {
             submitPrivateEncryptedMessage(
                 message = privateMessage(targetPeerId),
+                privateChatId = "chat-$targetPeerId",
                 senderPeerId = "sender-private",
                 senderUsername = "Alice",
                 transportSender = transportSender,
@@ -321,6 +322,7 @@ class AuroraBleRuntimeHostTest {
         assertEquals(targetPeerId, decodedFrame.recipientId)
         assertEquals("Alice", decodedPayload.senderUsername)
         assertEquals("hello $targetPeerId", decodedPayload.body)
+        assertEquals("chat-$targetPeerId", decodedPayload.privateChatId)
     }
 
     @Test
@@ -337,6 +339,7 @@ class AuroraBleRuntimeHostTest {
         val result = runSuspending {
             submitPrivateEncryptedMessage(
                 message = privateMessage(targetPeerId),
+                privateChatId = "chat-$targetPeerId",
                 senderPeerId = "sender-private",
                 senderUsername = "Alice",
                 transportSender = transportSender,
@@ -371,6 +374,7 @@ class AuroraBleRuntimeHostTest {
         val result = runSuspending {
             submitPrivateEncryptedMessage(
                 message = privateMessage(targetPeerId),
+                privateChatId = "chat-$targetPeerId",
                 senderPeerId = "sender-private",
                 senderUsername = "Alice",
                 transportSender = transportSender,
@@ -409,6 +413,7 @@ class AuroraBleRuntimeHostTest {
         val result = runSuspending {
             submitPrivateEncryptedMessage(
                 message = privateMessage(targetPeerId),
+                privateChatId = "chat-$targetPeerId",
                 senderPeerId = "sender-private",
                 senderUsername = "Alice",
                 transportSender = transportSender,
@@ -449,6 +454,7 @@ class AuroraBleRuntimeHostTest {
         val result = runSuspending {
             submitPrivateEncryptedMessage(
                 message = privateMessage(targetPeerId),
+                privateChatId = "chat-$targetPeerId",
                 senderPeerId = "sender-private",
                 senderUsername = "Alice",
                 transportSender = transportSender,
@@ -493,7 +499,8 @@ class AuroraBleRuntimeHostTest {
                 localIdentityMaterial = RuntimePeerIdentityExchangePublicMaterial(
                     peerId = "local-peer",
                     publicAgreementKeyBytes = publicKeyBytes
-                )
+                ),
+                privateChatProposalId = null
             )
         }
 
@@ -529,7 +536,8 @@ class AuroraBleRuntimeHostTest {
                 localIdentityMaterial = RuntimePeerIdentityExchangePublicMaterial(
                     peerId = "local-peer",
                     publicAgreementKeyBytes = senderPublicKeyBytes()
-                )
+                ),
+                privateChatProposalId = null
             )
         }
 
@@ -801,8 +809,15 @@ class AuroraBleRuntimeHostTest {
 
     @Test
     fun runtimeCreatesIdentityHandlerWhenLocalIdentityMaterialIsAvailable() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
         val registry = gr.hua.aurora.protocol.PeerSessionRegistry()
         val handler = createAuroraIdentityHandlerOrNull(
+            stateHolder = holder,
             localIdentity = generateEcKeyPair().identity(),
             registry = registry
         )
@@ -812,8 +827,15 @@ class AuroraBleRuntimeHostTest {
 
     @Test
     fun runtimeLeavesIdentityHandlerUnavailableWhenLocalIdentityMaterialIsMissing() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
         val registry = gr.hua.aurora.protocol.PeerSessionRegistry()
         val handler = createAuroraIdentityHandlerOrNull(
+            stateHolder = holder,
             localIdentity = null,
             registry = registry
         )
@@ -839,6 +861,7 @@ class AuroraBleRuntimeHostTest {
             stateHolder = holder,
             sessionMaterialProvider = registry,
             handleIdentity = createAuroraIdentityHandlerOrNull(
+                stateHolder = holder,
                 localIdentity = local.identity(),
                 registry = registry
             )
@@ -889,6 +912,7 @@ class AuroraBleRuntimeHostTest {
             stateHolder = holder,
             sessionMaterialProvider = registry,
             handleIdentity = createAuroraIdentityHandlerOrNull(
+                stateHolder = holder,
                 localIdentity = null,
                 registry = registry
             )
