@@ -23,6 +23,9 @@ class WifiDirectRuntimeStatusTest {
         assertEquals("enabled", wifiDirectEnabledSummary(status.enabledState))
         assertEquals("inactive", wifiDirectDiscoverySummary(status.discoveryState))
         assertEquals("not wired yet", wifiDirectTransportSummary(status.transportState))
+        assertEquals("disconnected", wifiDirectConnectionSummary(status.connectionStatus.state))
+        assertEquals("unknown", wifiDirectGroupFormedSummary(status.connectionStatus.groupFormed))
+        assertEquals("unknown", wifiDirectConnectionRoleSummary(status.connectionStatus.role))
         assertEquals(0, status.peerCount)
         assertEquals("Wi-Fi Direct transport not wired yet.", status.note)
     }

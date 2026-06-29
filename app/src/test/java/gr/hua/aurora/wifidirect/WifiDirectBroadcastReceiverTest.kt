@@ -28,11 +28,28 @@ class WifiDirectBroadcastReceiverTest {
             WifiDirectBroadcastEvent(
                 action = WifiP2pManager.WIFI_P2P_DISCOVERY_CHANGED_ACTION,
                 isWifiP2pEnabled = null,
-                isDiscoveryActive = false
+                isDiscoveryActive = false,
+                isConnectionEstablished = null
             ),
             wifiDirectBroadcastEvent(
                 action = WifiP2pManager.WIFI_P2P_DISCOVERY_CHANGED_ACTION,
                 discoveryState = WifiP2pManager.WIFI_P2P_DISCOVERY_STOPPED
+            )
+        )
+    }
+
+    @Test
+    fun broadcastEventParsesConnectionChangeSafely() {
+        assertEquals(
+            WifiDirectBroadcastEvent(
+                action = WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION,
+                isWifiP2pEnabled = null,
+                isDiscoveryActive = null,
+                isConnectionEstablished = true
+            ),
+            wifiDirectBroadcastEvent(
+                action = WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION,
+                isConnectionEstablished = true
             )
         )
     }
@@ -49,7 +66,8 @@ class WifiDirectBroadcastReceiverTest {
         assertEquals(
             listOf(
                 WifiDirectBroadcastEvent(
-                    action = WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION
+                    action = WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION,
+                    isConnectionEstablished = null
                 )
             ),
             receivedEvents
@@ -64,5 +82,6 @@ class WifiDirectBroadcastReceiverTest {
         assertTrue(actions.contains(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION))
         assertTrue(actions.contains(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION))
         assertTrue(actions.contains(WifiP2pManager.WIFI_P2P_DISCOVERY_CHANGED_ACTION))
+        assertTrue(actions.contains(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION))
     }
 }

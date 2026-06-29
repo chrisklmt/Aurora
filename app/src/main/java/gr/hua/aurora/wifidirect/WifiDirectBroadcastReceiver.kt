@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.net.wifi.WifiManager
 import android.net.wifi.p2p.WifiP2pManager
+import android.os.Parcelable
 
 internal class WifiDirectRuntimeBroadcastReceiver(
     private val onEvent: (WifiDirectBroadcastEvent) -> Unit
@@ -24,7 +25,10 @@ internal class WifiDirectRuntimeBroadcastReceiver(
                 discoveryState = intent?.getIntExtra(
                     WifiP2pManager.EXTRA_DISCOVERY_STATE,
                     -1
-                ) ?: -1
+                ) ?: -1,
+                isConnectionEstablished = intent?.parcelableExtraCompat<android.net.NetworkInfo>(
+                    WifiP2pManager.EXTRA_NETWORK_INFO
+                )?.isConnected
             )
         )
     }
@@ -35,7 +39,8 @@ internal fun wifiDirectStatusActions(): List<String> {
         WifiManager.WIFI_STATE_CHANGED_ACTION,
         WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION,
         WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION,
-        WifiP2pManager.WIFI_P2P_DISCOVERY_CHANGED_ACTION
+        WifiP2pManager.WIFI_P2P_DISCOVERY_CHANGED_ACTION,
+        WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION
     )
 }
 
@@ -64,7 +69,8 @@ fun wifiDirectBroadcastEvent(
 internal fun wifiDirectBroadcastEvent(
     action: String?,
     wifiP2pState: Int = -1,
-    discoveryState: Int = -1
+    discoveryState: Int = -1,
+    isConnectionEstablished: Boolean? = null
 ): WifiDirectBroadcastEvent {
     val wifiP2pEnabled = if (action == WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION) {
         when (wifiP2pState) {
@@ -88,6 +94,22 @@ internal fun wifiDirectBroadcastEvent(
     return WifiDirectBroadcastEvent(
         action = action,
         isWifiP2pEnabled = wifiP2pEnabled,
-        isDiscoveryActive = discoveryActive
+        isDiscoveryActive = discoveryActive,
+        isConnectionEstablished = if (action == WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION) {
+            isConnectionEstablished
+        } else {
+            null
+        }
     )
+}
+
+private inline fun <reified T : Parcelable> Intent.parcelableExtraCompat(
+    key: String
+): T? {
+    return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+        getParcelableExtra(key, T::class.java)
+    } else {
+        @Suppress("DEPRECATION")
+        getParcelableExtra(key) as? T
+    }
 }

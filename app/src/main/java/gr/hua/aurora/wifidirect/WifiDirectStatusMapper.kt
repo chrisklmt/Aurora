@@ -35,6 +35,7 @@ internal fun wifiDirectPermissionStatusWithP2pState(
 internal fun buildWifiDirectRuntimeStatus(
     permissionStatus: WifiDirectPermissionStatus,
     discoveryState: WifiDirectDiscoveryState,
+    connectionStatus: WifiDirectConnectionStatus,
     peers: List<WifiDirectPeer>,
     lastError: String?,
     lastUpdatedAtMillis: Long?
@@ -43,6 +44,7 @@ internal fun buildWifiDirectRuntimeStatus(
         permissionStatus = permissionStatus,
         discoveryState = discoveryState,
         transportState = WifiDirectTransportState.NOT_WIRED,
+        connectionStatus = connectionStatus,
         peers = peers,
         lastError = lastError,
         lastUpdatedAtMillis = lastUpdatedAtMillis

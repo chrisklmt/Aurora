@@ -15,8 +15,11 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 data class RememberedWifiDirectRuntimeStatusState(
     val status: WifiDirectRuntimeStatus,
     val refresh: () -> Unit,
+    val refreshConnectionInfo: () -> Unit,
     val startDiscovery: () -> Unit,
-    val stopDiscovery: () -> Unit
+    val stopDiscovery: () -> Unit,
+    val connectToPeer: (WifiDirectPeer) -> Unit,
+    val disconnect: () -> Unit
 )
 
 @Composable
@@ -45,6 +48,21 @@ fun rememberWifiDirectRuntimeStatusState(
     val stopDiscovery = remember(resolvedController) {
         {
             resolvedController.stopDiscovery()
+        }
+    }
+    val refreshConnectionInfo = remember(resolvedController) {
+        {
+            resolvedController.refreshConnectionInfo()
+        }
+    }
+    val connectToPeer = remember(resolvedController) {
+        { peer: WifiDirectPeer ->
+            resolvedController.connectToPeer(peer)
+        }
+    }
+    val disconnect = remember(resolvedController) {
+        {
+            resolvedController.disconnect()
         }
     }
 
@@ -102,7 +120,10 @@ fun rememberWifiDirectRuntimeStatusState(
     return RememberedWifiDirectRuntimeStatusState(
         status = runtimeStatus,
         refresh = refresh,
+        refreshConnectionInfo = refreshConnectionInfo,
         startDiscovery = startDiscovery,
-        stopDiscovery = stopDiscovery
+        stopDiscovery = stopDiscovery,
+        connectToPeer = connectToPeer,
+        disconnect = disconnect
     )
 }

@@ -77,6 +77,16 @@ class WifiDirectStatusMapperTest {
                 permissionStatus = permissionStatus,
                 discoveryState = WifiDirectDiscoveryState.ACTIVE,
                 transportState = WifiDirectTransportState.NOT_WIRED,
+                connectionStatus = WifiDirectConnectionStatus(
+                    state = WifiDirectConnectionState.CONNECTED,
+                    targetPeer = WifiDirectPeer(
+                        deviceName = "Aurora Alpha",
+                        deviceAddress = "AA:BB:CC:DD:EE:01"
+                    ),
+                    groupFormed = WifiDirectGroupFormedState.YES,
+                    role = WifiDirectConnectionRole.CLIENT,
+                    groupOwnerAddress = "192.168.49.1"
+                ),
                 peers = peers,
                 lastError = "Wi-Fi Direct peers unavailable: RuntimeException",
                 lastUpdatedAtMillis = 1234L
@@ -84,6 +94,16 @@ class WifiDirectStatusMapperTest {
             buildWifiDirectRuntimeStatus(
                 permissionStatus = permissionStatus,
                 discoveryState = WifiDirectDiscoveryState.ACTIVE,
+                connectionStatus = WifiDirectConnectionStatus(
+                    state = WifiDirectConnectionState.CONNECTED,
+                    targetPeer = WifiDirectPeer(
+                        deviceName = "Aurora Alpha",
+                        deviceAddress = "AA:BB:CC:DD:EE:01"
+                    ),
+                    groupFormed = WifiDirectGroupFormedState.YES,
+                    role = WifiDirectConnectionRole.CLIENT,
+                    groupOwnerAddress = "192.168.49.1"
+                ),
                 peers = peers,
                 lastError = "Wi-Fi Direct peers unavailable: RuntimeException",
                 lastUpdatedAtMillis = 1234L
@@ -119,6 +139,46 @@ class WifiDirectStatusMapperTest {
         )
         assertNull(
             wifiDirectPermissionStatusWithP2pState(permissionStatus, null).isWifiP2pEnabled
+        )
+    }
+
+    @Test
+    fun connectionSnapshotMapsGroupOwnerAndClientRolesSafely() {
+        assertEquals(
+            WifiDirectConnectionSnapshot(
+                groupFormed = WifiDirectGroupFormedState.YES,
+                role = WifiDirectConnectionRole.GROUP_OWNER,
+                groupOwnerAddress = "192.168.49.1"
+            ),
+            wifiDirectConnectionSnapshot(
+                groupFormed = true,
+                isGroupOwner = true,
+                groupOwnerAddress = " 192.168.49.1 "
+            )
+        )
+        assertEquals(
+            WifiDirectConnectionSnapshot(
+                groupFormed = WifiDirectGroupFormedState.YES,
+                role = WifiDirectConnectionRole.CLIENT,
+                groupOwnerAddress = null
+            ),
+            wifiDirectConnectionSnapshot(
+                groupFormed = true,
+                isGroupOwner = false,
+                groupOwnerAddress = "   "
+            )
+        )
+        assertEquals(
+            WifiDirectConnectionSnapshot(
+                groupFormed = WifiDirectGroupFormedState.NO,
+                role = WifiDirectConnectionRole.UNKNOWN,
+                groupOwnerAddress = null
+            ),
+            wifiDirectConnectionSnapshot(
+                groupFormed = false,
+                isGroupOwner = true,
+                groupOwnerAddress = null
+            )
         )
     }
 }

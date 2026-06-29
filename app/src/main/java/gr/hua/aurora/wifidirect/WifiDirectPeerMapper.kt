@@ -4,6 +4,15 @@ import android.net.wifi.p2p.WifiP2pDevice
 import android.net.wifi.p2p.WifiP2pDeviceList
 
 internal object WifiDirectPeerMapper {
+    fun normalizePeer(
+        peer: WifiDirectPeer
+    ): WifiDirectPeer {
+        return mapPeer(
+            deviceName = peer.deviceName,
+            deviceAddress = peer.deviceAddress
+        )
+    }
+
     fun mapPeer(
         deviceName: String?,
         deviceAddress: String?

@@ -14,10 +14,40 @@ enum class WifiDirectTransportState {
     CONNECTED
 }
 
+enum class WifiDirectConnectionState {
+    DISCONNECTED,
+    CONNECTING,
+    CONNECTED,
+    DISCONNECTING,
+    FAILED
+}
+
+enum class WifiDirectGroupFormedState {
+    YES,
+    NO,
+    UNKNOWN
+}
+
+enum class WifiDirectConnectionRole {
+    GROUP_OWNER,
+    CLIENT,
+    UNKNOWN
+}
+
+data class WifiDirectConnectionStatus(
+    val state: WifiDirectConnectionState = WifiDirectConnectionState.DISCONNECTED,
+    val targetPeer: WifiDirectPeer? = null,
+    val groupFormed: WifiDirectGroupFormedState = WifiDirectGroupFormedState.UNKNOWN,
+    val role: WifiDirectConnectionRole = WifiDirectConnectionRole.UNKNOWN,
+    val groupOwnerAddress: String? = null,
+    val lastError: String? = null
+)
+
 data class WifiDirectRuntimeStatus(
     val permissionStatus: WifiDirectPermissionStatus,
     val discoveryState: WifiDirectDiscoveryState = WifiDirectDiscoveryState.INACTIVE,
     val transportState: WifiDirectTransportState = WifiDirectTransportState.NOT_WIRED,
+    val connectionStatus: WifiDirectConnectionStatus = WifiDirectConnectionStatus(),
     val peers: List<WifiDirectPeer> = emptyList(),
     val lastError: String? = null,
     val lastUpdatedAtMillis: Long? = null,
@@ -80,6 +110,38 @@ fun wifiDirectTransportSummary(
         WifiDirectTransportState.IDLE -> "idle"
         WifiDirectTransportState.CONNECTING -> "connecting"
         WifiDirectTransportState.CONNECTED -> "connected"
+    }
+}
+
+fun wifiDirectConnectionSummary(
+    state: WifiDirectConnectionState
+): String {
+    return when (state) {
+        WifiDirectConnectionState.DISCONNECTED -> "disconnected"
+        WifiDirectConnectionState.CONNECTING -> "connecting"
+        WifiDirectConnectionState.CONNECTED -> "connected"
+        WifiDirectConnectionState.DISCONNECTING -> "disconnecting"
+        WifiDirectConnectionState.FAILED -> "failed"
+    }
+}
+
+fun wifiDirectGroupFormedSummary(
+    state: WifiDirectGroupFormedState
+): String {
+    return when (state) {
+        WifiDirectGroupFormedState.YES -> "yes"
+        WifiDirectGroupFormedState.NO -> "no"
+        WifiDirectGroupFormedState.UNKNOWN -> "unknown"
+    }
+}
+
+fun wifiDirectConnectionRoleSummary(
+    role: WifiDirectConnectionRole
+): String {
+    return when (role) {
+        WifiDirectConnectionRole.GROUP_OWNER -> "group owner"
+        WifiDirectConnectionRole.CLIENT -> "client"
+        WifiDirectConnectionRole.UNKNOWN -> "unknown"
     }
 }
 

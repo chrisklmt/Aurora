@@ -16,6 +16,10 @@ import gr.hua.aurora.ui.components.DebugInfoCardModel
 import gr.hua.aurora.ui.components.DebugInfoItem
 import gr.hua.aurora.ui.components.DebugInfoSection
 import gr.hua.aurora.wifidirect.WifiDirectDiscoveryState
+import gr.hua.aurora.wifidirect.WifiDirectConnectionRole
+import gr.hua.aurora.wifidirect.WifiDirectConnectionState
+import gr.hua.aurora.wifidirect.WifiDirectConnectionStatus
+import gr.hua.aurora.wifidirect.WifiDirectGroupFormedState
 import gr.hua.aurora.wifidirect.WifiDirectPeer
 import gr.hua.aurora.wifidirect.WifiDirectPermissionStatus
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
@@ -497,6 +501,9 @@ class NearbyDevicesScreenTest {
                             DebugInfoItem("Wi-Fi/P2P", "enabled"),
                             DebugInfoItem("Discovery", "inactive"),
                             DebugInfoItem("Transport", "not wired yet"),
+                            DebugInfoItem("Connection", "disconnected"),
+                            DebugInfoItem("Group", "unknown"),
+                            DebugInfoItem("Role", "unknown"),
                             DebugInfoItem("Peers", "0")
                         )
                     ),
@@ -533,6 +540,9 @@ class NearbyDevicesScreenTest {
                     DebugInfoItem("Wi-Fi/P2P", "unknown"),
                     DebugInfoItem("Discovery", "inactive"),
                     DebugInfoItem("Transport", "not wired yet"),
+                    DebugInfoItem("Connection", "disconnected"),
+                    DebugInfoItem("Group", "unknown"),
+                    DebugInfoItem("Role", "unknown"),
                     DebugInfoItem("Peers", "0"),
                     DebugInfoItem(
                         "Last error",
@@ -562,6 +572,9 @@ class NearbyDevicesScreenTest {
                     DebugInfoItem("Wi-Fi/P2P", "enabled"),
                     DebugInfoItem("Discovery", "active"),
                     DebugInfoItem("Transport", "not wired yet"),
+                    DebugInfoItem("Connection", "disconnected"),
+                    DebugInfoItem("Group", "unknown"),
+                    DebugInfoItem("Role", "unknown"),
                     DebugInfoItem("Peers", "2"),
                     DebugInfoItem(
                         "Devices",
@@ -594,6 +607,8 @@ class NearbyDevicesScreenTest {
             NearbyWifiDirectDebugControlsState(
                 canStartDiscovery = true,
                 canStopDiscovery = true,
+                canDisconnect = false,
+                disconnectLabel = "Disconnect Wi-Fi Direct",
                 startDisabledReason = null
             ),
             nearbyWifiDirectDebugControlsState(
@@ -606,6 +621,8 @@ class NearbyDevicesScreenTest {
             NearbyWifiDirectDebugControlsState(
                 canStartDiscovery = false,
                 canStopDiscovery = true,
+                canDisconnect = false,
+                disconnectLabel = "Disconnect Wi-Fi Direct",
                 startDisabledReason = "Wi-Fi Direct discovery already active."
             ),
             nearbyWifiDirectDebugControlsState(
@@ -622,12 +639,120 @@ class NearbyDevicesScreenTest {
             NearbyWifiDirectDebugControlsState(
                 canStartDiscovery = false,
                 canStopDiscovery = true,
+                canDisconnect = false,
+                disconnectLabel = "Disconnect Wi-Fi Direct",
                 startDisabledReason = "Missing Nearby Wi-Fi permission."
             ),
             nearbyWifiDirectDebugControlsState(
                 wifiDirectRuntimeStatus(
                     missingPermissions = setOf("android.permission.NEARBY_WIFI_DEVICES")
                 )
+            )
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectDebugSectionShowsConnectionDetailsWhenPresent() {
+        val peer = WifiDirectPeer(
+            deviceName = "Aurora Alpha",
+            deviceAddress = "AA:BB:CC:DD:EE:01"
+        )
+
+        assertEquals(
+            DebugInfoSection(
+                title = "Wi-Fi Direct",
+                items = listOf(
+                    DebugInfoItem("Supported", "yes"),
+                    DebugInfoItem("Permissions", "granted"),
+                    DebugInfoItem("Wi-Fi/P2P", "enabled"),
+                    DebugInfoItem("Discovery", "inactive"),
+                    DebugInfoItem("Transport", "not wired yet"),
+                    DebugInfoItem("Connection", "connected"),
+                    DebugInfoItem("Target", "Aurora Alpha (AA:BB:CC:DD:EE:01)", preferFullWidth = true),
+                    DebugInfoItem("Group", "yes"),
+                    DebugInfoItem("Role", "group owner"),
+                    DebugInfoItem("Owner", "192.168.49.1", preferFullWidth = true),
+                    DebugInfoItem("Peers", "1"),
+                    DebugInfoItem(
+                        "Devices",
+                        "Aurora Alpha (AA:BB:CC:DD:EE:01)",
+                        preferFullWidth = true
+                    ),
+                    DebugInfoItem(
+                        "Connect error",
+                        "Wi-Fi Direct connect failed: busy",
+                        preferFullWidth = true
+                    )
+                )
+            ),
+            buildNearbyWifiDirectDebugSection(
+                runtimeStatus = wifiDirectRuntimeStatus(
+                    peers = listOf(peer),
+                    connectionStatus = WifiDirectConnectionStatus(
+                        state = WifiDirectConnectionState.CONNECTED,
+                        targetPeer = peer,
+                        groupFormed = WifiDirectGroupFormedState.YES,
+                        role = WifiDirectConnectionRole.GROUP_OWNER,
+                        groupOwnerAddress = "192.168.49.1",
+                        lastError = "Wi-Fi Direct connect failed: busy"
+                    )
+                )
+            )
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectPeerActionStateReflectsConnectAndDisconnectProgress() {
+        val peer = WifiDirectPeer(
+            deviceName = "Aurora Alpha",
+            deviceAddress = "AA:BB:CC:DD:EE:01"
+        )
+
+        assertEquals(
+            NearbyWifiDirectPeerActionState(
+                connectLabel = "Connect",
+                canConnect = true
+            ),
+            nearbyWifiDirectPeerActionState(
+                runtimeStatus = wifiDirectRuntimeStatus(
+                    peers = listOf(peer)
+                ),
+                peer = peer
+            )
+        )
+        assertEquals(
+            NearbyWifiDirectPeerActionState(
+                connectLabel = "Connected",
+                canConnect = false
+            ),
+            nearbyWifiDirectPeerActionState(
+                runtimeStatus = wifiDirectRuntimeStatus(
+                    peers = listOf(peer),
+                    connectionStatus = WifiDirectConnectionStatus(
+                        state = WifiDirectConnectionState.CONNECTED,
+                        targetPeer = peer,
+                        groupFormed = WifiDirectGroupFormedState.YES,
+                        role = WifiDirectConnectionRole.CLIENT
+                    )
+                ),
+                peer = peer
+            )
+        )
+        assertEquals(
+            NearbyWifiDirectPeerActionState(
+                connectLabel = "Disconnecting",
+                canConnect = false,
+                disabledReason = "Wi-Fi Direct disconnect already in progress."
+            ),
+            nearbyWifiDirectPeerActionState(
+                runtimeStatus = wifiDirectRuntimeStatus(
+                    peers = listOf(peer),
+                    connectionStatus = WifiDirectConnectionStatus(
+                        state = WifiDirectConnectionState.DISCONNECTING,
+                        targetPeer = peer
+                    )
+                ),
+                peer = peer
             )
         )
     }
@@ -719,6 +844,7 @@ class NearbyDevicesScreenTest {
         isWifiEnabled: Boolean? = true,
         discoveryState: WifiDirectDiscoveryState = WifiDirectDiscoveryState.INACTIVE,
         peers: List<WifiDirectPeer> = emptyList(),
+        connectionStatus: WifiDirectConnectionStatus = WifiDirectConnectionStatus(),
         lastError: String? = null
     ): WifiDirectRuntimeStatus {
         return WifiDirectRuntimeStatus(
@@ -730,6 +856,7 @@ class NearbyDevicesScreenTest {
             ),
             discoveryState = discoveryState,
             transportState = WifiDirectTransportState.NOT_WIRED,
+            connectionStatus = connectionStatus,
             peers = peers,
             lastError = lastError
         )

@@ -8,6 +8,23 @@ import org.junit.Test
 
 class AndroidWifiDirectControllerTest {
     @Test
+    fun connectionStateDefaultsToDisconnected() {
+        val permissionStatus = readyPermissionStatus()
+        val controller = AndroidWifiDirectController(
+            permissionStatusReader = { permissionStatus },
+            fallbackPermissionStatus = { permissionStatus },
+            platformClient = FakeWifiDirectPlatformClient(),
+            nowMillis = { 1L }
+        )
+
+        assertEquals(
+            WifiDirectConnectionState.DISCONNECTED,
+            controller.currentRuntimeStatus().connectionStatus.state
+        )
+        assertNull(controller.currentRuntimeStatus().connectionStatus.targetPeer)
+    }
+
+    @Test
     fun startDiscoveryMarksActiveAndUpdatesPeers() {
         var permissionStatus = readyPermissionStatus()
         val client = FakeWifiDirectPlatformClient().apply {
@@ -25,8 +42,7 @@ class AndroidWifiDirectControllerTest {
             nowMillis = { 1234L }
         )
         val observedStatuses = mutableListOf<WifiDirectRuntimeStatus>()
-        val listener = recordingListener(observedStatuses)
-        controller.addListener(listener)
+        controller.addListener(recordingListener(observedStatuses))
 
         controller.startDiscovery()
 
@@ -72,7 +88,6 @@ class AndroidWifiDirectControllerTest {
             isWifiEnabled = true,
             isWifiP2pEnabled = true
         )
-        val client = FakeWifiDirectPlatformClient()
         val controller = AndroidWifiDirectController(
             permissionStatusReader = { permissionStatus },
             fallbackPermissionStatus = { permissionStatus },
@@ -82,12 +97,184 @@ class AndroidWifiDirectControllerTest {
 
         controller.startDiscovery()
 
-        assertEquals(0, client.discoverPeersCallCount)
         assertEquals(
             "Wi-Fi Direct unsupported on this device.",
             controller.currentRuntimeStatus().lastError
         )
         assertEquals(WifiDirectDiscoveryState.INACTIVE, controller.currentRuntimeStatus().discoveryState)
+    }
+
+    @Test
+    fun connectFailsClearlyWhenPermissionIsMissing() {
+        val permissionStatus = readyPermissionStatus(
+            missingPermissions = setOf("android.permission.NEARBY_WIFI_DEVICES")
+        )
+        val client = FakeWifiDirectPlatformClient().apply {
+            requestPeersResult = listOf(
+                WifiDirectPeer(
+                    deviceName = "Aurora Alpha",
+                    deviceAddress = "AA:BB:CC:DD:EE:01"
+                )
+            )
+        }
+        val controller = AndroidWifiDirectController(
+            permissionStatusReader = { permissionStatus },
+            fallbackPermissionStatus = { permissionStatus },
+            platformClient = client,
+            nowMillis = { 60L }
+        )
+
+        controller.connectToPeer(client.requestPeersResult.first())
+
+        assertEquals(0, client.connectToPeerCallCount)
+        assertEquals(
+            WifiDirectConnectionState.FAILED,
+            controller.currentRuntimeStatus().connectionStatus.state
+        )
+        assertEquals(
+            "Missing Nearby Wi-Fi permission.",
+            controller.currentRuntimeStatus().connectionStatus.lastError
+        )
+    }
+
+    @Test
+    fun connectFailsClearlyWhenWifiDirectStateIsDisabled() {
+        val permissionStatus = readyPermissionStatus(
+            isWifiEnabled = false,
+            isWifiP2pEnabled = false
+        )
+        val client = FakeWifiDirectPlatformClient().apply {
+            requestPeersResult = listOf(
+                WifiDirectPeer(
+                    deviceName = "Aurora Alpha",
+                    deviceAddress = "AA:BB:CC:DD:EE:01"
+                )
+            )
+        }
+        val controller = AndroidWifiDirectController(
+            permissionStatusReader = { permissionStatus },
+            fallbackPermissionStatus = { permissionStatus },
+            platformClient = client,
+            nowMillis = { 61L }
+        )
+
+        controller.connectToPeer(client.requestPeersResult.first())
+
+        assertEquals(0, client.connectToPeerCallCount)
+        assertEquals(
+            "Wi-Fi Direct is disabled.",
+            controller.currentRuntimeStatus().connectionStatus.lastError
+        )
+    }
+
+    @Test
+    fun connectFailsClearlyWhenPeerIsNoLongerVisible() {
+        val permissionStatus = readyPermissionStatus()
+        val client = FakeWifiDirectPlatformClient()
+        val controller = AndroidWifiDirectController(
+            permissionStatusReader = { permissionStatus },
+            fallbackPermissionStatus = { permissionStatus },
+            platformClient = client,
+            nowMillis = { 62L }
+        )
+
+        controller.connectToPeer(
+            WifiDirectPeer(
+                deviceName = "Aurora Missing",
+                deviceAddress = "AA:BB:CC:DD:EE:09"
+            )
+        )
+
+        assertEquals(0, client.connectToPeerCallCount)
+        assertEquals(
+            "Selected Wi-Fi Direct peer is no longer visible.",
+            controller.currentRuntimeStatus().connectionStatus.lastError
+        )
+    }
+
+    @Test
+    fun connectSuccessMovesStateTowardConnectingAndConnected() {
+        val permissionStatus = readyPermissionStatus()
+        val peer = WifiDirectPeer(
+            deviceName = "Aurora Beta",
+            deviceAddress = "AA:BB:CC:DD:EE:02"
+        )
+        val client = FakeWifiDirectPlatformClient().apply {
+            requestPeersResult = listOf(peer)
+            connectionSnapshot = WifiDirectConnectionSnapshot(
+                groupFormed = WifiDirectGroupFormedState.NO,
+                role = WifiDirectConnectionRole.UNKNOWN,
+                groupOwnerAddress = null
+            )
+        }
+        val controller = AndroidWifiDirectController(
+            permissionStatusReader = { permissionStatus },
+            fallbackPermissionStatus = { permissionStatus },
+            platformClient = client,
+            nowMillis = { 77L }
+        )
+
+        controller.handleBroadcast(
+            WifiDirectBroadcastEvent(
+                action = WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION
+            )
+        )
+        controller.connectToPeer(peer)
+
+        assertEquals(1, client.connectToPeerCallCount)
+        assertEquals(1, client.requestConnectionSnapshotCallCount)
+        assertEquals(
+            WifiDirectConnectionState.CONNECTING,
+            controller.currentRuntimeStatus().connectionStatus.state
+        )
+
+        client.connectionSnapshot = WifiDirectConnectionSnapshot(
+            groupFormed = WifiDirectGroupFormedState.YES,
+            role = WifiDirectConnectionRole.CLIENT,
+            groupOwnerAddress = "192.168.49.1"
+        )
+        controller.handleBroadcast(
+            WifiDirectBroadcastEvent(
+                action = WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION,
+                isConnectionEstablished = true
+            )
+        )
+
+        val status = controller.currentRuntimeStatus().connectionStatus
+        assertEquals(WifiDirectConnectionState.CONNECTED, status.state)
+        assertEquals(WifiDirectGroupFormedState.YES, status.groupFormed)
+        assertEquals(WifiDirectConnectionRole.CLIENT, status.role)
+        assertEquals("192.168.49.1", status.groupOwnerAddress)
+    }
+
+    @Test
+    fun connectFailureRecordsLastConnectionError() {
+        val permissionStatus = readyPermissionStatus()
+        val peer = WifiDirectPeer(
+            deviceName = "Aurora Busy",
+            deviceAddress = "AA:BB:CC:DD:EE:03"
+        )
+        val client = FakeWifiDirectPlatformClient().apply {
+            requestPeersResult = listOf(peer)
+            connectFailureReason = WifiP2pManager.BUSY
+        }
+        val controller = AndroidWifiDirectController(
+            permissionStatusReader = { permissionStatus },
+            fallbackPermissionStatus = { permissionStatus },
+            platformClient = client,
+            nowMillis = { 91L }
+        )
+
+        controller.handleBroadcast(
+            WifiDirectBroadcastEvent(
+                action = WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION
+            )
+        )
+        controller.connectToPeer(peer)
+
+        val status = controller.currentRuntimeStatus().connectionStatus
+        assertEquals(WifiDirectConnectionState.FAILED, status.state)
+        assertEquals("Wi-Fi Direct connect failed: busy", status.lastError)
     }
 
     @Test
@@ -116,6 +303,36 @@ class AndroidWifiDirectControllerTest {
 
         assertEquals(1, controller.currentRuntimeStatus().peerCount)
         assertEquals(1, client.requestPeersCallCount)
+    }
+
+    @Test
+    fun connectionChangedBroadcastUpdatesRuntimeState() {
+        val permissionStatus = readyPermissionStatus()
+        val client = FakeWifiDirectPlatformClient().apply {
+            connectionSnapshot = WifiDirectConnectionSnapshot(
+                groupFormed = WifiDirectGroupFormedState.YES,
+                role = WifiDirectConnectionRole.GROUP_OWNER,
+                groupOwnerAddress = "AA:BB:CC:DD:EE:AA"
+            )
+        }
+        val controller = AndroidWifiDirectController(
+            permissionStatusReader = { permissionStatus },
+            fallbackPermissionStatus = { permissionStatus },
+            platformClient = client,
+            nowMillis = { 88L }
+        )
+
+        controller.handleBroadcast(
+            WifiDirectBroadcastEvent(
+                action = WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION,
+                isConnectionEstablished = true
+            )
+        )
+
+        val status = controller.currentRuntimeStatus().connectionStatus
+        assertEquals(WifiDirectConnectionState.CONNECTED, status.state)
+        assertEquals(WifiDirectConnectionRole.GROUP_OWNER, status.role)
+        assertEquals("AA:BB:CC:DD:EE:AA", status.groupOwnerAddress)
     }
 
     @Test
@@ -153,6 +370,7 @@ class AndroidWifiDirectControllerTest {
         assertEquals(0, status.peerCount)
         assertEquals(WifiDirectEnabledState.DISABLED, status.enabledState)
         assertEquals("Wi-Fi Direct is disabled.", status.lastError)
+        assertEquals(WifiDirectConnectionState.DISCONNECTED, status.connectionStatus.state)
     }
 
     @Test
@@ -205,7 +423,7 @@ class AndroidWifiDirectControllerTest {
     }
 
     @Test
-    fun stopDiscoveryIsSafeWhenAlreadyInactive() {
+    fun disconnectIsSafeWhenInactive() {
         val permissionStatus = readyPermissionStatus()
         val client = FakeWifiDirectPlatformClient()
         val controller = AndroidWifiDirectController(
@@ -215,11 +433,59 @@ class AndroidWifiDirectControllerTest {
             nowMillis = { 121L }
         )
 
-        controller.stopDiscovery()
+        controller.disconnect()
 
-        assertEquals(WifiDirectDiscoveryState.INACTIVE, controller.currentRuntimeStatus().discoveryState)
-        assertNull(controller.currentRuntimeStatus().lastError)
-        assertEquals(1, client.stopDiscoveryCallCount)
+        assertEquals(0, client.cancelPendingConnectionCallCount)
+        assertEquals(0, client.disconnectFromPeerCallCount)
+        assertEquals(
+            WifiDirectConnectionState.DISCONNECTED,
+            controller.currentRuntimeStatus().connectionStatus.state
+        )
+    }
+
+    @Test
+    fun disconnectClearsConnectedState() {
+        val permissionStatus = readyPermissionStatus()
+        val peer = WifiDirectPeer(
+            deviceName = "Aurora Echo",
+            deviceAddress = "AA:BB:CC:DD:EE:05"
+        )
+        val client = FakeWifiDirectPlatformClient().apply {
+            requestPeersResult = listOf(peer)
+            connectionSnapshot = WifiDirectConnectionSnapshot(
+                groupFormed = WifiDirectGroupFormedState.YES,
+                role = WifiDirectConnectionRole.CLIENT,
+                groupOwnerAddress = "192.168.49.1"
+            )
+        }
+        val controller = AndroidWifiDirectController(
+            permissionStatusReader = { permissionStatus },
+            fallbackPermissionStatus = { permissionStatus },
+            platformClient = client,
+            nowMillis = { 122L }
+        )
+
+        controller.handleBroadcast(
+            WifiDirectBroadcastEvent(
+                action = WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION
+            )
+        )
+        controller.connectToPeer(peer)
+        controller.handleBroadcast(
+            WifiDirectBroadcastEvent(
+                action = WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION,
+                isConnectionEstablished = true
+            )
+        )
+
+        controller.disconnect()
+
+        assertEquals(1, client.disconnectFromPeerCallCount)
+        assertEquals(
+            WifiDirectConnectionState.DISCONNECTED,
+            controller.currentRuntimeStatus().connectionStatus.state
+        )
+        assertNull(controller.currentRuntimeStatus().connectionStatus.targetPeer)
     }
 
     @Test
@@ -272,10 +538,19 @@ private class FakeWifiDirectPlatformClient : WifiDirectPlatformClient {
     var discoverPeersCallCount: Int = 0
     var stopDiscoveryCallCount: Int = 0
     var requestPeersCallCount: Int = 0
+    var connectToPeerCallCount: Int = 0
+    var cancelPendingConnectionCallCount: Int = 0
+    var disconnectFromPeerCallCount: Int = 0
+    var requestConnectionSnapshotCallCount: Int = 0
     var discoverFailureReason: Int? = null
     var stopFailureReason: Int? = null
     var requestPeersFailureReason: String? = null
+    var connectFailureReason: Int? = null
+    var cancelFailureReason: Int? = null
+    var disconnectFailureReason: Int? = null
+    var requestConnectionSnapshotFailureReason: String? = null
     var requestPeersResult: List<WifiDirectPeer> = emptyList()
+    var connectionSnapshot: WifiDirectConnectionSnapshot = WifiDirectConnectionSnapshot()
 
     override fun discoverPeers(
         onSuccess: () -> Unit,
@@ -299,5 +574,38 @@ private class FakeWifiDirectPlatformClient : WifiDirectPlatformClient {
     ) {
         requestPeersCallCount += 1
         requestPeersFailureReason?.let(onFailure) ?: onSuccess(requestPeersResult)
+    }
+
+    override fun connectToPeer(
+        peer: WifiDirectPeer,
+        onSuccess: () -> Unit,
+        onFailure: (Int) -> Unit
+    ) {
+        connectToPeerCallCount += 1
+        connectFailureReason?.let(onFailure) ?: onSuccess()
+    }
+
+    override fun cancelPendingConnection(
+        onSuccess: () -> Unit,
+        onFailure: (Int) -> Unit
+    ) {
+        cancelPendingConnectionCallCount += 1
+        cancelFailureReason?.let(onFailure) ?: onSuccess()
+    }
+
+    override fun disconnectFromPeer(
+        onSuccess: () -> Unit,
+        onFailure: (Int) -> Unit
+    ) {
+        disconnectFromPeerCallCount += 1
+        disconnectFailureReason?.let(onFailure) ?: onSuccess()
+    }
+
+    override fun requestConnectionSnapshot(
+        onSuccess: (WifiDirectConnectionSnapshot) -> Unit,
+        onFailure: (String) -> Unit
+    ) {
+        requestConnectionSnapshotCallCount += 1
+        requestConnectionSnapshotFailureReason?.let(onFailure) ?: onSuccess(connectionSnapshot)
     }
 }
