@@ -216,6 +216,8 @@ fun NavGraph(
                 privateChatIdentitiesByPeerId = uiState.privateChatIdentitiesByPeerId,
                 transportSenderSourceLabel = bleRuntimeState.transportSenderSourceLabel,
                 wifiDirectRuntimeStatus = bleRuntimeState.wifiDirectRuntimeStatus,
+                onStartWifiDirectDiscovery = bleRuntimeState.startWifiDirectDiscovery,
+                onStopWifiDirectDiscovery = bleRuntimeState.stopWifiDirectDiscovery,
                 identityHandlerStatus = bleRuntimeState.identityHandlerStatus,
                 peerSessionDiagnostics = bleRuntimeState.peerSessionDiagnostics,
                 activeTransportPeerId = bleRuntimeState.activeTransportPeerId,

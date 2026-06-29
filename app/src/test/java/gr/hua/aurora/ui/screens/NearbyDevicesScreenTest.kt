@@ -16,6 +16,7 @@ import gr.hua.aurora.ui.components.DebugInfoCardModel
 import gr.hua.aurora.ui.components.DebugInfoItem
 import gr.hua.aurora.ui.components.DebugInfoSection
 import gr.hua.aurora.wifidirect.WifiDirectDiscoveryState
+import gr.hua.aurora.wifidirect.WifiDirectPeer
 import gr.hua.aurora.wifidirect.WifiDirectPermissionStatus
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
 import gr.hua.aurora.wifidirect.WifiDirectTransportState
@@ -560,6 +561,74 @@ class NearbyDevicesScreenTest {
     }
 
     @Test
+    fun nearbyWifiDirectDebugSectionShowsSafePeerDetailsWhenDiscovered() {
+        assertEquals(
+            DebugInfoSection(
+                title = "Wi-Fi Direct",
+                items = listOf(
+                    DebugInfoItem("Support", "supported"),
+                    DebugInfoItem("Perms", "granted"),
+                    DebugInfoItem("State", "enabled"),
+                    DebugInfoItem("Discovery", "active"),
+                    DebugInfoItem("Transport", "not wired"),
+                    DebugInfoItem("Peers", "2"),
+                    DebugInfoItem(
+                        "Devices",
+                        "Aurora Alpha (AA:BB:CC:DD:EE:01), unnamed (AA:BB:CC:DD:EE:02)",
+                        preferFullWidth = true
+                    ),
+                    DebugInfoItem(
+                        "Note",
+                        "Wi-Fi Direct transport not wired yet.",
+                        preferFullWidth = true
+                    )
+                )
+            ),
+            buildNearbyWifiDirectDebugSection(
+                runtimeStatus = wifiDirectRuntimeStatus(
+                    discoveryState = WifiDirectDiscoveryState.ACTIVE,
+                    peers = listOf(
+                        WifiDirectPeer(
+                            deviceName = "Aurora Alpha",
+                            deviceAddress = "AA:BB:CC:DD:EE:01"
+                        ),
+                        WifiDirectPeer(
+                            deviceName = null,
+                            deviceAddress = "AA:BB:CC:DD:EE:02"
+                        )
+                    )
+                )
+            )
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectDebugControlsFollowDiscoveryState() {
+        assertEquals(
+            NearbyWifiDirectDebugControlsState(
+                canStartDiscovery = true,
+                canStopDiscovery = false
+            ),
+            nearbyWifiDirectDebugControlsState(
+                wifiDirectRuntimeStatus(
+                    discoveryState = WifiDirectDiscoveryState.INACTIVE
+                )
+            )
+        )
+        assertEquals(
+            NearbyWifiDirectDebugControlsState(
+                canStartDiscovery = false,
+                canStopDiscovery = true
+            ),
+            nearbyWifiDirectDebugControlsState(
+                wifiDirectRuntimeStatus(
+                    discoveryState = WifiDirectDiscoveryState.ACTIVE
+                )
+            )
+        )
+    }
+
+    @Test
     fun nearbyExpandedDebugCardKeepsVerboseRuntimeTransportAndIdentityDetails() {
         val diagnostics = PeerSessionRegistryDiagnostics(
             establishedPeerIds = listOf("peer-canonical"),
@@ -644,6 +713,8 @@ class NearbyDevicesScreenTest {
     private fun wifiDirectRuntimeStatus(
         missingPermissions: Set<String> = emptySet(),
         isWifiEnabled: Boolean? = true,
+        discoveryState: WifiDirectDiscoveryState = WifiDirectDiscoveryState.INACTIVE,
+        peers: List<WifiDirectPeer> = emptyList(),
         lastError: String? = null
     ): WifiDirectRuntimeStatus {
         return WifiDirectRuntimeStatus(
@@ -653,8 +724,9 @@ class NearbyDevicesScreenTest {
                 isWifiDirectSupported = true,
                 isWifiEnabled = isWifiEnabled
             ),
-            discoveryState = WifiDirectDiscoveryState.INACTIVE,
+            discoveryState = discoveryState,
             transportState = WifiDirectTransportState.NOT_WIRED,
+            peers = peers,
             lastError = lastError
         )
     }

@@ -2,6 +2,7 @@ package gr.hua.aurora.wifidirect
 
 import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
 import android.content.IntentFilter
 import android.net.wifi.WifiManager
 import android.net.wifi.p2p.WifiP2pManager
@@ -19,14 +20,58 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 
 data class RememberedWifiDirectRuntimeStatusState(
     val status: WifiDirectRuntimeStatus,
-    val refresh: () -> Unit
+    val refresh: () -> Unit,
+    val startDiscovery: () -> Unit,
+    val stopDiscovery: () -> Unit
 )
 
 fun wifiDirectStatusIntentFilter(): IntentFilter {
     return IntentFilter().apply {
         addAction(WifiManager.WIFI_STATE_CHANGED_ACTION)
         addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION)
+        addAction(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION)
+        addAction(WifiP2pManager.WIFI_P2P_DISCOVERY_CHANGED_ACTION)
     }
+}
+
+fun wifiDirectBroadcastEvent(
+    intent: Intent?
+): WifiDirectBroadcastEvent {
+    val action = intent?.action
+    val wifiP2pEnabled = if (action == WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION) {
+        when (
+            intent.getIntExtra(
+                WifiP2pManager.EXTRA_WIFI_STATE,
+                -1
+            )
+        ) {
+            WifiP2pManager.WIFI_P2P_STATE_ENABLED -> true
+            WifiP2pManager.WIFI_P2P_STATE_DISABLED -> false
+            else -> null
+        }
+    } else {
+        null
+    }
+    val discoveryActive = if (action == WifiP2pManager.WIFI_P2P_DISCOVERY_CHANGED_ACTION) {
+        when (
+            intent.getIntExtra(
+                WifiP2pManager.EXTRA_DISCOVERY_STATE,
+                -1
+            )
+        ) {
+            WifiP2pManager.WIFI_P2P_DISCOVERY_STARTED -> true
+            WifiP2pManager.WIFI_P2P_DISCOVERY_STOPPED -> false
+            else -> null
+        }
+    } else {
+        null
+    }
+
+    return WifiDirectBroadcastEvent(
+        action = action,
+        isWifiP2pEnabled = wifiP2pEnabled,
+        isDiscoveryActive = discoveryActive
+    )
 }
 
 @Composable
@@ -44,14 +89,43 @@ fun rememberWifiDirectRuntimeStatusState(
     }
     val refresh = remember(resolvedController) {
         {
-            runtimeStatus = resolvedController.currentRuntimeStatus()
+            resolvedController.refreshRuntimeStatus()
+        }
+    }
+    val startDiscovery = remember(resolvedController) {
+        {
+            resolvedController.startDiscovery()
+        }
+    }
+    val stopDiscovery = remember(resolvedController) {
+        {
+            resolvedController.stopDiscovery()
         }
     }
 
-    DisposableEffect(lifecycleOwner, refresh) {
+    DisposableEffect(resolvedController) {
+        val listener = object : WifiDirectController.Listener {
+            override fun onRuntimeStatusChanged(status: WifiDirectRuntimeStatus) {
+                runtimeStatus = status
+            }
+        }
+
+        resolvedController.addListener(listener)
+        onDispose {
+            resolvedController.removeListener(listener)
+        }
+    }
+
+    DisposableEffect(lifecycleOwner, refresh, stopDiscovery, runtimeStatus.discoveryState) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                refresh()
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> refresh()
+                Lifecycle.Event.ON_STOP -> {
+                    if (runtimeStatus.discoveryState == WifiDirectDiscoveryState.ACTIVE) {
+                        stopDiscovery()
+                    }
+                }
+                else -> Unit
             }
         }
 
@@ -64,7 +138,7 @@ fun rememberWifiDirectRuntimeStatusState(
     DisposableEffect(appContext, refresh) {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: android.content.Intent?) {
-                refresh()
+                resolvedController.handleBroadcast(wifiDirectBroadcastEvent(intent))
             }
         }
 
@@ -84,6 +158,8 @@ fun rememberWifiDirectRuntimeStatusState(
 
     return RememberedWifiDirectRuntimeStatusState(
         status = runtimeStatus,
-        refresh = refresh
+        refresh = refresh,
+        startDiscovery = startDiscovery,
+        stopDiscovery = stopDiscovery
     )
 }

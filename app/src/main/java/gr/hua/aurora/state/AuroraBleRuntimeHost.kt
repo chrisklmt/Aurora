@@ -108,6 +108,8 @@ data class AuroraBleRuntimeState(
     val bleTransportSender: BleTransportSender,
     val transportSenderSourceLabel: String,
     val wifiDirectRuntimeStatus: WifiDirectRuntimeStatus,
+    val startWifiDirectDiscovery: () -> Unit,
+    val stopWifiDirectDiscovery: () -> Unit,
     val peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
     val globalMeshDiagnostics: GlobalMeshDiagnostics,
     val identityHandlerStatus: String,
@@ -171,7 +173,8 @@ fun rememberAuroraBleRuntimeState(
     val transportSenderSourceLabel = remember(bleTransportSender) {
         auroraTransportSenderSourceLabel(bleTransportSender)
     }
-    val wifiDirectRuntimeStatus = rememberWifiDirectRuntimeStatusState().status
+    val wifiDirectRuntimeState = rememberWifiDirectRuntimeStatusState()
+    val wifiDirectRuntimeStatus = wifiDirectRuntimeState.status
     var lastIdentityExchangeStatus by remember(runtimeGeneration) {
         mutableStateOf<String?>(null)
     }
@@ -840,6 +843,8 @@ fun rememberAuroraBleRuntimeState(
         bleTransportSender = bleTransportSender,
         transportSenderSourceLabel = transportSenderSourceLabel,
         wifiDirectRuntimeStatus = wifiDirectRuntimeStatus,
+        startWifiDirectDiscovery = wifiDirectRuntimeState.startDiscovery,
+        stopWifiDirectDiscovery = wifiDirectRuntimeState.stopDiscovery,
         peerSessionDiagnostics = peerSessionDiagnostics,
         globalMeshDiagnostics = globalMeshDiagnostics,
         identityHandlerStatus = identityHandlerStatus,

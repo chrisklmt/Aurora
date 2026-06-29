@@ -8,6 +8,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -63,6 +64,7 @@ import gr.hua.aurora.ui.components.DebugInfoItem
 import gr.hua.aurora.ui.components.DebugInfoSection
 import gr.hua.aurora.ui.components.buildAuroraAvailabilityUiState
 import gr.hua.aurora.wifidirect.WifiDirectEnabledState
+import gr.hua.aurora.wifidirect.WifiDirectPeer
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
 import gr.hua.aurora.wifidirect.wifiDirectDiscoverySummary
 import gr.hua.aurora.wifidirect.wifiDirectEnabledSummary
@@ -131,6 +133,8 @@ fun NearbyDevicesScreen(
     bleConnector: AndroidBleConnector,
     transportSenderSourceLabel: String,
     wifiDirectRuntimeStatus: WifiDirectRuntimeStatus,
+    onStartWifiDirectDiscovery: () -> Unit,
+    onStopWifiDirectDiscovery: () -> Unit,
     identityHandlerStatus: String,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
     activeTransportPeerId: String?,
@@ -299,7 +303,16 @@ fun NearbyDevicesScreen(
             }
             debugCard?.let { card ->
                 item {
-                    DebugInfoCard(card = card)
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        DebugInfoCard(card = card)
+                        NearbyWifiDirectDebugControls(
+                            runtimeStatus = wifiDirectRuntimeStatus,
+                            onStartDiscovery = onStartWifiDirectDiscovery,
+                            onStopDiscovery = onStopWifiDirectDiscovery
+                        )
+                    }
                 }
             }
         }
@@ -1408,6 +1421,15 @@ internal fun buildNearbyWifiDirectDebugSection(
             )
         )
         add(DebugInfoItem("Peers", runtimeStatus.peerCount.toString()))
+        runtimeStatus.peers.takeIf { it.isNotEmpty() }?.let { peers ->
+            add(
+                DebugInfoItem(
+                    "Devices",
+                    nearbyWifiDirectPeerListValue(peers),
+                    preferFullWidth = true
+                )
+            )
+        }
         runtimeStatus.lastError?.takeIf { it.isNotBlank() }?.let { errorText ->
             add(
                 DebugInfoItem(
@@ -1432,6 +1454,57 @@ internal fun buildNearbyWifiDirectDebugSection(
         title = "Wi-Fi Direct",
         items = items
     )
+}
+
+internal data class NearbyWifiDirectDebugControlsState(
+    val canStartDiscovery: Boolean,
+    val canStopDiscovery: Boolean
+)
+
+internal fun nearbyWifiDirectDebugControlsState(
+    runtimeStatus: WifiDirectRuntimeStatus
+): NearbyWifiDirectDebugControlsState {
+    return NearbyWifiDirectDebugControlsState(
+        canStartDiscovery = runtimeStatus.discoveryState != gr.hua.aurora.wifidirect.WifiDirectDiscoveryState.ACTIVE,
+        canStopDiscovery = runtimeStatus.discoveryState == gr.hua.aurora.wifidirect.WifiDirectDiscoveryState.ACTIVE
+    )
+}
+
+internal fun nearbyWifiDirectPeerListValue(
+    peers: List<WifiDirectPeer>
+): String {
+    return peers.joinToString(separator = ", ") { peer ->
+        val name = peer.deviceName?.trim()?.takeIf { it.isNotEmpty() } ?: "unnamed"
+        val address = peer.deviceAddress?.trim()?.takeIf { it.isNotEmpty() } ?: "unknown"
+        "$name ($address)"
+    }
+}
+
+@Composable
+private fun NearbyWifiDirectDebugControls(
+    runtimeStatus: WifiDirectRuntimeStatus,
+    onStartDiscovery: () -> Unit,
+    onStopDiscovery: () -> Unit
+) {
+    val controlsState = nearbyWifiDirectDebugControlsState(runtimeStatus)
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        TextButton(
+            onClick = onStartDiscovery,
+            enabled = controlsState.canStartDiscovery
+        ) {
+            Text("Start Wi-Fi Direct")
+        }
+        TextButton(
+            onClick = onStopDiscovery,
+            enabled = controlsState.canStopDiscovery
+        ) {
+            Text("Stop Wi-Fi Direct")
+        }
+    }
 }
 
 internal fun buildNearbyTransportDebugSection(

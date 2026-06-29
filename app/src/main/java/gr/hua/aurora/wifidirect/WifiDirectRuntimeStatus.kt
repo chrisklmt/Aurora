@@ -20,6 +20,7 @@ data class WifiDirectRuntimeStatus(
     val transportState: WifiDirectTransportState = WifiDirectTransportState.NOT_WIRED,
     val peers: List<WifiDirectPeer> = emptyList(),
     val lastError: String? = null,
+    val lastUpdatedAtMillis: Long? = null,
     val note: String = wifiDirectFoundationNote
 ) {
     val isSupported: Boolean
