@@ -15,6 +15,10 @@ import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
 import gr.hua.aurora.ui.components.DebugInfoCardModel
 import gr.hua.aurora.ui.components.DebugInfoItem
 import gr.hua.aurora.ui.components.DebugInfoSection
+import gr.hua.aurora.wifidirect.WifiDirectDiscoveryState
+import gr.hua.aurora.wifidirect.WifiDirectPermissionStatus
+import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
+import gr.hua.aurora.wifidirect.WifiDirectTransportState
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -456,6 +460,7 @@ class NearbyDevicesScreenTest {
                 advertiseStatus = BleAdvertiseStatus.ADVERTISING,
                 gattServerStatus = BleGattServerStatus.HOSTING,
                 scanStatus = BleScanStatus.SCANNING,
+                wifiDirectRuntimeStatus = wifiDirectRuntimeStatus(),
                 identityHandlerStatus = "Identity handler ready.",
                 peerSessionDiagnostics = PeerSessionRegistryDiagnostics(
                     establishedPeerIds = emptyList(),
@@ -484,6 +489,22 @@ class NearbyDevicesScreenTest {
                         )
                     ),
                     DebugInfoSection(
+                        title = "Wi-Fi Direct",
+                        items = listOf(
+                            DebugInfoItem("Support", "supported"),
+                            DebugInfoItem("Perms", "granted"),
+                            DebugInfoItem("State", "enabled"),
+                            DebugInfoItem("Discovery", "inactive"),
+                            DebugInfoItem("Transport", "not wired"),
+                            DebugInfoItem("Peers", "0"),
+                            DebugInfoItem(
+                                "Note",
+                                "Wi-Fi Direct transport not wired yet.",
+                                preferFullWidth = true
+                            )
+                        )
+                    ),
+                    DebugInfoSection(
                         title = "Identity",
                         items = listOf(
                             DebugInfoItem("Handler", "ready"),
@@ -497,8 +518,43 @@ class NearbyDevicesScreenTest {
                 advertiseStatus = BleAdvertiseStatus.ADVERTISING,
                 gattServerStatus = BleGattServerStatus.HOSTING,
                 scanStatus = BleScanStatus.SCANNING,
+                wifiDirectRuntimeStatus = wifiDirectRuntimeStatus(),
                 identityHandlerStatus = "Identity handler ready. Local agreement private key loaded.",
                 peerSessionDiagnostics = diagnostics
+            )
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectDebugSectionShowsSafePlaceholderState() {
+        assertEquals(
+            DebugInfoSection(
+                title = "Wi-Fi Direct",
+                items = listOf(
+                    DebugInfoItem("Support", "supported"),
+                    DebugInfoItem("Perms", "missing"),
+                    DebugInfoItem("State", "unknown"),
+                    DebugInfoItem("Discovery", "inactive"),
+                    DebugInfoItem("Transport", "not wired"),
+                    DebugInfoItem("Peers", "0"),
+                    DebugInfoItem(
+                        "Error",
+                        "Wi-Fi Direct status unavailable: RuntimeException",
+                        preferFullWidth = true
+                    ),
+                    DebugInfoItem(
+                        "Note",
+                        "Wi-Fi Direct transport not wired yet.",
+                        preferFullWidth = true
+                    )
+                )
+            ),
+            buildNearbyWifiDirectDebugSection(
+                runtimeStatus = wifiDirectRuntimeStatus(
+                    missingPermissions = setOf("android.permission.NEARBY_WIFI_DEVICES"),
+                    isWifiEnabled = null,
+                    lastError = "Wi-Fi Direct status unavailable: RuntimeException"
+                )
             )
         )
     }
@@ -582,6 +638,24 @@ class NearbyDevicesScreenTest {
                 )
             ),
             card.sections[3].items
+        )
+    }
+
+    private fun wifiDirectRuntimeStatus(
+        missingPermissions: Set<String> = emptySet(),
+        isWifiEnabled: Boolean? = true,
+        lastError: String? = null
+    ): WifiDirectRuntimeStatus {
+        return WifiDirectRuntimeStatus(
+            permissionStatus = WifiDirectPermissionStatus(
+                requiredPermissions = setOf("android.permission.NEARBY_WIFI_DEVICES"),
+                missingPermissions = missingPermissions,
+                isWifiDirectSupported = true,
+                isWifiEnabled = isWifiEnabled
+            ),
+            discoveryState = WifiDirectDiscoveryState.INACTIVE,
+            transportState = WifiDirectTransportState.NOT_WIRED,
+            lastError = lastError
         )
     }
 }

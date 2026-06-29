@@ -62,6 +62,13 @@ import gr.hua.aurora.ui.components.DebugInfoCardModel
 import gr.hua.aurora.ui.components.DebugInfoItem
 import gr.hua.aurora.ui.components.DebugInfoSection
 import gr.hua.aurora.ui.components.buildAuroraAvailabilityUiState
+import gr.hua.aurora.wifidirect.WifiDirectEnabledState
+import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
+import gr.hua.aurora.wifidirect.wifiDirectDiscoverySummary
+import gr.hua.aurora.wifidirect.wifiDirectEnabledSummary
+import gr.hua.aurora.wifidirect.wifiDirectPermissionsSummary
+import gr.hua.aurora.wifidirect.wifiDirectSupportSummary
+import gr.hua.aurora.wifidirect.wifiDirectTransportSummary
 import kotlinx.coroutines.launch
 
 private const val nearbyDevicesLogTag = "NearbyDevicesScreen"
@@ -123,6 +130,7 @@ fun NearbyDevicesScreen(
     bleConnectionStatus: BleConnectionStatus,
     bleConnector: AndroidBleConnector,
     transportSenderSourceLabel: String,
+    wifiDirectRuntimeStatus: WifiDirectRuntimeStatus,
     identityHandlerStatus: String,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
     activeTransportPeerId: String?,
@@ -170,6 +178,7 @@ fun NearbyDevicesScreen(
         advertiseStatus = bleAdvertiseStatus,
         gattServerStatus = bleGattServerStatus,
         scanStatus = bleScanStatus,
+        wifiDirectRuntimeStatus = wifiDirectRuntimeStatus,
         identityHandlerStatus = identityHandlerStatus,
         peerSessionDiagnostics = peerSessionDiagnostics
     )
@@ -1347,6 +1356,7 @@ internal fun buildNearbyDebugCard(
     advertiseStatus: BleAdvertiseStatus,
     gattServerStatus: BleGattServerStatus,
     scanStatus: BleScanStatus,
+    wifiDirectRuntimeStatus: WifiDirectRuntimeStatus,
     identityHandlerStatus: String,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics
 ): DebugInfoCardModel? {
@@ -1362,11 +1372,65 @@ internal fun buildNearbyDebugCard(
                 gattServerStatus = gattServerStatus,
                 scanStatus = scanStatus
             ),
+            buildNearbyWifiDirectDebugSection(
+                runtimeStatus = wifiDirectRuntimeStatus
+            ),
             buildNearbyIdentityDebugSection(
                 identityHandlerStatus = identityHandlerStatus,
                 peerSessionDiagnostics = peerSessionDiagnostics
             )
         )
+    )
+}
+
+internal fun buildNearbyWifiDirectDebugSection(
+    runtimeStatus: WifiDirectRuntimeStatus
+): DebugInfoSection {
+    val items = buildList {
+        add(DebugInfoItem("Support", wifiDirectSupportSummary(runtimeStatus)))
+        add(
+            DebugInfoItem(
+                "Perms",
+                wifiDirectPermissionsSummary(runtimeStatus.permissionStatus)
+            )
+        )
+        add(DebugInfoItem("State", nearbyWifiDirectEnabledValue(runtimeStatus.enabledState)))
+        add(
+            DebugInfoItem(
+                "Discovery",
+                wifiDirectDiscoverySummary(runtimeStatus.discoveryState)
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Transport",
+                wifiDirectTransportSummary(runtimeStatus.transportState)
+            )
+        )
+        add(DebugInfoItem("Peers", runtimeStatus.peerCount.toString()))
+        runtimeStatus.lastError?.takeIf { it.isNotBlank() }?.let { errorText ->
+            add(
+                DebugInfoItem(
+                    "Error",
+                    errorText,
+                    preferFullWidth = true
+                )
+            )
+        }
+        runtimeStatus.note.takeIf { it.isNotBlank() }?.let { noteText ->
+            add(
+                DebugInfoItem(
+                    "Note",
+                    noteText,
+                    preferFullWidth = true
+                )
+            )
+        }
+    }
+
+    return DebugInfoSection(
+        title = "Wi-Fi Direct",
+        items = items
     )
 }
 
@@ -1590,6 +1654,12 @@ internal fun nearbyIdentityHandlerValue(
         status.isEmpty() -> "missing"
         else -> status.removeSuffix(".")
     }
+}
+
+internal fun nearbyWifiDirectEnabledValue(
+    state: WifiDirectEnabledState
+): String {
+    return wifiDirectEnabledSummary(state)
 }
 
 internal fun nearbyPeerSessionCompactValue(

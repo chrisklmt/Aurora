@@ -86,6 +86,8 @@ import gr.hua.aurora.state.IncomingMessageIngestionResult.Duplicate
 import gr.hua.aurora.state.IncomingMessageIngestionResult.UnsupportedThread
 import gr.hua.aurora.state.IncomingMessageIngestionResult.UnsupportedType
 import gr.hua.aurora.ui.components.buildAuroraAvailabilityUiState
+import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
+import gr.hua.aurora.wifidirect.rememberWifiDirectRuntimeStatusState
 import java.security.PrivateKey
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -105,6 +107,7 @@ data class AuroraBleRuntimeState(
     val activeTransportPeerId: String?,
     val bleTransportSender: BleTransportSender,
     val transportSenderSourceLabel: String,
+    val wifiDirectRuntimeStatus: WifiDirectRuntimeStatus,
     val peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
     val globalMeshDiagnostics: GlobalMeshDiagnostics,
     val identityHandlerStatus: String,
@@ -168,6 +171,7 @@ fun rememberAuroraBleRuntimeState(
     val transportSenderSourceLabel = remember(bleTransportSender) {
         auroraTransportSenderSourceLabel(bleTransportSender)
     }
+    val wifiDirectRuntimeStatus = rememberWifiDirectRuntimeStatusState().status
     var lastIdentityExchangeStatus by remember(runtimeGeneration) {
         mutableStateOf<String?>(null)
     }
@@ -835,6 +839,7 @@ fun rememberAuroraBleRuntimeState(
         activeTransportPeerId = activeTransportPeerId,
         bleTransportSender = bleTransportSender,
         transportSenderSourceLabel = transportSenderSourceLabel,
+        wifiDirectRuntimeStatus = wifiDirectRuntimeStatus,
         peerSessionDiagnostics = peerSessionDiagnostics,
         globalMeshDiagnostics = globalMeshDiagnostics,
         identityHandlerStatus = identityHandlerStatus,
