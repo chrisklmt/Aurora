@@ -39,13 +39,15 @@ internal data class ContactChatSummary(
     val peerId: String,
     val displayName: String,
     val isPrivateChatReady: Boolean,
-    val seenText: String?
+    val hasPrivateChatSetup: Boolean,
+    val visibilityText: String?
 )
 
 @Composable
 fun ContactsScreen(
     contacts: List<AuroraContact>,
     privateChatIdentitiesByPeerId: Map<String, PrivateChatIdentity>,
+    nearbyVisiblePeerIds: Set<String>,
     currentUsername: String,
     desiredAvailability: AuroraAvailabilityPreference,
     showDebugDiagnostics: Boolean,
@@ -62,6 +64,7 @@ fun ContactsScreen(
         showDebugDiagnostics = showDebugDiagnostics,
         contacts = contacts,
         privateChatIdentitiesByPeerId = privateChatIdentitiesByPeerId,
+        nearbyVisiblePeerIds = nearbyVisiblePeerIds,
         peerSessionDiagnostics = peerSessionDiagnostics,
         lastIdentityExchangeStatus = lastIdentityExchangeStatus
     )
@@ -116,7 +119,8 @@ fun ContactsScreen(
                         identity = privateChatIdentitiesByPeerId[contact.canonicalPeerId],
                         hasRuntimeSession = peerSessionDiagnostics.hasSessionForPeer(
                             contact.canonicalPeerId
-                        )
+                        ),
+                        isNearbyVisible = nearbyVisiblePeerIds.contains(contact.canonicalPeerId)
                     )
                     Card(
                         modifier = Modifier.fillMaxWidth()
@@ -130,13 +134,16 @@ fun ContactsScreen(
                                 style = MaterialTheme.typography.titleMedium
                             )
                             Text(
-                                text = contactsProductStatusText(summary.isPrivateChatReady),
+                                text = contactsProductStatusText(
+                                    isPrivateChatReady = summary.isPrivateChatReady,
+                                    hasPrivateChatSetup = summary.hasPrivateChatSetup
+                                ),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            summary.seenText?.let { seenText ->
+                            summary.visibilityText?.let { visibilityText ->
                                 Text(
-                                    text = seenText,
+                                    text = visibilityText,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -170,7 +177,8 @@ fun ContactsScreen(
                 buildContactChatSummary(
                     contact = it,
                     identity = privateChatIdentitiesByPeerId[peerId],
-                    hasRuntimeSession = peerSessionDiagnostics.hasSessionForPeer(peerId)
+                    hasRuntimeSession = peerSessionDiagnostics.hasSessionForPeer(peerId),
+                    isNearbyVisible = nearbyVisiblePeerIds.contains(peerId)
                 )
             }
             if (summary != null) {
@@ -275,31 +283,40 @@ fun ContactsScreen(
 internal fun buildContactChatSummary(
     contact: AuroraContact,
     identity: PrivateChatIdentity?,
-    hasRuntimeSession: Boolean
+    hasRuntimeSession: Boolean,
+    isNearbyVisible: Boolean
 ): ContactChatSummary {
     return ContactChatSummary(
         peerId = contact.canonicalPeerId,
         displayName = identity?.displayNameOrNull() ?: contact.displayName,
         isPrivateChatReady = hasRuntimeSession && identity?.isEstablished == true,
-        seenText = contactsSeenStatusText(contact)
+        hasPrivateChatSetup = identity != null,
+        visibilityText = contactsVisibilityText(
+            contact = contact,
+            isNearbyVisible = isNearbyVisible
+        )
     )
 }
 
 internal fun contactsProductStatusText(
-    isPrivateChatReady: Boolean
+    isPrivateChatReady: Boolean,
+    hasPrivateChatSetup: Boolean
 ): String {
-    return if (isPrivateChatReady) {
-        "Private chat ready"
-    } else {
-        "Setup needed"
+    return when {
+        isPrivateChatReady -> "Private chat ready"
+        hasPrivateChatSetup -> "Retry setup"
+        else -> "Setup needed"
     }
 }
 
-internal fun contactsSeenStatusText(contact: AuroraContact): String? {
-    return if (contact.lastSeenMillis != null) {
-        "Seen recently"
-    } else {
-        null
+internal fun contactsVisibilityText(
+    contact: AuroraContact,
+    isNearbyVisible: Boolean
+): String? {
+    return when {
+        isNearbyVisible -> "Seen nearby"
+        contact.lastSeenMillis != null -> "Not currently visible"
+        else -> null
     }
 }
 
@@ -307,6 +324,7 @@ internal fun buildContactsDebugCard(
     showDebugDiagnostics: Boolean,
     contacts: List<AuroraContact>,
     privateChatIdentitiesByPeerId: Map<String, PrivateChatIdentity>,
+    nearbyVisiblePeerIds: Set<String>,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
     lastIdentityExchangeStatus: String?
 ): DebugInfoCardModel? {
@@ -319,6 +337,8 @@ internal fun buildContactsDebugCard(
             privateChatIdentitiesByPeerId[contact.canonicalPeerId]?.isEstablished == true
     }
     val seenCount = contacts.count { it.lastSeenMillis != null }
+    val visibleCount = contacts.count { nearbyVisiblePeerIds.contains(it.canonicalPeerId) }
+    val chatCount = privateChatIdentitiesByPeerId.size
     val peerListValue = contacts.joinToString(separator = ", ") { contact ->
         privateChatShortPeerId(contact.canonicalPeerId)
     }.ifBlank { "none" }
@@ -326,6 +346,8 @@ internal fun buildContactsDebugCard(
     val contactItems = buildList {
         add(DebugInfoItem("Count", contacts.size.toString()))
         add(DebugInfoItem("Ready", readyCount.toString()))
+        add(DebugInfoItem("Chats", chatCount.toString()))
+        add(DebugInfoItem("Visible", visibleCount.toString()))
         add(DebugInfoItem("Seen", seenCount.toString()))
         add(DebugInfoItem("Sessions", peerSessionDiagnostics.establishedPeerIds.size.toString()))
         add(

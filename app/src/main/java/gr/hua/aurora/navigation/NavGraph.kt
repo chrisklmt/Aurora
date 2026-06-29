@@ -13,6 +13,7 @@ import gr.hua.aurora.state.AuroraAvailabilityPreference
 import gr.hua.aurora.state.AuroraBleRuntimeState
 import gr.hua.aurora.state.AuroraStateHolder
 import gr.hua.aurora.protocol.PrivateChatMessageSendResult
+import gr.hua.aurora.ui.screens.nearbyContactPeerId
 import gr.hua.aurora.ui.screens.ContactsScreen
 import gr.hua.aurora.ui.screens.GlobalChatScreen
 import gr.hua.aurora.ui.screens.NearbyDevicesScreen
@@ -29,6 +30,9 @@ fun NavGraph(
 ) {
     val uiState = stateHolder.uiState
     val sendScope = rememberCoroutineScope()
+    val nearbyVisiblePeerIds = bleRuntimeState.discoveredAuroraPeers
+        .mapNotNull(::nearbyContactPeerId)
+        .toSet()
     val onResetLocalData: () -> Unit = {
         bleRuntimeState.resetLocalIdentityAndSessions()
         stateHolder.resetLocalData()
@@ -114,6 +118,7 @@ fun NavGraph(
                 privateChatIdentitiesByPeerId = uiState.privateChatIdentitiesByPeerId,
                 currentUsername = uiState.privateProfileUsername,
                 desiredAvailability = uiState.desiredAvailability,
+                nearbyVisiblePeerIds = nearbyVisiblePeerIds,
                 showDebugDiagnostics = uiState.isDebugModeEnabled,
                 peerSessionDiagnostics = bleRuntimeState.peerSessionDiagnostics,
                 lastIdentityExchangeStatus = bleRuntimeState.lastIdentityExchangeStatus,
@@ -139,6 +144,7 @@ fun NavGraph(
                 contact = selectedContact,
                 privateChatIdentity = privateChatIdentity,
                 hasRuntimeSession = hasRuntimeSession,
+                isNearbyVisible = nearbyVisiblePeerIds.contains(peerId),
                 currentUsername = uiState.privateProfileUsername,
                 messages = stateHolder.privateMessagesForPeerId(peerId),
                 lastDeliveryResult = stateHolder.latestPrivateChatDeliveryResultForPeerId(peerId),
@@ -231,6 +237,12 @@ fun NavGraph(
                     stateHolder.promoteContactSession(
                         canonicalPeerId = peerId,
                         displayName = displayName,
+                        lastSeenMillis = lastSeenMillis
+                    )
+                },
+                onRefreshContactLastSeen = { peerId, lastSeenMillis ->
+                    stateHolder.refreshContactLastSeen(
+                        canonicalPeerId = peerId,
                         lastSeenMillis = lastSeenMillis
                     )
                 },

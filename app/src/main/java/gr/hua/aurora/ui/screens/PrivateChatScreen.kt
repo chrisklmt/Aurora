@@ -39,6 +39,7 @@ fun PrivateChatScreen(
     contact: AuroraContact?,
     privateChatIdentity: PrivateChatIdentity?,
     hasRuntimeSession: Boolean,
+    isNearbyVisible: Boolean,
     currentUsername: String,
     messages: List<ChatMessage>,
     lastDeliveryResult: PrivateChatMessageSendResult?,
@@ -55,7 +56,8 @@ fun PrivateChatScreen(
         requestedPeerId = requestedPeerId,
         contact = contact,
         privateChatIdentity = privateChatIdentity,
-        hasRuntimeSession = hasRuntimeSession
+        hasRuntimeSession = hasRuntimeSession,
+        isNearbyVisible = isNearbyVisible
     )
     val mappedMessages = messages.map { it.toMessageListItem(showRetryAction = true) }
     val debugCard = buildPrivateChatDebugCard(
@@ -64,6 +66,7 @@ fun PrivateChatScreen(
         contact = contact,
         privateChatIdentity = privateChatIdentity,
         hasRuntimeSession = hasRuntimeSession,
+        isNearbyVisible = isNearbyVisible,
         messages = messages,
         lastDeliveryResult = lastDeliveryResult,
         peerSessionDiagnostics = peerSessionDiagnostics,
@@ -72,7 +75,7 @@ fun PrivateChatScreen(
         isComposerEnabled = content.isComposerEnabled
     )
     val bodyTopContent: (@Composable ColumnScope.() -> Unit)? = when {
-        content.isMissingContact || !content.isComposerEnabled || debugCard != null -> {
+        content.statusText != null || content.helperText != null || debugCard != null -> {
             {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
@@ -154,7 +157,8 @@ internal fun buildPrivateChatScreenContent(
     requestedPeerId: String,
     contact: AuroraContact?,
     privateChatIdentity: PrivateChatIdentity?,
-    hasRuntimeSession: Boolean
+    hasRuntimeSession: Boolean,
+    isNearbyVisible: Boolean
 ): PrivateChatScreenContent {
     val resolvedPeerId = contact?.canonicalPeerId ?: requestedPeerId
     if (contact == null) {
@@ -170,17 +174,28 @@ internal fun buildPrivateChatScreenContent(
         )
     }
 
+    val hasPrivateChatSetup = privateChatIdentity != null
     val hasReadyPrivateChat = hasRuntimeSession && privateChatIdentity?.isEstablished == true
     val title = privateChatIdentity?.displayNameOrNull() ?: contact.displayName
+    val visibilityText = when {
+        isNearbyVisible -> "Seen nearby"
+        contact.lastSeenMillis != null -> "Not currently visible"
+        else -> null
+    }
     val helperText = when {
-        hasReadyPrivateChat -> null
-        privateChatIdentity == null -> "Add this device from Nearby to start a private chat."
-        else -> "Setup needed. Open Nearby to finish private chat setup."
+        hasReadyPrivateChat -> visibilityText
+        !hasPrivateChatSetup -> "Add this device from Nearby to start a private chat."
+        isNearbyVisible -> "Seen nearby. Open Nearby to finish private chat setup."
+        else -> "Not currently visible. Open Nearby to finish private chat setup."
     }
     return PrivateChatScreenContent(
         title = title,
         shortPeerId = privateChatShortPeerId(contact.canonicalPeerId),
-        statusText = if (hasReadyPrivateChat) null else "Private chat is not ready yet",
+        statusText = when {
+            hasReadyPrivateChat -> null
+            hasPrivateChatSetup -> "Retry setup"
+            else -> "Setup needed"
+        },
         helperText = helperText,
         isMissingContact = false,
         isComposerEnabled = hasReadyPrivateChat,
@@ -199,6 +214,7 @@ internal fun buildPrivateChatDebugCard(
     contact: AuroraContact?,
     privateChatIdentity: PrivateChatIdentity?,
     hasRuntimeSession: Boolean,
+    isNearbyVisible: Boolean,
     messages: List<ChatMessage>,
     lastDeliveryResult: PrivateChatMessageSendResult?,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
@@ -245,10 +261,16 @@ internal fun buildPrivateChatDebugCard(
                                     privateChatDebugIdentifierValue(privateChatIdentity?.privateChatId)
                                 )
                             )
+                            add(
+                                DebugInfoItem(
+                                    "Visible",
+                                    privateChatVisibilityDebugValue(
+                                        isNearbyVisible = isNearbyVisible,
+                                        lastSeenMillis = contact?.lastSeenMillis
+                                    )
+                                )
+                            )
                             add(DebugInfoItem("Messages", messages.size.toString()))
-                            contact?.lastSeenMillis?.let {
-                                add(DebugInfoItem("Seen", "recent"))
-                            }
                             privateChatIdentity?.customChatName?.let { customName ->
                         add(
                             DebugInfoItem(
@@ -368,6 +390,17 @@ internal fun privateChatDebugIdentifierValue(
 ): String {
     val sanitizedValue = value?.trim()?.takeIf { it.isNotEmpty() } ?: return "missing"
     return privateChatShortPeerId(sanitizedValue)
+}
+
+internal fun privateChatVisibilityDebugValue(
+    isNearbyVisible: Boolean,
+    lastSeenMillis: Long?
+): String {
+    return when {
+        isNearbyVisible -> "nearby"
+        lastSeenMillis != null -> "not visible"
+        else -> "unknown"
+    }
 }
 
 internal fun privateChatShortPeerId(peerId: String): String {

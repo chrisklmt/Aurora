@@ -159,32 +159,43 @@ class NearbyDevicesScreenTest {
         assertNull(
             nearbyContactStatusText(
                 isContact = false,
-                hasReadyKeys = false
+                hasReadyKeys = false,
+                hasPrivateChatSetup = false
             )
         )
         assertEquals(
             "Setup needed",
             nearbyContactStatusText(
                 isContact = true,
-                hasReadyKeys = false
+                hasReadyKeys = false,
+                hasPrivateChatSetup = false
+            )
+        )
+        assertEquals(
+            "Retry setup",
+            nearbyContactStatusText(
+                isContact = true,
+                hasReadyKeys = false,
+                hasPrivateChatSetup = true
             )
         )
         assertEquals(
             "Private chat ready",
             nearbyContactStatusText(
                 isContact = true,
-                hasReadyKeys = true
+                hasReadyKeys = true,
+                hasPrivateChatSetup = true
             )
         )
     }
 
     @Test
     fun nearbyProductStatusTextKeepsNormalModeCompact() {
-        assertEquals(
-            "Aurora device",
+        assertNull(
             nearbyProductStatusText(
                 isContact = false,
                 hasReadyKeys = false,
+                hasPrivateChatSetup = false,
                 isAuroraDevice = true
             )
         )
@@ -193,6 +204,16 @@ class NearbyDevicesScreenTest {
             nearbyProductStatusText(
                 isContact = true,
                 hasReadyKeys = false,
+                hasPrivateChatSetup = false,
+                isAuroraDevice = true
+            )
+        )
+        assertEquals(
+            "Retry setup",
+            nearbyProductStatusText(
+                isContact = true,
+                hasReadyKeys = false,
+                hasPrivateChatSetup = true,
                 isAuroraDevice = true
             )
         )
@@ -201,6 +222,7 @@ class NearbyDevicesScreenTest {
             nearbyProductStatusText(
                 isContact = true,
                 hasReadyKeys = true,
+                hasPrivateChatSetup = true,
                 isAuroraDevice = true
             )
         )

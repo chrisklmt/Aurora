@@ -29,7 +29,8 @@ class PrivateChatScreenTest {
             requestedPeerId = contact.canonicalPeerId,
             contact = contact,
             privateChatIdentity = readyIdentity(contact.canonicalPeerId),
-            hasRuntimeSession = true
+            hasRuntimeSession = true,
+            isNearbyVisible = false
         )
 
         assertEquals("Alex", content.title)
@@ -50,7 +51,8 @@ class PrivateChatScreenTest {
             requestedPeerId = contact.canonicalPeerId,
             contact = contact,
             privateChatIdentity = readyIdentity(contact.canonicalPeerId),
-            hasRuntimeSession = true
+            hasRuntimeSession = true,
+            isNearbyVisible = false
         )
 
         assertNull(content.statusText)
@@ -78,12 +80,13 @@ class PrivateChatScreenTest {
                 createdAtMillis = 1_000L,
                 lastUpdatedMillis = 2_000L
             ),
-            hasRuntimeSession = false
+            hasRuntimeSession = false,
+            isNearbyVisible = false
         )
 
-        assertEquals("Private chat is not ready yet", content.statusText)
+        assertEquals("Retry setup", content.statusText)
         assertEquals(
-            "Setup needed. Open Nearby to finish private chat setup.",
+            "Not currently visible. Open Nearby to finish private chat setup.",
             content.helperText
         )
         assertFalse(content.isComposerEnabled)
@@ -106,7 +109,8 @@ class PrivateChatScreenTest {
             requestedPeerId = contact.canonicalPeerId,
             contact = contact,
             privateChatIdentity = readyIdentity(contact.canonicalPeerId),
-            hasRuntimeSession = true
+            hasRuntimeSession = true,
+            isNearbyVisible = false
         )
 
         assertNull(content.statusText)
@@ -121,7 +125,8 @@ class PrivateChatScreenTest {
             requestedPeerId = "missing-peer-123456",
             contact = null,
             privateChatIdentity = null,
-            hasRuntimeSession = false
+            hasRuntimeSession = false,
+            isNearbyVisible = false
         )
 
         assertEquals("Contact not found", content.title)
@@ -163,6 +168,7 @@ class PrivateChatScreenTest {
             contact = contact,
             privateChatIdentity = readyIdentity(contact.canonicalPeerId),
             hasRuntimeSession = true,
+            isNearbyVisible = true,
             messages = messages,
             lastDeliveryResult = PrivateChatMessageSendResult.SubmittedLocally,
             peerSessionDiagnostics = PeerSessionRegistryDiagnostics(
@@ -186,8 +192,8 @@ class PrivateChatScreenTest {
                             DebugInfoItem("Local prop", "local-peer-1..."),
                             DebugInfoItem("Remote prop", "remote-peer-..."),
                             DebugInfoItem("Chat id", "chat-peer-12..."),
+                            DebugInfoItem("Visible", "nearby"),
                             DebugInfoItem("Messages", "1"),
-                            DebugInfoItem("Seen", "recent")
                         )
                     ),
                     DebugInfoSection(
@@ -267,7 +273,8 @@ class PrivateChatScreenTest {
             privateChatIdentity = readyIdentity(contact.canonicalPeerId).copy(
                 customChatName = "Family chat"
             ),
-            hasRuntimeSession = true
+            hasRuntimeSession = true,
+            isNearbyVisible = false
         )
 
         assertEquals("Family chat", content.title)

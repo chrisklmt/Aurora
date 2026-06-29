@@ -14,27 +14,55 @@ import org.junit.Test
 class ContactsScreenTest {
     @Test
     fun contactsNormalModeUsesProductFacingReadinessText() {
-        val readyContact = AuroraContact(
-            canonicalPeerId = "peer-123",
-            displayName = "Alex",
-            createdAtMillis = 1_000L,
-            hasSession = true
+        assertEquals(
+            "Private chat ready",
+            contactsProductStatusText(
+                isPrivateChatReady = true,
+                hasPrivateChatSetup = true
+            )
         )
-        val missingContact = readyContact.copy(
-            canonicalPeerId = "peer-456",
-            hasSession = false
+        assertEquals(
+            "Retry setup",
+            contactsProductStatusText(
+                isPrivateChatReady = false,
+                hasPrivateChatSetup = true
+            )
         )
-
-        assertEquals("Private chat ready", contactsProductStatusText(isPrivateChatReady = true))
-        assertEquals("Setup needed", contactsProductStatusText(isPrivateChatReady = false))
-        assertFalse(contactsProductStatusText(isPrivateChatReady = true).contains("Keys", ignoreCase = true))
-        assertFalse(contactsProductStatusText(isPrivateChatReady = false).contains("Session", ignoreCase = true))
-        assertFalse(contactsProductStatusText(isPrivateChatReady = false).contains("Transport", ignoreCase = true))
-        assertFalse(contactsProductStatusText(isPrivateChatReady = false).contains("Peer", ignoreCase = true))
+        assertEquals(
+            "Setup needed",
+            contactsProductStatusText(
+                isPrivateChatReady = false,
+                hasPrivateChatSetup = false
+            )
+        )
+        assertFalse(
+            contactsProductStatusText(
+                isPrivateChatReady = true,
+                hasPrivateChatSetup = true
+            ).contains("Keys", ignoreCase = true)
+        )
+        assertFalse(
+            contactsProductStatusText(
+                isPrivateChatReady = false,
+                hasPrivateChatSetup = true
+            ).contains("Session", ignoreCase = true)
+        )
+        assertFalse(
+            contactsProductStatusText(
+                isPrivateChatReady = false,
+                hasPrivateChatSetup = false
+            ).contains("Transport", ignoreCase = true)
+        )
+        assertFalse(
+            contactsProductStatusText(
+                isPrivateChatReady = false,
+                hasPrivateChatSetup = false
+            ).contains("Peer", ignoreCase = true)
+        )
     }
 
     @Test
-    fun contactsSeenStatusOnlyAppearsWhenLastSeenExists() {
+    fun contactsVisibilityTextSeparatesLivePresenceFromStoredContactHistory() {
         val seenContact = AuroraContact(
             canonicalPeerId = "peer-123",
             displayName = "Alex",
@@ -46,8 +74,26 @@ class ContactsScreenTest {
             lastSeenMillis = null
         )
 
-        assertEquals("Seen recently", contactsSeenStatusText(seenContact))
-        assertNull(contactsSeenStatusText(unseenContact))
+        assertEquals(
+            "Seen nearby",
+            contactsVisibilityText(
+                contact = seenContact,
+                isNearbyVisible = true
+            )
+        )
+        assertEquals(
+            "Not currently visible",
+            contactsVisibilityText(
+                contact = seenContact,
+                isNearbyVisible = false
+            )
+        )
+        assertNull(
+            contactsVisibilityText(
+                contact = unseenContact,
+                isNearbyVisible = false
+            )
+        )
     }
 
     @Test
@@ -70,16 +116,20 @@ class ContactsScreenTest {
         val restoringSummary = buildContactChatSummary(
             contact = contact,
             identity = identity,
-            hasRuntimeSession = false
+            hasRuntimeSession = false,
+            isNearbyVisible = false
         )
         val recoveredSummary = buildContactChatSummary(
             contact = contact,
             identity = identity,
-            hasRuntimeSession = true
+            hasRuntimeSession = true,
+            isNearbyVisible = true
         )
 
         assertEquals(false, restoringSummary.isPrivateChatReady)
+        assertEquals(true, restoringSummary.hasPrivateChatSetup)
         assertEquals(true, recoveredSummary.isPrivateChatReady)
+        assertEquals("Seen nearby", recoveredSummary.visibilityText)
     }
 
     @Test
@@ -89,6 +139,7 @@ class ContactsScreenTest {
                 showDebugDiagnostics = false,
                 contacts = emptyList(),
                 privateChatIdentitiesByPeerId = emptyMap(),
+                nearbyVisiblePeerIds = emptySet(),
                 peerSessionDiagnostics = PeerSessionRegistryDiagnostics(
                     establishedPeerIds = emptyList(),
                     canonicalPeerIdByAlias = emptyMap()
@@ -133,6 +184,7 @@ class ContactsScreenTest {
                 establishedPeerIds = listOf("peer-123456789abc"),
                 canonicalPeerIdByAlias = mapOf("alex" to "peer-123456789abc")
             ),
+            nearbyVisiblePeerIds = setOf("peer-123456789abc"),
             lastIdentityExchangeStatus = "Identity sent. Run on both devices."
         )
 
@@ -145,6 +197,8 @@ class ContactsScreenTest {
                         items = listOf(
                             DebugInfoItem("Count", "2"),
                             DebugInfoItem("Ready", "1"),
+                            DebugInfoItem("Chats", "1"),
+                            DebugInfoItem("Visible", "1"),
                             DebugInfoItem("Seen", "1"),
                             DebugInfoItem("Sessions", "1"),
                             DebugInfoItem("Peers", "peer-1234567..., peer-456", preferFullWidth = true),

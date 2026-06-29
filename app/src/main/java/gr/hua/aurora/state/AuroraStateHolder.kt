@@ -257,6 +257,23 @@ class AuroraStateHolder(
         )
     }
 
+    fun refreshContactLastSeen(
+        canonicalPeerId: String,
+        lastSeenMillis: Long
+    ): AuroraContact? {
+        val existingContact = findContactByPeerId(canonicalPeerId) ?: return null
+        if (existingContact.lastSeenMillis == lastSeenMillis) {
+            return existingContact
+        }
+        return upsertContact(
+            canonicalPeerId = existingContact.canonicalPeerId,
+            displayName = existingContact.displayName,
+            lastSeenMillis = lastSeenMillis,
+            hasSession = false,
+            createPrivateChatIdentity = false
+        )
+    }
+
     fun findContactByPeerId(peerId: String): AuroraContact? {
         val sanitizedPeerId = peerId.trim()
         if (sanitizedPeerId.isEmpty()) return null

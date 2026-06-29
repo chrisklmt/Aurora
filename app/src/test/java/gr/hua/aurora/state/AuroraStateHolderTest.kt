@@ -393,6 +393,29 @@ class AuroraStateHolderTest {
     }
 
     @Test
+    fun refreshingContactLastSeenKeepsKnownContactWithoutFakingReadyState() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1"
+        )
+        val originalContact = holder.addOrUpdateContact(
+            canonicalPeerId = "peer-123",
+            displayName = "Alex",
+            lastSeenMillis = 1_000L,
+            hasSession = false
+        )
+
+        val refreshedContact = holder.refreshContactLastSeen(
+            canonicalPeerId = "peer-123",
+            lastSeenMillis = 2_000L
+        )
+
+        assertEquals(originalContact.createdAtMillis, refreshedContact?.createdAtMillis)
+        assertEquals(2_000L, refreshedContact?.lastSeenMillis)
+        assertEquals(false, refreshedContact?.hasSession)
+    }
+
+    @Test
     fun keyExchangeSuccessPromotesExistingContactToReady() {
         val holder = createHolder(
             store = FakeProfileStore(),

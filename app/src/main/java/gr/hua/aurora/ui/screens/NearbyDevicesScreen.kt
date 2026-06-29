@@ -134,6 +134,7 @@ fun NearbyDevicesScreen(
     onDisconnectTransportPeer: () -> Unit,
     onAddOrUpdateContact: (String, String, Long?, Boolean) -> String?,
     onPromoteContactSession: (String, String, Long?) -> Unit,
+    onRefreshContactLastSeen: (String, Long) -> Unit,
     onSelectSecurePeer: (String) -> Unit,
     onClearSelectedSecurePeer: () -> Unit,
     onOpenPrivateChat: (String) -> Unit,
@@ -175,11 +176,18 @@ fun NearbyDevicesScreen(
 
     LaunchedEffect(
         discoveredBleDevices,
+        contacts,
         peerSessionDiagnostics.establishedPeerIds,
         peerSessionDiagnostics.canonicalPeerIdByAlias
     ) {
         discoveredBleDevices.forEach { device ->
             val contactPeerId = nearbyContactPeerId(device) ?: return@forEach
+            if (contacts.any { it.canonicalPeerId == contactPeerId }) {
+                onRefreshContactLastSeen(
+                    contactPeerId,
+                    System.currentTimeMillis()
+                )
+            }
             if (nearbyPeerHasReadyKeys(contactPeerId, peerSessionDiagnostics)) {
                 onPromoteContactSession(
                     contactPeerId,
@@ -529,6 +537,9 @@ private fun DiscoveredBleDevicesCard(
                             val existingContact = contactPeerId?.let { peerId ->
                                 contacts.firstOrNull { it.canonicalPeerId == peerId }
                             }
+                            val hasPrivateChatSetup = contactPeerId?.let { peerId ->
+                                privateChatIdentitiesByPeerId[peerId] != null
+                            } == true
                             val hasRuntimeSession = peerSessionDiagnostics.hasSessionForPeer(
                                 contactPeerId
                             )
@@ -541,6 +552,7 @@ private fun DiscoveredBleDevicesCard(
                                 existingContact = existingContact,
                                 privateChatIdentitiesByPeerId = privateChatIdentitiesByPeerId,
                                 hasRuntimeSession = hasRuntimeSession,
+                                hasPrivateChatSetup = hasPrivateChatSetup,
                                 isPrivateChatReady = isPrivateChatReady,
                                 connectionStatus = connectionStatus,
                                 transportReadStatus = transportReadStatus,
@@ -576,6 +588,8 @@ private fun DiscoveredBleDevicesCard(
                             scanDiagnostics.auroraDiscoveryMatchCount == 0
                         ) {
                             "Scanning is active. Raw BLE devices are visible in diagnostics, but no Aurora peers match yet."
+                        } else if (contacts.isNotEmpty()) {
+                            "Scanning is active. Waiting for nearby Aurora peers to appear. Saved contacts stay available in Contacts."
                         } else {
                             "Scanning is active. Waiting for nearby Aurora peers to appear."
                         },
@@ -588,6 +602,8 @@ private fun DiscoveredBleDevicesCard(
                     Text(
                         text = if (isDiscoveryPausedByAvailability) {
                             "BLE discovery is paused while Aurora is Offline."
+                        } else if (contacts.isNotEmpty()) {
+                            "No Aurora peers are visible right now. Saved contacts stay available in Contacts."
                         } else {
                             "Live Aurora peers will appear here when Bluetooth and Location/GPS readiness is complete and this screen is active."
                         },
@@ -626,6 +642,7 @@ private fun BleDiscoveredDeviceRow(
     existingContact: AuroraContact?,
     privateChatIdentitiesByPeerId: Map<String, PrivateChatIdentity>,
     hasRuntimeSession: Boolean,
+    hasPrivateChatSetup: Boolean,
     isPrivateChatReady: Boolean,
     connectionStatus: BleConnectionStatus,
     transportReadStatus: NearbyBleTransportReadStatus,
@@ -682,14 +699,21 @@ private fun BleDiscoveredDeviceRow(
     val statusText = if (showDebugActions) {
         nearbyContactStatusText(
             isContact = isContact,
-            hasReadyKeys = isPrivateChatReady
+            hasReadyKeys = isPrivateChatReady,
+            hasPrivateChatSetup = hasPrivateChatSetup
         )
     } else {
         nearbyProductStatusText(
             isContact = isContact,
             hasReadyKeys = isPrivateChatReady,
+            hasPrivateChatSetup = hasPrivateChatSetup,
             isAuroraDevice = device.hasAuroraDiscoveryPayload
         )
+    }
+    val visibilityText = if (showDebugActions || !device.hasAuroraDiscoveryPayload) {
+        null
+    } else {
+        "Seen nearby"
     }
     val openChatPeerId = nearbyOpenChatPeerId(existingContact)
 
@@ -700,14 +724,12 @@ private fun BleDiscoveredDeviceRow(
             text = titleText,
             style = MaterialTheme.typography.titleSmall
         )
-        Text(
-            text = if (showDebugActions) {
-                "${device.address} | RSSI ${device.rssi.toBleScanRssiText()} dBm"
-            } else {
-                device.address
-            },
-            style = MaterialTheme.typography.bodyMedium
-        )
+        if (showDebugActions) {
+            Text(
+                text = "${device.address} | RSSI ${device.rssi.toBleScanRssiText()} dBm",
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
         if (showDebugActions) {
             Text(
                 text = buildString {
@@ -730,6 +752,13 @@ private fun BleDiscoveredDeviceRow(
                         }
                     )
                 },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        visibilityText?.let { text ->
+            Text(
+                text = text,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -1246,31 +1275,31 @@ internal fun nearbyAddContactActionLabel(
 
 internal fun nearbyContactStatusText(
     isContact: Boolean,
-    hasReadyKeys: Boolean
+    hasReadyKeys: Boolean,
+    hasPrivateChatSetup: Boolean
 ): String? {
     if (!isContact) return null
-    return if (hasReadyKeys) {
-        "Private chat ready"
-    } else {
-        "Setup needed"
+    return when {
+        hasReadyKeys -> "Private chat ready"
+        hasPrivateChatSetup -> "Retry setup"
+        else -> "Setup needed"
     }
 }
 
 internal fun nearbyProductStatusText(
     isContact: Boolean,
     hasReadyKeys: Boolean,
+    hasPrivateChatSetup: Boolean,
     isAuroraDevice: Boolean
 ): String? {
-    if (!isAuroraDevice) {
+    if (!isAuroraDevice || !isContact) {
         return null
-    }
-    if (!isContact) {
-        return "Aurora device"
     }
 
     return nearbyContactStatusText(
         isContact = true,
-        hasReadyKeys = hasReadyKeys
+        hasReadyKeys = hasReadyKeys,
+        hasPrivateChatSetup = hasPrivateChatSetup
     )
 }
 
