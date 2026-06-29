@@ -68,6 +68,7 @@ import gr.hua.aurora.wifidirect.WifiDirectPeer
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
 import gr.hua.aurora.wifidirect.wifiDirectDiscoverySummary
 import gr.hua.aurora.wifidirect.wifiDirectEnabledSummary
+import gr.hua.aurora.wifidirect.wifiDirectMissingPermissionsSummary
 import gr.hua.aurora.wifidirect.wifiDirectPermissionsSummary
 import gr.hua.aurora.wifidirect.wifiDirectSupportSummary
 import gr.hua.aurora.wifidirect.wifiDirectTransportSummary
@@ -1400,14 +1401,23 @@ internal fun buildNearbyWifiDirectDebugSection(
     runtimeStatus: WifiDirectRuntimeStatus
 ): DebugInfoSection {
     val items = buildList {
-        add(DebugInfoItem("Support", wifiDirectSupportSummary(runtimeStatus)))
+        add(DebugInfoItem("Supported", wifiDirectSupportSummary(runtimeStatus)))
         add(
             DebugInfoItem(
-                "Perms",
+                "Permissions",
                 wifiDirectPermissionsSummary(runtimeStatus.permissionStatus)
             )
         )
-        add(DebugInfoItem("State", nearbyWifiDirectEnabledValue(runtimeStatus.enabledState)))
+        wifiDirectMissingPermissionsSummary(runtimeStatus.permissionStatus)?.let { missingText ->
+            add(
+                DebugInfoItem(
+                    "Missing",
+                    missingText,
+                    preferFullWidth = true
+                )
+            )
+        }
+        add(DebugInfoItem("Wi-Fi/P2P", nearbyWifiDirectEnabledValue(runtimeStatus.enabledState)))
         add(
             DebugInfoItem(
                 "Discovery",
@@ -1433,17 +1443,8 @@ internal fun buildNearbyWifiDirectDebugSection(
         runtimeStatus.lastError?.takeIf { it.isNotBlank() }?.let { errorText ->
             add(
                 DebugInfoItem(
-                    "Error",
+                    "Last error",
                     errorText,
-                    preferFullWidth = true
-                )
-            )
-        }
-        runtimeStatus.note.takeIf { it.isNotBlank() }?.let { noteText ->
-            add(
-                DebugInfoItem(
-                    "Note",
-                    noteText,
                     preferFullWidth = true
                 )
             )
@@ -1458,15 +1459,26 @@ internal fun buildNearbyWifiDirectDebugSection(
 
 internal data class NearbyWifiDirectDebugControlsState(
     val canStartDiscovery: Boolean,
-    val canStopDiscovery: Boolean
+    val canStopDiscovery: Boolean,
+    val startDisabledReason: String? = null
 )
 
 internal fun nearbyWifiDirectDebugControlsState(
     runtimeStatus: WifiDirectRuntimeStatus
 ): NearbyWifiDirectDebugControlsState {
+    val startDisabledReason = if (
+        runtimeStatus.discoveryState == gr.hua.aurora.wifidirect.WifiDirectDiscoveryState.ACTIVE
+    ) {
+        "Wi-Fi Direct discovery already active."
+    } else {
+        gr.hua.aurora.wifidirect.wifiDirectDiscoveryBlockedReason(
+            runtimeStatus.permissionStatus
+        )
+    }
     return NearbyWifiDirectDebugControlsState(
-        canStartDiscovery = runtimeStatus.discoveryState != gr.hua.aurora.wifidirect.WifiDirectDiscoveryState.ACTIVE,
-        canStopDiscovery = runtimeStatus.discoveryState == gr.hua.aurora.wifidirect.WifiDirectDiscoveryState.ACTIVE
+        canStartDiscovery = startDisabledReason == null,
+        canStopDiscovery = true,
+        startDisabledReason = startDisabledReason
     )
 }
 

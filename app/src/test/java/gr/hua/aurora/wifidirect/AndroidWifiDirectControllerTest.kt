@@ -156,6 +156,27 @@ class AndroidWifiDirectControllerTest {
     }
 
     @Test
+    fun startDiscoveryFailsClearlyWhenWifiDirectStateIsDisabled() {
+        val permissionStatus = readyPermissionStatus(
+            isWifiEnabled = false,
+            isWifiP2pEnabled = false
+        )
+        val client = FakeWifiDirectPlatformClient()
+        val controller = AndroidWifiDirectController(
+            permissionStatusReader = { permissionStatus },
+            fallbackPermissionStatus = { permissionStatus },
+            platformClient = client,
+            nowMillis = { 101L }
+        )
+
+        controller.startDiscovery()
+
+        assertEquals(0, client.discoverPeersCallCount)
+        assertEquals("Wi-Fi Direct is disabled.", controller.currentRuntimeStatus().lastError)
+        assertEquals(WifiDirectDiscoveryState.INACTIVE, controller.currentRuntimeStatus().discoveryState)
+    }
+
+    @Test
     fun stopDiscoveryClearsPeersAndKeepsStateInactive() {
         val permissionStatus = readyPermissionStatus()
         val client = FakeWifiDirectPlatformClient().apply {
@@ -180,6 +201,24 @@ class AndroidWifiDirectControllerTest {
         assertEquals(WifiDirectDiscoveryState.INACTIVE, status.discoveryState)
         assertEquals(0, status.peerCount)
         assertNull(status.lastError)
+        assertEquals(1, client.stopDiscoveryCallCount)
+    }
+
+    @Test
+    fun stopDiscoveryIsSafeWhenAlreadyInactive() {
+        val permissionStatus = readyPermissionStatus()
+        val client = FakeWifiDirectPlatformClient()
+        val controller = AndroidWifiDirectController(
+            permissionStatusReader = { permissionStatus },
+            fallbackPermissionStatus = { permissionStatus },
+            platformClient = client,
+            nowMillis = { 121L }
+        )
+
+        controller.stopDiscovery()
+
+        assertEquals(WifiDirectDiscoveryState.INACTIVE, controller.currentRuntimeStatus().discoveryState)
+        assertNull(controller.currentRuntimeStatus().lastError)
         assertEquals(1, client.stopDiscoveryCallCount)
     }
 

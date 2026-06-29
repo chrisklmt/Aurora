@@ -37,9 +37,9 @@ fun wifiDirectSupportSummary(
     status: WifiDirectRuntimeStatus
 ): String {
     return if (status.isSupported) {
-        "supported"
+        "yes"
     } else {
-        "unsupported"
+        "no"
     }
 }
 
@@ -76,9 +76,20 @@ fun wifiDirectTransportSummary(
     state: WifiDirectTransportState
 ): String {
     return when (state) {
-        WifiDirectTransportState.NOT_WIRED -> "not wired"
+        WifiDirectTransportState.NOT_WIRED -> "not wired yet"
         WifiDirectTransportState.IDLE -> "idle"
         WifiDirectTransportState.CONNECTING -> "connecting"
         WifiDirectTransportState.CONNECTED -> "connected"
+    }
+}
+
+fun wifiDirectMissingPermissionsSummary(
+    status: WifiDirectPermissionStatus
+): String? {
+    val labels = status.missingPermissionLabels
+    return if (labels.isEmpty()) {
+        null
+    } else {
+        labels.joinToString(separator = ", ")
     }
 }

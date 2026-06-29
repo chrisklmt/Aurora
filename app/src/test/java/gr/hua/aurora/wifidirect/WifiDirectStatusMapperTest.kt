@@ -21,6 +21,10 @@ class WifiDirectStatusMapperTest {
             "Missing Nearby Wi-Fi permission.",
             wifiDirectDiscoveryBlockedReason(permissionStatus)
         )
+        assertEquals(
+            "NEARBY_WIFI_DEVICES",
+            wifiDirectMissingPermissionsSummary(permissionStatus)
+        )
     }
 
     @Test

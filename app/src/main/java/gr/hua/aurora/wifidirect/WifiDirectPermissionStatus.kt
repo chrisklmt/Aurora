@@ -38,6 +38,20 @@ data class WifiDirectPermissionStatus(
             permission == Manifest.permission.ACCESS_FINE_LOCATION ||
                 permission == Manifest.permission.ACCESS_COARSE_LOCATION
         }
+
+    val missingPermissionLabels: List<String>
+        get() = missingPermissions.map(::wifiDirectPermissionDebugLabel)
+}
+
+internal fun wifiDirectPermissionDebugLabel(
+    permission: String
+): String {
+    return when (permission) {
+        Manifest.permission.NEARBY_WIFI_DEVICES -> "NEARBY_WIFI_DEVICES"
+        Manifest.permission.ACCESS_FINE_LOCATION -> "ACCESS_FINE_LOCATION"
+        Manifest.permission.ACCESS_COARSE_LOCATION -> "ACCESS_COARSE_LOCATION"
+        else -> permission.substringAfterLast('.')
+    }
 }
 
 object WifiDirectPermissionStatusReader {

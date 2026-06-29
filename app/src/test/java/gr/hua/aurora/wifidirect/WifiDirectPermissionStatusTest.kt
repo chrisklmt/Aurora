@@ -34,6 +34,10 @@ class WifiDirectPermissionStatusTest {
 
         assertFalse(status.allRequiredGranted)
         assertTrue(status.hasMissingNearbyWifiPermission)
+        assertEquals(
+            listOf("NEARBY_WIFI_DEVICES"),
+            status.missingPermissionLabels
+        )
         assertEquals(WifiDirectEnabledState.ENABLED, status.enabledState)
     }
 
@@ -48,7 +52,49 @@ class WifiDirectPermissionStatusTest {
 
         assertTrue(status.allRequiredGranted)
         assertFalse(status.hasMissingLocationPermission)
+        assertEquals(emptyList<String>(), status.missingPermissionLabels)
         assertEquals(WifiDirectEnabledState.DISABLED, status.enabledState)
+    }
+
+    @Test
+    fun api33MissingNearbyWifiDevicesReportsMissingPermission() {
+        val status = WifiDirectPermissionStatus(
+            requiredPermissions = WifiDirectPermissionStatusReader.requiredPermissionsForSdkInt(33),
+            missingPermissions = setOf(Manifest.permission.NEARBY_WIFI_DEVICES),
+            isWifiDirectSupported = true,
+            isWifiEnabled = true
+        )
+
+        assertTrue(status.hasMissingNearbyWifiPermission)
+        assertFalse(status.hasMissingLocationPermission)
+        assertEquals(listOf("NEARBY_WIFI_DEVICES"), status.missingPermissionLabels)
+    }
+
+    @Test
+    fun api33GrantedNearbyWifiDevicesReportsGrantedPermission() {
+        val status = WifiDirectPermissionStatus(
+            requiredPermissions = WifiDirectPermissionStatusReader.requiredPermissionsForSdkInt(33),
+            missingPermissions = emptySet(),
+            isWifiDirectSupported = true,
+            isWifiEnabled = true
+        )
+
+        assertTrue(status.allRequiredGranted)
+        assertEquals(emptyList<String>(), status.missingPermissionLabels)
+    }
+
+    @Test
+    fun api32MissingFineLocationReportsMissingPermission() {
+        val status = WifiDirectPermissionStatus(
+            requiredPermissions = WifiDirectPermissionStatusReader.requiredPermissionsForSdkInt(32),
+            missingPermissions = setOf(Manifest.permission.ACCESS_FINE_LOCATION),
+            isWifiDirectSupported = true,
+            isWifiEnabled = true
+        )
+
+        assertFalse(status.hasMissingNearbyWifiPermission)
+        assertTrue(status.hasMissingLocationPermission)
+        assertEquals(listOf("ACCESS_FINE_LOCATION"), status.missingPermissionLabels)
     }
 
     @Test

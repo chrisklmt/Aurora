@@ -492,17 +492,12 @@ class NearbyDevicesScreenTest {
                     DebugInfoSection(
                         title = "Wi-Fi Direct",
                         items = listOf(
-                            DebugInfoItem("Support", "supported"),
-                            DebugInfoItem("Perms", "granted"),
-                            DebugInfoItem("State", "enabled"),
+                            DebugInfoItem("Supported", "yes"),
+                            DebugInfoItem("Permissions", "granted"),
+                            DebugInfoItem("Wi-Fi/P2P", "enabled"),
                             DebugInfoItem("Discovery", "inactive"),
-                            DebugInfoItem("Transport", "not wired"),
-                            DebugInfoItem("Peers", "0"),
-                            DebugInfoItem(
-                                "Note",
-                                "Wi-Fi Direct transport not wired yet.",
-                                preferFullWidth = true
-                            )
+                            DebugInfoItem("Transport", "not wired yet"),
+                            DebugInfoItem("Peers", "0")
                         )
                     ),
                     DebugInfoSection(
@@ -532,20 +527,16 @@ class NearbyDevicesScreenTest {
             DebugInfoSection(
                 title = "Wi-Fi Direct",
                 items = listOf(
-                    DebugInfoItem("Support", "supported"),
-                    DebugInfoItem("Perms", "missing"),
-                    DebugInfoItem("State", "unknown"),
+                    DebugInfoItem("Supported", "yes"),
+                    DebugInfoItem("Permissions", "missing"),
+                    DebugInfoItem("Missing", "NEARBY_WIFI_DEVICES", preferFullWidth = true),
+                    DebugInfoItem("Wi-Fi/P2P", "unknown"),
                     DebugInfoItem("Discovery", "inactive"),
-                    DebugInfoItem("Transport", "not wired"),
+                    DebugInfoItem("Transport", "not wired yet"),
                     DebugInfoItem("Peers", "0"),
                     DebugInfoItem(
-                        "Error",
+                        "Last error",
                         "Wi-Fi Direct status unavailable: RuntimeException",
-                        preferFullWidth = true
-                    ),
-                    DebugInfoItem(
-                        "Note",
-                        "Wi-Fi Direct transport not wired yet.",
                         preferFullWidth = true
                     )
                 )
@@ -566,20 +557,15 @@ class NearbyDevicesScreenTest {
             DebugInfoSection(
                 title = "Wi-Fi Direct",
                 items = listOf(
-                    DebugInfoItem("Support", "supported"),
-                    DebugInfoItem("Perms", "granted"),
-                    DebugInfoItem("State", "enabled"),
+                    DebugInfoItem("Supported", "yes"),
+                    DebugInfoItem("Permissions", "granted"),
+                    DebugInfoItem("Wi-Fi/P2P", "enabled"),
                     DebugInfoItem("Discovery", "active"),
-                    DebugInfoItem("Transport", "not wired"),
+                    DebugInfoItem("Transport", "not wired yet"),
                     DebugInfoItem("Peers", "2"),
                     DebugInfoItem(
                         "Devices",
                         "Aurora Alpha (AA:BB:CC:DD:EE:01), unnamed (AA:BB:CC:DD:EE:02)",
-                        preferFullWidth = true
-                    ),
-                    DebugInfoItem(
-                        "Note",
-                        "Wi-Fi Direct transport not wired yet.",
                         preferFullWidth = true
                     )
                 )
@@ -607,7 +593,8 @@ class NearbyDevicesScreenTest {
         assertEquals(
             NearbyWifiDirectDebugControlsState(
                 canStartDiscovery = true,
-                canStopDiscovery = false
+                canStopDiscovery = true,
+                startDisabledReason = null
             ),
             nearbyWifiDirectDebugControlsState(
                 wifiDirectRuntimeStatus(
@@ -618,11 +605,28 @@ class NearbyDevicesScreenTest {
         assertEquals(
             NearbyWifiDirectDebugControlsState(
                 canStartDiscovery = false,
-                canStopDiscovery = true
+                canStopDiscovery = true,
+                startDisabledReason = "Wi-Fi Direct discovery already active."
             ),
             nearbyWifiDirectDebugControlsState(
                 wifiDirectRuntimeStatus(
                     discoveryState = WifiDirectDiscoveryState.ACTIVE
+                )
+            )
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectDebugControlsDisableStartWhenPermissionMissing() {
+        assertEquals(
+            NearbyWifiDirectDebugControlsState(
+                canStartDiscovery = false,
+                canStopDiscovery = true,
+                startDisabledReason = "Missing Nearby Wi-Fi permission."
+            ),
+            nearbyWifiDirectDebugControlsState(
+                wifiDirectRuntimeStatus(
+                    missingPermissions = setOf("android.permission.NEARBY_WIFI_DEVICES")
                 )
             )
         )

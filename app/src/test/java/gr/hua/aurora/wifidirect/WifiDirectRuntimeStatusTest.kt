@@ -17,11 +17,12 @@ class WifiDirectRuntimeStatusTest {
             transportState = WifiDirectTransportState.NOT_WIRED
         )
 
-        assertEquals("supported", wifiDirectSupportSummary(status))
+        assertEquals("yes", wifiDirectSupportSummary(status))
         assertEquals("granted", wifiDirectPermissionsSummary(status.permissionStatus))
+        assertEquals(null, wifiDirectMissingPermissionsSummary(status.permissionStatus))
         assertEquals("enabled", wifiDirectEnabledSummary(status.enabledState))
         assertEquals("inactive", wifiDirectDiscoverySummary(status.discoveryState))
-        assertEquals("not wired", wifiDirectTransportSummary(status.transportState))
+        assertEquals("not wired yet", wifiDirectTransportSummary(status.transportState))
         assertEquals(0, status.peerCount)
         assertEquals("Wi-Fi Direct transport not wired yet.", status.note)
     }
@@ -38,8 +39,12 @@ class WifiDirectRuntimeStatusTest {
             lastError = "Wi-Fi Direct status unavailable: RuntimeException"
         )
 
-        assertEquals("unsupported", wifiDirectSupportSummary(status))
+        assertEquals("no", wifiDirectSupportSummary(status))
         assertEquals("missing", wifiDirectPermissionsSummary(status.permissionStatus))
+        assertEquals(
+            "ACCESS_FINE_LOCATION",
+            wifiDirectMissingPermissionsSummary(status.permissionStatus)
+        )
         assertEquals("unknown", wifiDirectEnabledSummary(status.enabledState))
         assertEquals("Wi-Fi Direct status unavailable: RuntimeException", status.lastError)
     }
