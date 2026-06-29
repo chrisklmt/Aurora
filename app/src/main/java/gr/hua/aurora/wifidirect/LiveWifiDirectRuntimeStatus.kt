@@ -1,11 +1,5 @@
 package gr.hua.aurora.wifidirect
 
-import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
-import android.net.wifi.WifiManager
-import android.net.wifi.p2p.WifiP2pManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -24,55 +18,6 @@ data class RememberedWifiDirectRuntimeStatusState(
     val startDiscovery: () -> Unit,
     val stopDiscovery: () -> Unit
 )
-
-fun wifiDirectStatusIntentFilter(): IntentFilter {
-    return IntentFilter().apply {
-        addAction(WifiManager.WIFI_STATE_CHANGED_ACTION)
-        addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION)
-        addAction(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION)
-        addAction(WifiP2pManager.WIFI_P2P_DISCOVERY_CHANGED_ACTION)
-    }
-}
-
-fun wifiDirectBroadcastEvent(
-    intent: Intent?
-): WifiDirectBroadcastEvent {
-    val action = intent?.action
-    val wifiP2pEnabled = if (action == WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION) {
-        when (
-            intent.getIntExtra(
-                WifiP2pManager.EXTRA_WIFI_STATE,
-                -1
-            )
-        ) {
-            WifiP2pManager.WIFI_P2P_STATE_ENABLED -> true
-            WifiP2pManager.WIFI_P2P_STATE_DISABLED -> false
-            else -> null
-        }
-    } else {
-        null
-    }
-    val discoveryActive = if (action == WifiP2pManager.WIFI_P2P_DISCOVERY_CHANGED_ACTION) {
-        when (
-            intent.getIntExtra(
-                WifiP2pManager.EXTRA_DISCOVERY_STATE,
-                -1
-            )
-        ) {
-            WifiP2pManager.WIFI_P2P_DISCOVERY_STARTED -> true
-            WifiP2pManager.WIFI_P2P_DISCOVERY_STOPPED -> false
-            else -> null
-        }
-    } else {
-        null
-    }
-
-    return WifiDirectBroadcastEvent(
-        action = action,
-        isWifiP2pEnabled = wifiP2pEnabled,
-        isDiscoveryActive = discoveryActive
-    )
-}
 
 @Composable
 fun rememberWifiDirectRuntimeStatusState(
@@ -136,10 +81,8 @@ fun rememberWifiDirectRuntimeStatusState(
     }
 
     DisposableEffect(appContext, refresh) {
-        val receiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: android.content.Intent?) {
-                resolvedController.handleBroadcast(wifiDirectBroadcastEvent(intent))
-            }
+        val receiver = WifiDirectRuntimeBroadcastReceiver { event ->
+            resolvedController.handleBroadcast(event)
         }
 
         ContextCompat.registerReceiver(

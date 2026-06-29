@@ -1,12 +1,8 @@
 package gr.hua.aurora.wifidirect
 
 import android.content.Context
-import android.net.wifi.p2p.WifiP2pDeviceList
 import android.net.wifi.p2p.WifiP2pManager
 import android.os.Build
-import android.os.Looper
-
-private const val wifiDirectStatusUnavailableMessage = "Wi-Fi Direct status unavailable"
 
 class AndroidWifiDirectController internal constructor(
     private val permissionStatusReader: () -> WifiDirectPermissionStatus,
@@ -26,12 +22,7 @@ class AndroidWifiDirectController internal constructor(
             )
         },
         fallbackPermissionStatus = {
-            WifiDirectPermissionStatus(
-                requiredPermissions = WifiDirectPermissionStatusReader.requiredPermissionsForSdkInt(sdkInt),
-                missingPermissions = emptySet(),
-                isWifiDirectSupported = false,
-                isWifiEnabled = null
-            )
+            fallbackWifiDirectPermissionStatus(sdkInt)
         },
         platformClient = AndroidWifiDirectPlatformClient.create(context.applicationContext)
     )
@@ -155,14 +146,7 @@ class AndroidWifiDirectController internal constructor(
     private fun requestPeers(client: WifiDirectPlatformClient) {
         client.requestPeers(
             onSuccess = { discoveredPeers ->
-                peers = discoveredPeers
-                    .distinctBy { peer -> peer.deviceAddress?.uppercase() ?: peer.deviceName.orEmpty() }
-                    .sortedWith(
-                        compareBy(
-                            WifiDirectPeer::deviceName,
-                            WifiDirectPeer::deviceAddress
-                        )
-                    )
+                peers = WifiDirectPeerMapper.normalizePeers(discoveredPeers)
                 clearLastError()
                 touch()
                 emitCurrentRuntimeStatus()
@@ -186,10 +170,9 @@ class AndroidWifiDirectController internal constructor(
             peers = emptyList()
         }
 
-        return WifiDirectRuntimeStatus(
+        return buildWifiDirectRuntimeStatus(
             permissionStatus = permissionStatus,
             discoveryState = discoveryState,
-            transportState = WifiDirectTransportState.NOT_WIRED,
             peers = peers,
             lastError = lastError,
             lastUpdatedAtMillis = lastUpdatedAtMillis
@@ -203,17 +186,15 @@ class AndroidWifiDirectController internal constructor(
     private fun emit(
         permissionStatus: WifiDirectPermissionStatus
     ) {
-        val status = WifiDirectRuntimeStatus(
-            permissionStatus = permissionStatus,
-            discoveryState = discoveryState,
-            transportState = WifiDirectTransportState.NOT_WIRED,
-            peers = peers,
-            lastError = lastError,
-            lastUpdatedAtMillis = lastUpdatedAtMillis
+        emit(
+            buildWifiDirectRuntimeStatus(
+                permissionStatus = permissionStatus,
+                discoveryState = discoveryState,
+                peers = peers,
+                lastError = lastError,
+                lastUpdatedAtMillis = lastUpdatedAtMillis
+            )
         )
-        listeners.forEach { listener ->
-            listener.onRuntimeStatusChanged(status)
-        }
     }
 
     private fun emit(status: WifiDirectRuntimeStatus) {
@@ -224,14 +205,13 @@ class AndroidWifiDirectController internal constructor(
 
     private fun readPermissionStatusSafely(): WifiDirectPermissionStatus {
         val baseStatus = runCatching(permissionStatusReader).getOrElse { error ->
-            setLastError("$wifiDirectStatusUnavailableMessage: ${error::class.java.simpleName}")
+            setLastError(wifiDirectStatusUnavailableReason(error))
             fallbackPermissionStatus()
         }
-        return if (latestWifiP2pEnabled != null) {
-            baseStatus.copy(isWifiP2pEnabled = latestWifiP2pEnabled)
-        } else {
-            baseStatus
-        }
+        return wifiDirectPermissionStatusWithP2pState(
+            status = baseStatus,
+            isWifiP2pEnabled = latestWifiP2pEnabled
+        )
     }
 
     private fun setLastError(error: String) {
@@ -248,140 +228,5 @@ class AndroidWifiDirectController internal constructor(
 
     private fun touch() {
         lastUpdatedAtMillis = nowMillis()
-    }
-}
-
-internal interface WifiDirectPlatformClient {
-    fun discoverPeers(
-        onSuccess: () -> Unit,
-        onFailure: (Int) -> Unit
-    )
-
-    fun stopPeerDiscovery(
-        onSuccess: () -> Unit,
-        onFailure: (Int) -> Unit
-    )
-
-    fun requestPeers(
-        onSuccess: (List<WifiDirectPeer>) -> Unit,
-        onFailure: (String) -> Unit
-    )
-}
-
-private class AndroidWifiDirectPlatformClient private constructor(
-    private val manager: WifiP2pManager,
-    private val channel: WifiP2pManager.Channel
-) : WifiDirectPlatformClient {
-
-    override fun discoverPeers(
-        onSuccess: () -> Unit,
-        onFailure: (Int) -> Unit
-    ) {
-        runCatching {
-            manager.discoverPeers(
-                channel,
-                object : WifiP2pManager.ActionListener {
-                    override fun onSuccess() {
-                        onSuccess()
-                    }
-
-                    override fun onFailure(reason: Int) {
-                        onFailure(reason)
-                    }
-                }
-            )
-        }.getOrElse {
-            onFailure(WifiP2pManager.ERROR)
-        }
-    }
-
-    override fun stopPeerDiscovery(
-        onSuccess: () -> Unit,
-        onFailure: (Int) -> Unit
-    ) {
-        runCatching {
-            manager.stopPeerDiscovery(
-                channel,
-                object : WifiP2pManager.ActionListener {
-                    override fun onSuccess() {
-                        onSuccess()
-                    }
-
-                    override fun onFailure(reason: Int) {
-                        onFailure(reason)
-                    }
-                }
-            )
-        }.getOrElse {
-            onFailure(WifiP2pManager.ERROR)
-        }
-    }
-
-    override fun requestPeers(
-        onSuccess: (List<WifiDirectPeer>) -> Unit,
-        onFailure: (String) -> Unit
-    ) {
-        runCatching {
-            manager.requestPeers(channel) { peerList: WifiP2pDeviceList ->
-                onSuccess(
-                    peerList.deviceList.map { device ->
-                        WifiDirectPeer(
-                            deviceName = device.deviceName?.trim()?.takeIf { it.isNotEmpty() },
-                            deviceAddress = device.deviceAddress?.trim()?.takeIf { it.isNotEmpty() }
-                        )
-                    }
-                )
-            }
-        }.getOrElse { error ->
-            onFailure(error::class.java.simpleName)
-        }
-    }
-
-    companion object {
-        fun create(context: Context): WifiDirectPlatformClient? {
-            val appContext = context.applicationContext
-            val manager = appContext.getSystemService(Context.WIFI_P2P_SERVICE) as? WifiP2pManager
-                ?: return null
-            val channel = runCatching {
-                manager.initialize(appContext, Looper.getMainLooper(), null)
-            }.getOrNull() ?: return null
-            return AndroidWifiDirectPlatformClient(
-                manager = manager,
-                channel = channel
-            )
-        }
-    }
-}
-
-internal fun wifiDirectDiscoveryBlockedReason(
-    permissionStatus: WifiDirectPermissionStatus
-): String? {
-    if (!permissionStatus.isWifiDirectSupported) {
-        return "Wi-Fi Direct unsupported on this device."
-    }
-    if (permissionStatus.hasMissingNearbyWifiPermission) {
-        return "Missing Nearby Wi-Fi permission."
-    }
-    if (permissionStatus.hasMissingLocationPermission) {
-        return "Missing location permission."
-    }
-    if (!permissionStatus.allRequiredGranted) {
-        return "Missing Wi-Fi Direct permission."
-    }
-    return when (permissionStatus.enabledState) {
-        WifiDirectEnabledState.ENABLED -> null
-        WifiDirectEnabledState.DISABLED -> "Wi-Fi Direct is disabled."
-        WifiDirectEnabledState.UNKNOWN -> "Wi-Fi Direct state unavailable."
-    }
-}
-
-internal fun wifiDirectFailureLabel(
-    reason: Int
-): String {
-    return when (reason) {
-        WifiP2pManager.BUSY -> "busy"
-        WifiP2pManager.P2P_UNSUPPORTED -> "unsupported"
-        WifiP2pManager.ERROR -> "error"
-        else -> "code $reason"
     }
 }

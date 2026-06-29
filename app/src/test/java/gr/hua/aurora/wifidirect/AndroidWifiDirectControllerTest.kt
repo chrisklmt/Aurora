@@ -64,6 +64,33 @@ class AndroidWifiDirectControllerTest {
     }
 
     @Test
+    fun startDiscoveryFailsClearlyWhenDeviceIsUnsupported() {
+        val permissionStatus = WifiDirectPermissionStatus(
+            requiredPermissions = setOf("android.permission.NEARBY_WIFI_DEVICES"),
+            missingPermissions = emptySet(),
+            isWifiDirectSupported = false,
+            isWifiEnabled = true,
+            isWifiP2pEnabled = true
+        )
+        val client = FakeWifiDirectPlatformClient()
+        val controller = AndroidWifiDirectController(
+            permissionStatusReader = { permissionStatus },
+            fallbackPermissionStatus = { permissionStatus },
+            platformClient = null,
+            nowMillis = { 56L }
+        )
+
+        controller.startDiscovery()
+
+        assertEquals(0, client.discoverPeersCallCount)
+        assertEquals(
+            "Wi-Fi Direct unsupported on this device.",
+            controller.currentRuntimeStatus().lastError
+        )
+        assertEquals(WifiDirectDiscoveryState.INACTIVE, controller.currentRuntimeStatus().discoveryState)
+    }
+
+    @Test
     fun peerChangeBroadcastRefreshesPeerList() {
         val permissionStatus = readyPermissionStatus()
         val client = FakeWifiDirectPlatformClient().apply {
