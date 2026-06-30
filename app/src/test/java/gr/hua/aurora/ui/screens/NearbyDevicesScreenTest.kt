@@ -544,6 +544,21 @@ class NearbyDevicesScreenTest {
                         )
                     ),
                     DebugInfoSection(
+                        title = "Adapter",
+                        items = listOf(
+                            DebugInfoItem("Adapter", "disabled"),
+                            DebugInfoItem("Submitted", "0"),
+                            DebugInfoItem("Received", "0"),
+                            DebugInfoItem("Bytes", "0/0"),
+                            DebugInfoItem("Last size", "none"),
+                            DebugInfoItem(
+                                "Note",
+                                "Wi-Fi Direct chat routing not wired yet.",
+                                preferFullWidth = true
+                            )
+                        )
+                    ),
+                    DebugInfoSection(
                         title = "Identity",
                         items = listOf(
                             DebugInfoItem("Handler", "ready"),
@@ -809,6 +824,37 @@ class NearbyDevicesScreenTest {
     }
 
     @Test
+    fun nearbyWifiDirectAdapterDebugSectionShowsCompactDiagnostics() {
+        assertEquals(
+            DebugInfoSection(
+                title = "Adapter",
+                items = listOf(
+                    DebugInfoItem("Adapter", "ready"),
+                    DebugInfoItem("Submitted", "2"),
+                    DebugInfoItem("Received", "1"),
+                    DebugInfoItem("Bytes", "24/12"),
+                    DebugInfoItem("Last size", "12 B"),
+                    DebugInfoItem(
+                        "Note",
+                        "Wi-Fi Direct chat routing not wired yet.",
+                        preferFullWidth = true
+                    )
+                )
+            ),
+            buildNearbyWifiDirectAdapterDebugSection(
+                diagnostics = gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics(
+                    state = gr.hua.aurora.wifidirect.WifiDirectTransportAdapterState.READY,
+                    framesSubmitted = 2,
+                    framesReceived = 1,
+                    bytesSubmitted = 24,
+                    bytesReceived = 12,
+                    lastFrameSize = 12
+                )
+            )
+        )
+    }
+
+    @Test
     fun nearbyWifiDirectPeerActionStateReflectsConnectAndDisconnectProgress() {
         val peer = WifiDirectPeer(
             deviceName = "Aurora Alpha",
@@ -871,6 +917,7 @@ class NearbyDevicesScreenTest {
                 canStartServer = false,
                 canConnectClient = false,
                 canSendFrame = false,
+                canSendAdapterFrame = false,
                 canCloseSocket = false,
                 helpText = "Wi-Fi Direct group not formed."
             ),
@@ -888,6 +935,7 @@ class NearbyDevicesScreenTest {
                 canStartServer = true,
                 canConnectClient = false,
                 canSendFrame = false,
+                canSendAdapterFrame = false,
                 canCloseSocket = false
             ),
             nearbyWifiDirectSocketControlsState(
@@ -910,6 +958,7 @@ class NearbyDevicesScreenTest {
                 canStartServer = false,
                 canConnectClient = true,
                 canSendFrame = false,
+                canSendAdapterFrame = false,
                 canCloseSocket = false,
                 connectHost = "192.168.49.1"
             ),
@@ -934,6 +983,7 @@ class NearbyDevicesScreenTest {
                 canStartServer = false,
                 canConnectClient = false,
                 canSendFrame = false,
+                canSendAdapterFrame = false,
                 canCloseSocket = false,
                 helpText = "Wi-Fi Direct role unavailable."
             ),
@@ -953,6 +1003,7 @@ class NearbyDevicesScreenTest {
                 canStartServer = false,
                 canConnectClient = false,
                 canSendFrame = false,
+                canSendAdapterFrame = false,
                 canCloseSocket = false,
                 connectHost = null,
                 helpText = "Group owner address unavailable."
@@ -967,6 +1018,37 @@ class NearbyDevicesScreenTest {
                     )
                 ),
                 diagnostics = WifiDirectSocketDiagnostics()
+            )
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectSocketControlsEnableAdapterFrameSendOnlyWhenAdapterReady() {
+        assertEquals(
+            NearbyWifiDirectSocketControlsState(
+                canStartServer = false,
+                canConnectClient = false,
+                canSendFrame = true,
+                canSendAdapterFrame = true,
+                canCloseSocket = true
+            ),
+            nearbyWifiDirectSocketControlsState(
+                runtimeStatus = wifiDirectRuntimeStatus(
+                    connectionStatus = WifiDirectConnectionStatus(
+                        state = WifiDirectConnectionState.CONNECTED,
+                        groupFormed = WifiDirectGroupFormedState.YES,
+                        role = WifiDirectConnectionRole.CLIENT,
+                        groupOwnerAddress = "192.168.49.1"
+                    )
+                ),
+                diagnostics = WifiDirectSocketDiagnostics(
+                    state = WifiDirectSocketState.CONNECTED,
+                    role = WifiDirectSocketRole.CLIENT,
+                    isConnected = true
+                ),
+                adapterDiagnostics = gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics(
+                    state = gr.hua.aurora.wifidirect.WifiDirectTransportAdapterState.READY
+                )
             )
         )
     }

@@ -184,6 +184,7 @@ fun NearbyDevicesScreen(
         scanStatus = bleScanStatus,
         wifiDirectRuntimeStatus = wifiDirectRuntimeStatus,
         wifiDirectSocketDiagnostics = wifiDirectSocketState.diagnostics,
+        wifiDirectAdapterDiagnostics = wifiDirectSocketState.adapterDiagnostics,
         identityHandlerStatus = identityHandlerStatus,
         peerSessionDiagnostics = peerSessionDiagnostics
     )
@@ -311,6 +312,7 @@ fun NearbyDevicesScreen(
                         NearbyWifiDirectDebugControls(
                             runtimeStatus = wifiDirectRuntimeStatus,
                             socketDiagnostics = wifiDirectSocketState.diagnostics,
+                            adapterDiagnostics = wifiDirectSocketState.adapterDiagnostics,
                             onStartDiscovery = onStartWifiDirectDiscovery,
                             onStopDiscovery = onStopWifiDirectDiscovery,
                             onConnectToPeer = onConnectWifiDirectPeer,
@@ -318,6 +320,7 @@ fun NearbyDevicesScreen(
                             onStartSocketServer = wifiDirectSocketState.startServer,
                             onConnectSocketClient = wifiDirectSocketState.connectClient,
                             onSendSocketFrame = wifiDirectSocketState.sendFrame,
+                            onSendAdapterFrame = wifiDirectSocketState.sendAdapterFrame,
                             onCloseSocket = wifiDirectSocketState.closeSocket
                         )
                     }
@@ -1379,6 +1382,8 @@ internal fun buildNearbyDebugCard(
     scanStatus: BleScanStatus,
     wifiDirectRuntimeStatus: WifiDirectRuntimeStatus,
     wifiDirectSocketDiagnostics: gr.hua.aurora.wifidirect.WifiDirectSocketDiagnostics,
+    wifiDirectAdapterDiagnostics: gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics =
+        gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics(),
     identityHandlerStatus: String,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics
 ): DebugInfoCardModel? {
@@ -1402,6 +1407,9 @@ internal fun buildNearbyDebugCard(
             ),
             buildNearbyWifiDirectFrameDebugSection(
                 diagnostics = wifiDirectSocketDiagnostics
+            ),
+            buildNearbyWifiDirectAdapterDebugSection(
+                diagnostics = wifiDirectAdapterDiagnostics
             ),
             buildNearbyIdentityDebugSection(
                 identityHandlerStatus = identityHandlerStatus,

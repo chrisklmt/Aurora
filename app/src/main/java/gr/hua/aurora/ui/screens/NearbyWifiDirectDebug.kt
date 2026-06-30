@@ -20,6 +20,8 @@ import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
 import gr.hua.aurora.wifidirect.WifiDirectSocketCommandAvailability
 import gr.hua.aurora.wifidirect.WifiDirectSocketDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectSocketState
+import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics
+import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterState
 import gr.hua.aurora.wifidirect.wifiDirectFrameByteSummary
 import gr.hua.aurora.wifidirect.wifiDirectFrameCountSummary
 import gr.hua.aurora.wifidirect.wifiDirectFrameSizeSummary
@@ -42,6 +44,8 @@ import gr.hua.aurora.wifidirect.wifiDirectSocketStateSummary
 import gr.hua.aurora.wifidirect.wifiDirectSocketCommandAvailability
 import gr.hua.aurora.wifidirect.wifiDirectSupportSummary
 import gr.hua.aurora.wifidirect.wifiDirectTransportSummary
+import gr.hua.aurora.wifidirect.wifiDirectTransportAdapterByteSummary
+import gr.hua.aurora.wifidirect.wifiDirectTransportAdapterStateSummary
 
 internal fun buildNearbyWifiDirectDebugSection(
     runtimeStatus: WifiDirectRuntimeStatus
@@ -272,6 +276,64 @@ internal fun buildNearbyWifiDirectFrameDebugSection(
     )
 }
 
+internal fun buildNearbyWifiDirectAdapterDebugSection(
+    diagnostics: WifiDirectTransportAdapterDiagnostics
+): DebugInfoSection {
+    val items = buildList {
+        add(
+            DebugInfoItem(
+                "Adapter",
+                wifiDirectTransportAdapterStateSummary(diagnostics.state)
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Submitted",
+                diagnostics.framesSubmitted.toString()
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Received",
+                diagnostics.framesReceived.toString()
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Bytes",
+                wifiDirectTransportAdapterByteSummary(diagnostics)
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Last size",
+                wifiDirectFrameSizeSummary(diagnostics.lastFrameSize)
+            )
+        )
+        diagnostics.lastError?.takeIf { it.isNotBlank() }?.let { errorText ->
+            add(
+                DebugInfoItem(
+                    "Last error",
+                    errorText,
+                    preferFullWidth = true
+                )
+            )
+        }
+        add(
+            DebugInfoItem(
+                "Note",
+                diagnostics.note,
+                preferFullWidth = true
+            )
+        )
+    }
+
+    return DebugInfoSection(
+        title = "Adapter",
+        items = items
+    )
+}
+
 internal data class NearbyWifiDirectDebugControlsState(
     val canStartDiscovery: Boolean,
     val canStopDiscovery: Boolean,
@@ -303,6 +365,7 @@ internal data class NearbyWifiDirectSocketControlsState(
     val canStartServer: Boolean,
     val canConnectClient: Boolean,
     val canSendFrame: Boolean,
+    val canSendAdapterFrame: Boolean,
     val canCloseSocket: Boolean,
     val connectHost: String? = null,
     val helpText: String? = null
@@ -310,12 +373,15 @@ internal data class NearbyWifiDirectSocketControlsState(
 
 internal fun nearbyWifiDirectSocketControlsState(
     runtimeStatus: WifiDirectRuntimeStatus,
-    diagnostics: WifiDirectSocketDiagnostics
+    diagnostics: WifiDirectSocketDiagnostics,
+    adapterDiagnostics: WifiDirectTransportAdapterDiagnostics = WifiDirectTransportAdapterDiagnostics()
 ): NearbyWifiDirectSocketControlsState {
     return wifiDirectSocketCommandAvailability(
         runtimeStatus = runtimeStatus,
         diagnostics = diagnostics
-    ).toNearbySocketControlsState()
+    ).toNearbySocketControlsState(
+        canSendAdapterFrame = adapterDiagnostics.state == WifiDirectTransportAdapterState.READY
+    )
 }
 
 internal fun nearbyWifiDirectPeerListValue(
@@ -442,6 +508,7 @@ internal fun nearbyCanDisconnectWifiDirect(
 internal fun NearbyWifiDirectDebugControls(
     runtimeStatus: WifiDirectRuntimeStatus,
     socketDiagnostics: WifiDirectSocketDiagnostics,
+    adapterDiagnostics: WifiDirectTransportAdapterDiagnostics,
     onStartDiscovery: () -> Unit,
     onStopDiscovery: () -> Unit,
     onConnectToPeer: (WifiDirectPeer) -> Unit,
@@ -449,12 +516,14 @@ internal fun NearbyWifiDirectDebugControls(
     onStartSocketServer: (String?) -> Unit,
     onConnectSocketClient: (String) -> Unit,
     onSendSocketFrame: () -> Unit,
+    onSendAdapterFrame: () -> Unit,
     onCloseSocket: () -> Unit
 ) {
     val controlsState = nearbyWifiDirectDebugControlsState(runtimeStatus)
     val socketControlsState = nearbyWifiDirectSocketControlsState(
         runtimeStatus = runtimeStatus,
-        diagnostics = socketDiagnostics
+        diagnostics = socketDiagnostics,
+        adapterDiagnostics = adapterDiagnostics
     )
 
     Column(
@@ -515,6 +584,12 @@ internal fun NearbyWifiDirectDebugControls(
                 Text("Send debug frame")
             }
             TextButton(
+                onClick = onSendAdapterFrame,
+                enabled = socketControlsState.canSendAdapterFrame
+            ) {
+                Text("Send adapter frame")
+            }
+            TextButton(
                 onClick = onCloseSocket,
                 enabled = socketControlsState.canCloseSocket
             ) {
@@ -573,11 +648,14 @@ internal fun nearbyWifiDirectEnabledValue(
     return wifiDirectEnabledSummary(state)
 }
 
-private fun WifiDirectSocketCommandAvailability.toNearbySocketControlsState(): NearbyWifiDirectSocketControlsState {
+private fun WifiDirectSocketCommandAvailability.toNearbySocketControlsState(
+    canSendAdapterFrame: Boolean
+): NearbyWifiDirectSocketControlsState {
     return NearbyWifiDirectSocketControlsState(
         canStartServer = canStartServer,
         canConnectClient = canConnectClient,
         canSendFrame = canSendFrame,
+        canSendAdapterFrame = canSendAdapterFrame,
         canCloseSocket = canCloseSocket,
         connectHost = connectHost,
         helpText = helpText

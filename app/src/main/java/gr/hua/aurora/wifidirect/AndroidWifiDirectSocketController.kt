@@ -22,9 +22,12 @@ internal class AndroidWifiDirectSocketController internal constructor(
     createClientSocket: () -> Socket = { Socket() },
     connectTimeoutMillis: Int = wifiDirectSocketConnectTimeoutMillis,
     private val ioScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-) : WifiDirectSocketController {
+) : WifiDirectSocketController,
+    WifiDirectTransportFrameSink,
+    WifiDirectTransportFrameSource {
 
     private val listeners = linkedSetOf<WifiDirectSocketController.Listener>()
+    private val transportFrameListeners = linkedSetOf<WifiDirectTransportFrameSource.Listener>()
     private val resourceLock = Any()
     private val stateMachine = WifiDirectSocketStateMachine(initialPort = requestedPort)
     private val socketServer = WifiDirectSocketServer(
@@ -141,9 +144,38 @@ internal class AndroidWifiDirectSocketController internal constructor(
         }
         val token = currentTokenSnapshot()
         ioScope.launch {
-            sendFrame(
+            sendFramePayload(
                 token = token,
-                frame = wifiDirectDebugPingFrame()
+                payload = wifiDirectDebugPingFrame().payloadBytes()
+            )
+        }
+    }
+
+    override fun isTransportFrameReady(): Boolean {
+        val diagnostics = currentDiagnostics()
+        return diagnostics.isConnected &&
+            diagnostics.frameDiagnostics.state == WifiDirectFrameTransportState.READY
+    }
+
+    override fun submitTransportFramePayload(
+        payload: ByteArray,
+        onResult: (Result<Unit>) -> Unit
+    ) {
+        if (!currentDiagnostics().isConnected) {
+            emit(stateMachine.recordNotConnectedError())
+            onResult(
+                Result.failure(
+                    IllegalStateException("Debug frame transport not connected.")
+                )
+            )
+            return
+        }
+        val token = currentTokenSnapshot()
+        ioScope.launch {
+            sendFramePayload(
+                token = token,
+                payload = payload,
+                onResult = onResult
             )
         }
     }
@@ -161,6 +193,14 @@ internal class AndroidWifiDirectSocketController internal constructor(
 
     override fun removeListener(listener: WifiDirectSocketController.Listener) {
         listeners -= listener
+    }
+
+    override fun addTransportFrameListener(listener: WifiDirectTransportFrameSource.Listener) {
+        transportFrameListeners += listener
+    }
+
+    override fun removeTransportFrameListener(listener: WifiDirectTransportFrameSource.Listener) {
+        transportFrameListeners -= listener
     }
 
     override fun dispose() {
@@ -207,6 +247,10 @@ internal class AndroidWifiDirectSocketController internal constructor(
                 isActive = { stateMachine.isCurrentToken(token) },
                 onIncomingFrame = { incomingFrame ->
                     val frame = incomingFrame.frame
+                    emitIncomingTransportFramePayload(
+                        payload = frame.payloadBytes(),
+                        byteCount = incomingFrame.frameByteCount
+                    )
                     emitIfPresent(
                         stateMachine.recordReceivedFrame(
                             token = token,
@@ -216,7 +260,7 @@ internal class AndroidWifiDirectSocketController internal constructor(
                         )
                     )
                     wifiDirectDebugAutoReplyFrameOrNull(frame)?.let { reply ->
-                        sendFrame(token, reply)
+                        sendFramePayload(token, reply.payloadBytes())
                     }
                 },
                 onClosed = {
@@ -235,12 +279,31 @@ internal class AndroidWifiDirectSocketController internal constructor(
         }
     }
 
-    private fun sendFrame(
+    private fun sendFramePayload(
         token: Long,
-        frame: WifiDirectFrame
+        payload: ByteArray,
+        onResult: (Result<Unit>) -> Unit = {}
     ) {
         val activeSocket = currentSocket(token) ?: run {
             emit(stateMachine.recordNotConnectedError())
+            onResult(
+                Result.failure(
+                    IllegalStateException("Debug frame transport not connected.")
+                )
+            )
+            return
+        }
+        val frame = runCatching {
+            WifiDirectFrame.fromPayload(payload)
+        }.getOrElse { error ->
+            emit(
+                stateMachine.markImmediateFailure(
+                    role = currentDiagnostics().role,
+                    reason = "Debug frame send failed: ${safeFrameErrorDetail(error)}",
+                    endpoint = currentDiagnostics().endpoint
+                )
+            )
+            onResult(Result.failure(error))
             return
         }
 
@@ -256,11 +319,13 @@ internal class AndroidWifiDirectSocketController internal constructor(
                     bytesSent = byteCount
                 )
             )
+            onResult(Result.success(Unit))
         }.onFailure { error ->
             failSocket(
                 token = token,
                 reason = "Debug frame send failed: ${safeFrameErrorDetail(error)}"
             )
+            onResult(Result.failure(error))
         }
     }
 
@@ -351,6 +416,18 @@ internal class AndroidWifiDirectSocketController internal constructor(
     ) {
         listeners.forEach { listener ->
             listener.onSocketDiagnosticsChanged(updated)
+        }
+    }
+
+    private fun emitIncomingTransportFramePayload(
+        payload: ByteArray,
+        byteCount: Long
+    ) {
+        transportFrameListeners.toList().forEach { listener ->
+            listener.onTransportFramePayloadReceived(
+                payload = payload.copyOf(),
+                byteCount = byteCount
+            )
         }
     }
 
