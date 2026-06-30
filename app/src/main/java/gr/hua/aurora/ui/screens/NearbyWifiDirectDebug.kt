@@ -17,8 +17,8 @@ import gr.hua.aurora.wifidirect.WifiDirectConnectionState
 import gr.hua.aurora.wifidirect.WifiDirectEnabledState
 import gr.hua.aurora.wifidirect.WifiDirectPeer
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
+import gr.hua.aurora.wifidirect.WifiDirectSocketCommandAvailability
 import gr.hua.aurora.wifidirect.WifiDirectSocketDiagnostics
-import gr.hua.aurora.wifidirect.WifiDirectSocketRole
 import gr.hua.aurora.wifidirect.WifiDirectSocketState
 import gr.hua.aurora.wifidirect.wifiDirectConnectionRoleSummary
 import gr.hua.aurora.wifidirect.wifiDirectConnectionSummary
@@ -35,6 +35,7 @@ import gr.hua.aurora.wifidirect.wifiDirectSocketEndpointSummary
 import gr.hua.aurora.wifidirect.wifiDirectSocketMessageSummary
 import gr.hua.aurora.wifidirect.wifiDirectSocketRoleSummary
 import gr.hua.aurora.wifidirect.wifiDirectSocketStateSummary
+import gr.hua.aurora.wifidirect.wifiDirectSocketCommandAvailability
 import gr.hua.aurora.wifidirect.wifiDirectSupportSummary
 import gr.hua.aurora.wifidirect.wifiDirectTransportSummary
 
@@ -254,72 +255,10 @@ internal fun nearbyWifiDirectSocketControlsState(
     runtimeStatus: WifiDirectRuntimeStatus,
     diagnostics: WifiDirectSocketDiagnostics
 ): NearbyWifiDirectSocketControlsState {
-    return when (diagnostics.state) {
-        WifiDirectSocketState.CONNECTED -> NearbyWifiDirectSocketControlsState(
-            canStartServer = false,
-            canConnectClient = false,
-            canSendPing = true,
-            canCloseSocket = true
-        )
-        WifiDirectSocketState.STARTING_SERVER,
-        WifiDirectSocketState.SERVER_LISTENING,
-        WifiDirectSocketState.CONNECTING,
-        WifiDirectSocketState.CLOSING -> NearbyWifiDirectSocketControlsState(
-            canStartServer = false,
-            canConnectClient = false,
-            canSendPing = false,
-            canCloseSocket = true,
-            helpText = nearbyWifiDirectSocketActivityHint(diagnostics.state)
-        )
-        WifiDirectSocketState.IDLE,
-        WifiDirectSocketState.FAILED -> {
-            val connectionStatus = runtimeStatus.connectionStatus
-            if (
-                connectionStatus.state != WifiDirectConnectionState.CONNECTED ||
-                connectionStatus.groupFormed != gr.hua.aurora.wifidirect.WifiDirectGroupFormedState.YES
-            ) {
-                return NearbyWifiDirectSocketControlsState(
-                    canStartServer = false,
-                    canConnectClient = false,
-                    canSendPing = false,
-                    canCloseSocket = false,
-                    helpText = "Wi-Fi Direct group not formed."
-                )
-            }
-
-            when (connectionStatus.role) {
-                WifiDirectSocketRole.SERVER.toConnectionRole() -> NearbyWifiDirectSocketControlsState(
-                    canStartServer = true,
-                    canConnectClient = false,
-                    canSendPing = false,
-                    canCloseSocket = false
-                )
-                WifiDirectSocketRole.CLIENT.toConnectionRole() -> {
-                    val ownerAddress = connectionStatus.groupOwnerAddress?.trim()
-                        ?.takeIf { it.isNotEmpty() }
-                    NearbyWifiDirectSocketControlsState(
-                        canStartServer = false,
-                        canConnectClient = ownerAddress != null,
-                        canSendPing = false,
-                        canCloseSocket = false,
-                        connectHost = ownerAddress,
-                        helpText = if (ownerAddress == null) {
-                            "Group owner address unavailable."
-                        } else {
-                            null
-                        }
-                    )
-                }
-                else -> NearbyWifiDirectSocketControlsState(
-                    canStartServer = false,
-                    canConnectClient = false,
-                    canSendPing = false,
-                    canCloseSocket = false,
-                    helpText = "Wi-Fi Direct role unavailable."
-                )
-            }
-        }
-    }
+    return wifiDirectSocketCommandAvailability(
+        runtimeStatus = runtimeStatus,
+        diagnostics = diagnostics
+    ).toNearbySocketControlsState()
 }
 
 internal fun nearbyWifiDirectPeerListValue(
@@ -577,24 +516,13 @@ internal fun nearbyWifiDirectEnabledValue(
     return wifiDirectEnabledSummary(state)
 }
 
-private fun nearbyWifiDirectSocketActivityHint(
-    state: WifiDirectSocketState
-): String? {
-    return when (state) {
-        WifiDirectSocketState.STARTING_SERVER -> "Starting debug socket server."
-        WifiDirectSocketState.SERVER_LISTENING -> "Waiting for a socket client."
-        WifiDirectSocketState.CONNECTING -> "Connecting to the group owner socket."
-        WifiDirectSocketState.CLOSING -> "Closing Wi-Fi Direct debug socket."
-        WifiDirectSocketState.IDLE,
-        WifiDirectSocketState.CONNECTED,
-        WifiDirectSocketState.FAILED -> null
-    }
-}
-
-private fun WifiDirectSocketRole.toConnectionRole(): gr.hua.aurora.wifidirect.WifiDirectConnectionRole {
-    return when (this) {
-        WifiDirectSocketRole.SERVER -> gr.hua.aurora.wifidirect.WifiDirectConnectionRole.GROUP_OWNER
-        WifiDirectSocketRole.CLIENT -> gr.hua.aurora.wifidirect.WifiDirectConnectionRole.CLIENT
-        WifiDirectSocketRole.UNKNOWN -> gr.hua.aurora.wifidirect.WifiDirectConnectionRole.UNKNOWN
-    }
+private fun WifiDirectSocketCommandAvailability.toNearbySocketControlsState(): NearbyWifiDirectSocketControlsState {
+    return NearbyWifiDirectSocketControlsState(
+        canStartServer = canStartServer,
+        canConnectClient = canConnectClient,
+        canSendPing = canSendPing,
+        canCloseSocket = canCloseSocket,
+        connectHost = connectHost,
+        helpText = helpText
+    )
 }

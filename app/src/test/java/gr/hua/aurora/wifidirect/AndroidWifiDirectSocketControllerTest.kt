@@ -1,5 +1,8 @@
 package gr.hua.aurora.wifidirect
 
+import java.io.IOException
+import java.net.ServerSocket
+import java.net.Socket
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -134,6 +137,91 @@ class AndroidWifiDirectSocketControllerTest {
         }
     }
 
+    @Test
+    fun serverStartFailureMapsToFailedWithSafeError() {
+        val controller = AndroidWifiDirectSocketController(
+            requestedPort = 0,
+            createServerSocket = {
+                throw IOException("bind failed")
+            }
+        )
+
+        try {
+            controller.startServer(hostHint = "192.168.49.1")
+
+            awaitCondition {
+                controller.currentDiagnostics().state == WifiDirectSocketState.FAILED
+            }
+
+            assertEquals(
+                "Debug socket server failed: IOException",
+                controller.currentDiagnostics().lastError
+            )
+        } finally {
+            controller.dispose()
+        }
+    }
+
+    @Test
+    fun clientConnectFailureMapsToFailedWithSafeError() {
+        val controller = AndroidWifiDirectSocketController(
+            requestedPort = 8988,
+            createClientSocket = {
+                object : Socket() {
+                    override fun connect(endpoint: java.net.SocketAddress?, timeout: Int) {
+                        throw IOException("connect failed")
+                    }
+                }
+            }
+        )
+
+        try {
+            controller.connectClient("127.0.0.1")
+
+            awaitCondition {
+                controller.currentDiagnostics().state == WifiDirectSocketState.FAILED
+            }
+
+            assertEquals(
+                "Debug socket connect failed: IOException",
+                controller.currentDiagnostics().lastError
+            )
+        } finally {
+            controller.dispose()
+        }
+    }
+
+    @Test
+    fun closeReleasesListeningSocketSoPortCanBeReused() {
+        val port = availableLocalPort()
+        val firstController = AndroidWifiDirectSocketController(requestedPort = port)
+
+        try {
+            firstController.startServer(hostHint = "192.168.49.1")
+            awaitCondition {
+                firstController.currentDiagnostics().state == WifiDirectSocketState.SERVER_LISTENING
+            }
+
+            firstController.closeSocket()
+            awaitCondition {
+                firstController.currentDiagnostics().state == WifiDirectSocketState.IDLE
+            }
+
+            val secondController = AndroidWifiDirectSocketController(requestedPort = port)
+            try {
+                secondController.startServer(hostHint = "192.168.49.1")
+                awaitCondition {
+                    secondController.currentDiagnostics().state == WifiDirectSocketState.SERVER_LISTENING
+                }
+                assertTrue((secondController.currentDiagnostics().endpoint?.port ?: 0) == port)
+            } finally {
+                secondController.dispose()
+            }
+        } finally {
+            firstController.dispose()
+        }
+    }
+
     private fun awaitCondition(
         timeoutMillis: Long = 5_000L,
         condition: () -> Boolean
@@ -144,6 +232,12 @@ class AndroidWifiDirectSocketControllerTest {
                 throw AssertionError("Timed out waiting for socket condition.")
             }
             Thread.sleep(25L)
+        }
+    }
+
+    private fun availableLocalPort(): Int {
+        return ServerSocket(0).use { serverSocket ->
+            serverSocket.localPort
         }
     }
 }
