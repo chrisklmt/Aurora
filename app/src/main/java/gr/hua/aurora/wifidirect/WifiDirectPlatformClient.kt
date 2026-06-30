@@ -8,12 +8,6 @@ import android.net.wifi.p2p.WifiP2pInfo
 import android.net.wifi.p2p.WifiP2pManager
 import android.os.Looper
 
-internal data class WifiDirectConnectionSnapshot(
-    val groupFormed: WifiDirectGroupFormedState = WifiDirectGroupFormedState.UNKNOWN,
-    val role: WifiDirectConnectionRole = WifiDirectConnectionRole.UNKNOWN,
-    val groupOwnerAddress: String? = null
-)
-
 internal interface WifiDirectPlatformClient {
     fun discoverPeers(
         onSuccess: () -> Unit,
@@ -229,44 +223,4 @@ internal class AndroidWifiDirectPlatformClient private constructor(
             )
         }
     }
-}
-
-internal fun wifiDirectConnectionSnapshot(
-    groupFormed: Boolean?,
-    isGroupOwner: Boolean?,
-    groupOwnerAddress: String?
-): WifiDirectConnectionSnapshot {
-    val normalizedGroupOwnerAddress = groupOwnerAddress?.trim()?.takeIf { it.isNotEmpty() }
-    val groupFormedState = when (groupFormed) {
-        true -> WifiDirectGroupFormedState.YES
-        false -> WifiDirectGroupFormedState.NO
-        null -> WifiDirectGroupFormedState.UNKNOWN
-    }
-    val role = when {
-        groupFormed != true -> WifiDirectConnectionRole.UNKNOWN
-        isGroupOwner == true -> WifiDirectConnectionRole.GROUP_OWNER
-        isGroupOwner == false -> WifiDirectConnectionRole.CLIENT
-        else -> WifiDirectConnectionRole.UNKNOWN
-    }
-    return WifiDirectConnectionSnapshot(
-        groupFormed = groupFormedState,
-        role = role,
-        groupOwnerAddress = normalizedGroupOwnerAddress
-    )
-}
-
-internal fun wifiDirectConnectionSnapshot(
-    info: WifiP2pInfo
-): WifiDirectConnectionSnapshot {
-    return wifiDirectConnectionSnapshot(
-        groupFormed = info.groupFormed,
-        isGroupOwner = if (info.groupFormed) info.isGroupOwner else null,
-        groupOwnerAddress = info.groupOwnerAddress?.hostAddress
-    )
-}
-
-internal fun wifiDirectGroupOwnerAddress(
-    group: WifiP2pGroup?
-): String? {
-    return group?.owner?.deviceAddress?.trim()?.takeIf { it.isNotEmpty() }
 }

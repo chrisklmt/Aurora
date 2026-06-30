@@ -95,87 +95,41 @@ class AndroidWifiDirectController internal constructor(
 
     override fun connectToPeer(peer: WifiDirectPeer) {
         val permissionStatus = readPermissionStatusSafely()
-        val blockReason = wifiDirectDiscoveryBlockedReason(permissionStatus)
-        val normalizedPeer = WifiDirectPeerMapper.normalizePeer(peer)
-        if (blockReason != null) {
-            connectionStatus = wifiDirectConnectionFailureStatus(
-                current = connectionStatus,
-                targetPeer = normalizedPeer,
-                reason = blockReason
-            )
-            emit(permissionStatus)
-            return
-        }
-        val client = platformClient
-        if (client == null) {
-            connectionStatus = wifiDirectConnectionFailureStatus(
-                current = connectionStatus,
-                targetPeer = normalizedPeer,
-                reason = "Wi-Fi Direct unsupported on this device."
-            )
-            emit(permissionStatus)
-            return
-        }
-        val targetPeer = visiblePeerOrNull(normalizedPeer)
-        if (targetPeer == null) {
-            connectionStatus = wifiDirectConnectionFailureStatus(
-                current = connectionStatus,
-                targetPeer = normalizedPeer,
-                reason = "Selected Wi-Fi Direct peer is no longer visible."
-            )
-            emit(permissionStatus)
-            return
-        }
-        if (targetPeer.deviceAddress.isNullOrBlank()) {
-            connectionStatus = wifiDirectConnectionFailureStatus(
-                current = connectionStatus,
-                targetPeer = targetPeer,
-                reason = "Selected Wi-Fi Direct peer address unavailable."
-            )
-            emit(permissionStatus)
-            return
-        }
-
-        when (connectionStatus.state) {
-            WifiDirectConnectionState.CONNECTING -> {
-                if (wifiDirectPeerMatches(connectionStatus.targetPeer, targetPeer)) {
-                    emit(permissionStatus)
-                } else {
-                    connectionStatus = wifiDirectConnectionFailureStatus(
-                        current = connectionStatus,
-                        targetPeer = targetPeer,
-                        reason = "Wi-Fi Direct connection already in progress."
-                    )
-                    emit(permissionStatus)
-                }
-                return
-            }
-            WifiDirectConnectionState.CONNECTED -> {
-                if (wifiDirectPeerMatches(connectionStatus.targetPeer, targetPeer)) {
-                    clearConnectionError()
-                    requestConnectionSnapshot(client)
-                } else {
-                    connectionStatus = wifiDirectConnectionFailureStatus(
-                        current = connectionStatus,
-                        targetPeer = targetPeer,
-                        reason = "Disconnect current Wi-Fi Direct peer first."
-                    )
-                    emit(permissionStatus)
-                }
-                return
-            }
-            WifiDirectConnectionState.DISCONNECTING -> {
+        val decision = wifiDirectConnectCommandDecision(
+            permissionStatus = permissionStatus,
+            platformClientAvailable = platformClient != null,
+            currentConnectionStatus = connectionStatus,
+            visiblePeers = peers,
+            requestedPeer = peer
+        )
+        when (decision) {
+            is WifiDirectConnectCommandDecision.Blocked -> {
                 connectionStatus = wifiDirectConnectionFailureStatus(
                     current = connectionStatus,
-                    targetPeer = targetPeer,
-                    reason = "Wi-Fi Direct disconnect already in progress."
+                    targetPeer = decision.targetPeer,
+                    reason = decision.reason
                 )
                 emit(permissionStatus)
                 return
             }
-            WifiDirectConnectionState.DISCONNECTED,
-            WifiDirectConnectionState.FAILED -> Unit
+            is WifiDirectConnectCommandDecision.Allowed -> {
+                if (connectionStatus.state == WifiDirectConnectionState.CONNECTED &&
+                    wifiDirectPeerMatches(connectionStatus.targetPeer, decision.targetPeer)
+                ) {
+                    clearConnectionError()
+                    platformClient?.let(::requestConnectionSnapshot)
+                    return
+                }
+                if (connectionStatus.state == WifiDirectConnectionState.CONNECTING &&
+                    wifiDirectPeerMatches(connectionStatus.targetPeer, decision.targetPeer)
+                ) {
+                    emit(permissionStatus)
+                    return
+                }
+            }
         }
+        val client = platformClient ?: return
+        val targetPeer = (decision as WifiDirectConnectCommandDecision.Allowed).targetPeer
 
         connectionStatus = connectionStatus.copy(
             state = WifiDirectConnectionState.CONNECTING,
@@ -395,12 +349,6 @@ class AndroidWifiDirectController internal constructor(
         )
     }
 
-    private fun visiblePeerOrNull(targetPeer: WifiDirectPeer): WifiDirectPeer? {
-        return peers.firstOrNull { peer ->
-            wifiDirectPeerMatches(peer, targetPeer)
-        }
-    }
-
     private fun buildRuntimeStatus(): WifiDirectRuntimeStatus {
         val permissionStatus = readPermissionStatusSafely()
         val blockReason = wifiDirectDiscoveryBlockedReason(permissionStatus)
@@ -489,80 +437,4 @@ class AndroidWifiDirectController internal constructor(
     private fun touch() {
         lastUpdatedAtMillis = nowMillis()
     }
-}
-
-internal fun wifiDirectConnectionStatusFromSnapshot(
-    current: WifiDirectConnectionStatus,
-    snapshot: WifiDirectConnectionSnapshot
-): WifiDirectConnectionStatus {
-    val resolvedState = when (snapshot.groupFormed) {
-        WifiDirectGroupFormedState.YES -> WifiDirectConnectionState.CONNECTED
-        WifiDirectGroupFormedState.NO -> when (current.state) {
-            WifiDirectConnectionState.CONNECTING -> WifiDirectConnectionState.CONNECTING
-            WifiDirectConnectionState.DISCONNECTING -> WifiDirectConnectionState.DISCONNECTING
-            else -> WifiDirectConnectionState.DISCONNECTED
-        }
-        WifiDirectGroupFormedState.UNKNOWN -> when (current.state) {
-            WifiDirectConnectionState.CONNECTING,
-            WifiDirectConnectionState.DISCONNECTING -> current.state
-            WifiDirectConnectionState.CONNECTED -> WifiDirectConnectionState.CONNECTED
-            else -> WifiDirectConnectionState.DISCONNECTED
-        }
-    }
-    return current.copy(
-        state = resolvedState,
-        groupFormed = snapshot.groupFormed,
-        role = snapshot.role,
-        groupOwnerAddress = snapshot.groupOwnerAddress,
-        lastError = if (resolvedState == WifiDirectConnectionState.CONNECTED) {
-            null
-        } else {
-            current.lastError
-        }
-    )
-}
-
-internal fun wifiDirectConnectionFailureStatus(
-    current: WifiDirectConnectionStatus,
-    targetPeer: WifiDirectPeer?,
-    reason: String
-): WifiDirectConnectionStatus {
-    return current.copy(
-        state = WifiDirectConnectionState.FAILED,
-        targetPeer = targetPeer ?: current.targetPeer,
-        groupFormed = WifiDirectGroupFormedState.UNKNOWN,
-        role = WifiDirectConnectionRole.UNKNOWN,
-        groupOwnerAddress = null,
-        lastError = reason
-    )
-}
-
-internal fun wifiDirectDisconnectedStatus(
-    current: WifiDirectConnectionStatus,
-    keepLastError: Boolean = false,
-    lastError: String? = current.lastError
-): WifiDirectConnectionStatus {
-    return current.copy(
-        state = WifiDirectConnectionState.DISCONNECTED,
-        targetPeer = null,
-        groupFormed = WifiDirectGroupFormedState.UNKNOWN,
-        role = WifiDirectConnectionRole.UNKNOWN,
-        groupOwnerAddress = null,
-        lastError = if (keepLastError) lastError else null
-    )
-}
-
-internal fun wifiDirectPeerMatches(
-    left: WifiDirectPeer?,
-    right: WifiDirectPeer?
-): Boolean {
-    if (left == null || right == null) return false
-    val leftAddress = left.deviceAddress?.trim()?.uppercase()?.takeIf { it.isNotEmpty() }
-    val rightAddress = right.deviceAddress?.trim()?.uppercase()?.takeIf { it.isNotEmpty() }
-    if (leftAddress != null && rightAddress != null) {
-        return leftAddress == rightAddress
-    }
-    val leftName = left.deviceName?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }
-    val rightName = right.deviceName?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }
-    return leftName != null && leftName == rightName
 }
