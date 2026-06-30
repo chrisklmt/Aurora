@@ -18,11 +18,15 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 internal data class RememberedWifiDirectSocketState(
     val diagnostics: WifiDirectSocketDiagnostics,
     val adapterDiagnostics: WifiDirectTransportAdapterDiagnostics,
+    val sendBridgeDiagnostics: WifiDirectSendBridgeDiagnostics,
     val receiveBridgeDiagnostics: WifiDirectReceiveBridgeDiagnostics,
     val startServer: (String?) -> Unit,
     val connectClient: (String) -> Unit,
     val sendFrame: () -> Unit,
     val sendAdapterFrame: () -> Unit,
+    val sendBridgedFrame: () -> Unit,
+    val setSendBridgeEnabled: (Boolean) -> Unit,
+    val disableSendBridge: () -> Unit,
     val setReceiveBridgeEnabled: (Boolean) -> Unit,
     val disableReceiveBridge: () -> Unit,
     val closeSocket: () -> Unit
@@ -58,11 +62,17 @@ internal fun rememberWifiDirectSocketState(
     val receiveBridge = remember(processReceiveBridgeFrame) {
         processReceiveBridgeFrame?.let(::WifiDirectReceiveBridge)
     }
+    val sendBridge = remember(transportAdapter) {
+        WifiDirectSendBridge(transportAdapter)
+    }
     var diagnostics by remember(resolvedController) {
         mutableStateOf(resolvedController.currentDiagnostics())
     }
     var adapterDiagnostics by remember(transportAdapter) {
         mutableStateOf(transportAdapter.currentDiagnostics())
+    }
+    var sendBridgeDiagnostics by remember(sendBridge) {
+        mutableStateOf(sendBridge.currentDiagnostics())
     }
     var receiveBridgeDiagnostics by remember(receiveBridge) {
         mutableStateOf(
@@ -90,6 +100,21 @@ internal fun rememberWifiDirectSocketState(
             transportAdapter.submit(wifiDirectSyntheticTransportFrame())
         }
     }
+    val sendBridgedFrame = remember(sendBridge) {
+        {
+            sendBridge.submit(wifiDirectSyntheticTransportFrame())
+        }
+    }
+    val setSendBridgeEnabled = remember(sendBridge) {
+        { enabled: Boolean ->
+            sendBridge.setEnabled(enabled)
+        }
+    }
+    val disableSendBridge = remember(sendBridge) {
+        {
+            sendBridge.disable()
+        }
+    }
     val setReceiveBridgeEnabled = remember(receiveBridge) {
         { enabled: Boolean ->
             receiveBridge?.setEnabled(enabled)
@@ -109,7 +134,7 @@ internal fun rememberWifiDirectSocketState(
         }
     }
 
-    DisposableEffect(resolvedController, mainHandler, receiveBridge) {
+    DisposableEffect(resolvedController, mainHandler, sendBridge, receiveBridge) {
         val listener = object : WifiDirectSocketController.Listener {
             override fun onSocketDiagnosticsChanged(diagnosticsUpdate: WifiDirectSocketDiagnostics) {
                 mainHandler.post {
@@ -133,6 +158,15 @@ internal fun rememberWifiDirectSocketState(
                 }
             }
         }
+        val sendBridgeListener = object : WifiDirectSendBridge.Listener {
+            override fun onSendBridgeDiagnosticsChanged(
+                diagnosticsUpdate: WifiDirectSendBridgeDiagnostics
+            ) {
+                mainHandler.post {
+                    sendBridgeDiagnostics = diagnosticsUpdate
+                }
+            }
+        }
         val receiveBridgeListener = object : WifiDirectReceiveBridge.Listener {
             override fun onReceiveBridgeDiagnosticsChanged(
                 diagnosticsUpdate: WifiDirectReceiveBridgeDiagnostics
@@ -145,10 +179,12 @@ internal fun rememberWifiDirectSocketState(
 
         resolvedController.addListener(listener)
         transportAdapter.addListener(adapterListener)
+        sendBridge.addListener(sendBridgeListener)
         receiveBridge?.addListener(receiveBridgeListener)
         onDispose {
             resolvedController.removeListener(listener)
             transportAdapter.removeListener(adapterListener)
+            sendBridge.removeListener(sendBridgeListener)
             receiveBridge?.removeListener(receiveBridgeListener)
             transportAdapter.dispose()
             resolvedController.dispose()
@@ -183,11 +219,15 @@ internal fun rememberWifiDirectSocketState(
     return RememberedWifiDirectSocketState(
         diagnostics = diagnostics,
         adapterDiagnostics = adapterDiagnostics,
+        sendBridgeDiagnostics = sendBridgeDiagnostics,
         receiveBridgeDiagnostics = receiveBridgeDiagnostics,
         startServer = startServer,
         connectClient = connectClient,
         sendFrame = sendFrame,
         sendAdapterFrame = sendAdapterFrame,
+        sendBridgedFrame = sendBridgedFrame,
+        setSendBridgeEnabled = setSendBridgeEnabled,
+        disableSendBridge = disableSendBridge,
         setReceiveBridgeEnabled = setReceiveBridgeEnabled,
         disableReceiveBridge = disableReceiveBridge,
         closeSocket = closeSocket

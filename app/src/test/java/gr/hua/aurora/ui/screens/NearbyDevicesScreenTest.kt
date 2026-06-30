@@ -28,6 +28,7 @@ import gr.hua.aurora.wifidirect.WifiDirectSocketEndpoint
 import gr.hua.aurora.wifidirect.WifiDirectSocketRole
 import gr.hua.aurora.wifidirect.WifiDirectSocketState
 import gr.hua.aurora.wifidirect.WifiDirectReceiveBridgeDiagnostics
+import gr.hua.aurora.wifidirect.WifiDirectSendBridgeDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectTransportState
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -560,7 +561,21 @@ class NearbyDevicesScreenTest {
                         )
                     ),
                     DebugInfoSection(
-                        title = "Bridge",
+                        title = "Send bridge",
+                        items = listOf(
+                            DebugInfoItem("Bridge", "disabled"),
+                            DebugInfoItem("Submitted", "0"),
+                            DebugInfoItem("Failures", "0"),
+                            DebugInfoItem("Last size", "none"),
+                            DebugInfoItem(
+                                "Note",
+                                "Debug send bridge only; normal chat sending still uses BLE.",
+                                preferFullWidth = true
+                            )
+                        )
+                    ),
+                    DebugInfoSection(
+                        title = "Receive bridge",
                         items = listOf(
                             DebugInfoItem("Bridge", "disabled"),
                             DebugInfoItem("Bridged", "0"),
@@ -599,7 +614,7 @@ class NearbyDevicesScreenTest {
     fun nearbyWifiDirectReceiveBridgeDebugSectionShowsCompactDiagnostics() {
         assertEquals(
             DebugInfoSection(
-                title = "Bridge",
+                title = "Receive bridge",
                 items = listOf(
                     DebugInfoItem("Bridge", "enabled"),
                     DebugInfoItem("Bridged", "2"),
@@ -624,6 +639,40 @@ class NearbyDevicesScreenTest {
                     bridgeFailures = 1,
                     lastBridgedFrameSize = 18,
                     lastBridgeError = "Invalid Aurora transport frame payload."
+                )
+            )
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectSendBridgeDebugSectionShowsCompactDiagnostics() {
+        assertEquals(
+            DebugInfoSection(
+                title = "Send bridge",
+                items = listOf(
+                    DebugInfoItem("Bridge", "enabled"),
+                    DebugInfoItem("Submitted", "2"),
+                    DebugInfoItem("Failures", "1"),
+                    DebugInfoItem("Last size", "18 B"),
+                    DebugInfoItem(
+                        "Last error",
+                        "Wi-Fi Direct send bridge disabled.",
+                        preferFullWidth = true
+                    ),
+                    DebugInfoItem(
+                        "Note",
+                        "Debug send bridge only; normal chat sending still uses BLE.",
+                        preferFullWidth = true
+                    )
+                )
+            ),
+            buildNearbyWifiDirectSendBridgeDebugSection(
+                diagnostics = WifiDirectSendBridgeDiagnostics(
+                    enabled = true,
+                    framesSubmitted = 2,
+                    submitFailures = 1,
+                    lastSubmittedFrameSize = 18,
+                    lastSendBridgeError = "Wi-Fi Direct send bridge disabled."
                 )
             )
         )
@@ -1079,6 +1128,7 @@ class NearbyDevicesScreenTest {
                 canConnectClient = false,
                 canSendFrame = true,
                 canSendAdapterFrame = true,
+                canSendBridgedFrame = false,
                 canCloseSocket = true
             ),
             nearbyWifiDirectSocketControlsState(
@@ -1097,6 +1147,41 @@ class NearbyDevicesScreenTest {
                 ),
                 adapterDiagnostics = gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics(
                     state = gr.hua.aurora.wifidirect.WifiDirectTransportAdapterState.READY
+                )
+            )
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectSocketControlsEnableBridgedFrameOnlyWhenSendBridgeAndAdapterAreReady() {
+        assertEquals(
+            NearbyWifiDirectSocketControlsState(
+                canStartServer = false,
+                canConnectClient = false,
+                canSendFrame = true,
+                canSendAdapterFrame = true,
+                canSendBridgedFrame = true,
+                canCloseSocket = true
+            ),
+            nearbyWifiDirectSocketControlsState(
+                runtimeStatus = wifiDirectRuntimeStatus(
+                    connectionStatus = WifiDirectConnectionStatus(
+                        state = WifiDirectConnectionState.CONNECTED,
+                        groupFormed = WifiDirectGroupFormedState.YES,
+                        role = WifiDirectConnectionRole.CLIENT,
+                        groupOwnerAddress = "192.168.49.1"
+                    )
+                ),
+                diagnostics = WifiDirectSocketDiagnostics(
+                    state = WifiDirectSocketState.CONNECTED,
+                    role = WifiDirectSocketRole.CLIENT,
+                    isConnected = true
+                ),
+                adapterDiagnostics = gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics(
+                    state = gr.hua.aurora.wifidirect.WifiDirectTransportAdapterState.READY
+                ),
+                sendBridgeDiagnostics = WifiDirectSendBridgeDiagnostics(
+                    enabled = true
                 )
             )
         )

@@ -189,12 +189,14 @@ fun NearbyDevicesScreen(
         wifiDirectRuntimeStatus = wifiDirectRuntimeStatus,
         wifiDirectSocketDiagnostics = wifiDirectSocketState.diagnostics,
         wifiDirectAdapterDiagnostics = wifiDirectSocketState.adapterDiagnostics,
+        wifiDirectSendBridgeDiagnostics = wifiDirectSocketState.sendBridgeDiagnostics,
         wifiDirectReceiveBridgeDiagnostics = wifiDirectSocketState.receiveBridgeDiagnostics,
         identityHandlerStatus = identityHandlerStatus,
         peerSessionDiagnostics = peerSessionDiagnostics
     )
     val handleResetLocalData = remember(wifiDirectSocketState, onResetLocalData) {
         {
+            wifiDirectSocketState.disableSendBridge()
             wifiDirectSocketState.disableReceiveBridge()
             onResetLocalData()
         }
@@ -324,6 +326,7 @@ fun NearbyDevicesScreen(
                             runtimeStatus = wifiDirectRuntimeStatus,
                             socketDiagnostics = wifiDirectSocketState.diagnostics,
                             adapterDiagnostics = wifiDirectSocketState.adapterDiagnostics,
+                            sendBridgeDiagnostics = wifiDirectSocketState.sendBridgeDiagnostics,
                             receiveBridgeDiagnostics = wifiDirectSocketState.receiveBridgeDiagnostics,
                             onStartDiscovery = onStartWifiDirectDiscovery,
                             onStopDiscovery = onStopWifiDirectDiscovery,
@@ -333,6 +336,8 @@ fun NearbyDevicesScreen(
                             onConnectSocketClient = wifiDirectSocketState.connectClient,
                             onSendSocketFrame = wifiDirectSocketState.sendFrame,
                             onSendAdapterFrame = wifiDirectSocketState.sendAdapterFrame,
+                            onSendBridgedFrame = wifiDirectSocketState.sendBridgedFrame,
+                            onSetSendBridgeEnabled = wifiDirectSocketState.setSendBridgeEnabled,
                             onSetReceiveBridgeEnabled = wifiDirectSocketState.setReceiveBridgeEnabled,
                             onCloseSocket = wifiDirectSocketState.closeSocket
                         )
@@ -1397,6 +1402,8 @@ internal fun buildNearbyDebugCard(
     wifiDirectSocketDiagnostics: gr.hua.aurora.wifidirect.WifiDirectSocketDiagnostics,
     wifiDirectAdapterDiagnostics: gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics =
         gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics(),
+    wifiDirectSendBridgeDiagnostics: gr.hua.aurora.wifidirect.WifiDirectSendBridgeDiagnostics =
+        gr.hua.aurora.wifidirect.WifiDirectSendBridgeDiagnostics(),
     wifiDirectReceiveBridgeDiagnostics: gr.hua.aurora.wifidirect.WifiDirectReceiveBridgeDiagnostics =
         gr.hua.aurora.wifidirect.WifiDirectReceiveBridgeDiagnostics(),
     identityHandlerStatus: String,
@@ -1425,6 +1432,9 @@ internal fun buildNearbyDebugCard(
             ),
             buildNearbyWifiDirectAdapterDebugSection(
                 diagnostics = wifiDirectAdapterDiagnostics
+            ),
+            buildNearbyWifiDirectSendBridgeDebugSection(
+                diagnostics = wifiDirectSendBridgeDiagnostics
             ),
             buildNearbyWifiDirectReceiveBridgeDebugSection(
                 diagnostics = wifiDirectReceiveBridgeDiagnostics
