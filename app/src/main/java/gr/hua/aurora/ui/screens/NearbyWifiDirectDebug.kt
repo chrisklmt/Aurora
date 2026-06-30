@@ -21,6 +21,7 @@ import gr.hua.aurora.wifidirect.WifiDirectSocketCommandAvailability
 import gr.hua.aurora.wifidirect.WifiDirectSocketDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectSocketState
 import gr.hua.aurora.wifidirect.WifiDirectReceiveBridgeDiagnostics
+import gr.hua.aurora.wifidirect.WifiDirectGlobalDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectSendBridgeDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectSmokeTestDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics
@@ -50,6 +51,7 @@ import gr.hua.aurora.wifidirect.wifiDirectTransportSummary
 import gr.hua.aurora.wifidirect.wifiDirectTransportAdapterByteSummary
 import gr.hua.aurora.wifidirect.wifiDirectTransportAdapterStateSummary
 import gr.hua.aurora.wifidirect.wifiDirectReceiveBridgeStateSummary
+import gr.hua.aurora.wifidirect.wifiDirectGlobalDebugSendStateSummary
 import gr.hua.aurora.wifidirect.wifiDirectSendBridgeStateSummary
 import gr.hua.aurora.wifidirect.wifiDirectSmokeTestStateSummary
 
@@ -392,6 +394,66 @@ internal fun buildNearbyWifiDirectSendBridgeDebugSection(
     )
 }
 
+internal fun buildNearbyWifiDirectGlobalSendDebugSection(
+    diagnostics: WifiDirectGlobalDebugSendDiagnostics
+): DebugInfoSection {
+    val items = buildList {
+        add(
+            DebugInfoItem(
+                "Global send",
+                wifiDirectGlobalDebugSendStateSummary(diagnostics)
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Submitted",
+                diagnostics.globalFramesSubmitted.toString()
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Failures",
+                diagnostics.globalSubmitFailures.toString()
+            )
+        )
+        diagnostics.lastGlobalSendResult?.takeIf { it.isNotBlank() }?.let { resultText ->
+            add(
+                DebugInfoItem(
+                    "Last result",
+                    resultText
+                )
+            )
+        }
+        add(
+            DebugInfoItem(
+                "Last size",
+                wifiDirectFrameSizeSummary(diagnostics.lastGlobalFrameSize)
+            )
+        )
+        diagnostics.lastGlobalSendError?.takeIf { it.isNotBlank() }?.let { errorText ->
+            add(
+                DebugInfoItem(
+                    "Last error",
+                    errorText,
+                    preferFullWidth = true
+                )
+            )
+        }
+        add(
+            DebugInfoItem(
+                "Note",
+                diagnostics.note,
+                preferFullWidth = true
+            )
+        )
+    }
+
+    return DebugInfoSection(
+        title = "Global send",
+        items = items
+    )
+}
+
 internal fun buildNearbyWifiDirectSmokeTestDebugSection(
     diagnostics: WifiDirectSmokeTestDiagnostics
 ): DebugInfoSection {
@@ -701,6 +763,7 @@ internal fun NearbyWifiDirectDebugControls(
     socketDiagnostics: WifiDirectSocketDiagnostics,
     adapterDiagnostics: WifiDirectTransportAdapterDiagnostics,
     sendBridgeDiagnostics: WifiDirectSendBridgeDiagnostics,
+    globalSendDiagnostics: WifiDirectGlobalDebugSendDiagnostics,
     smokeTestDiagnostics: WifiDirectSmokeTestDiagnostics,
     receiveBridgeDiagnostics: WifiDirectReceiveBridgeDiagnostics,
     onStartDiscovery: () -> Unit,
@@ -713,6 +776,7 @@ internal fun NearbyWifiDirectDebugControls(
     onSendAdapterFrame: () -> Unit,
     onSendBridgedFrame: () -> Unit,
     onSendSmokeTestFrame: () -> Unit,
+    onSetGlobalDebugSendEnabled: (Boolean) -> Unit,
     onSetSendBridgeEnabled: (Boolean) -> Unit,
     onSetReceiveBridgeEnabled: (Boolean) -> Unit,
     onCloseSocket: () -> Unit
@@ -779,6 +843,19 @@ internal fun NearbyWifiDirectDebugControls(
         ) {
             TextButton(
                 onClick = {
+                    onSetGlobalDebugSendEnabled(!globalSendDiagnostics.enabled)
+                }
+            ) {
+                Text(
+                    if (globalSendDiagnostics.enabled) {
+                        "Disable Global send"
+                    } else {
+                        "Enable Global send"
+                    }
+                )
+            }
+            TextButton(
+                onClick = {
                     onSetSendBridgeEnabled(!sendBridgeDiagnostics.enabled)
                 }
             ) {
@@ -803,6 +880,11 @@ internal fun NearbyWifiDirectDebugControls(
                     }
                 )
             }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             TextButton(
                 onClick = onSendSocketFrame,
                 enabled = socketControlsState.canSendFrame
@@ -839,6 +921,11 @@ internal fun NearbyWifiDirectDebugControls(
                 Text("Close socket")
             }
         }
+        Text(
+            text = "Wi-Fi Direct Global send: ${wifiDirectGlobalDebugSendStateSummary(globalSendDiagnostics)}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
         Text(
             text = "Wi-Fi Direct send bridge: ${wifiDirectSendBridgeStateSummary(sendBridgeDiagnostics)}",
             style = MaterialTheme.typography.bodySmall,

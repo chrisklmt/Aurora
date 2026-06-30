@@ -19,6 +19,7 @@ import gr.hua.aurora.ui.screens.GlobalChatScreen
 import gr.hua.aurora.ui.screens.NearbyDevicesScreen
 import gr.hua.aurora.ui.screens.PrivateChatScreen
 import gr.hua.aurora.ui.screens.SettingsScreen
+import gr.hua.aurora.wifidirect.rememberWifiDirectSocketState
 import kotlinx.coroutines.launch
 
 @Composable
@@ -33,7 +34,14 @@ fun NavGraph(
     val nearbyVisiblePeerIds = bleRuntimeState.discoveredAuroraPeers
         .mapNotNull(::nearbyContactPeerId)
         .toSet()
+    val wifiDirectSocketState = rememberWifiDirectSocketState(
+        runtimeStatus = bleRuntimeState.wifiDirectRuntimeStatus,
+        processReceiveBridgeFrame = bleRuntimeState.receiveWifiDirectDebugTransportFrame
+    )
     val onResetLocalData: () -> Unit = {
+        wifiDirectSocketState.disableGlobalDebugSend()
+        wifiDirectSocketState.disableSendBridge()
+        wifiDirectSocketState.disableReceiveBridge()
         bleRuntimeState.resetLocalIdentityAndSessions()
         stateHolder.resetLocalData()
     }
@@ -83,7 +91,13 @@ fun NavGraph(
                             val transportResult = submitGlobalQueuedMessage(
                                 queuedMessage = queuedMessage,
                                 currentUsername = { stateHolder.uiState.globalChatUsername },
-                                submitTransport = bleRuntimeState.submitGlobalMeshMessage
+                                submitTransport = bleRuntimeState.submitGlobalMeshMessage,
+                                submitWifiDirectDebugTransport =
+                                if (wifiDirectSocketState.globalDebugSendDiagnostics.enabled) {
+                                    wifiDirectSocketState.sendGlobalDebugMessage
+                                } else {
+                                    null
+                                }
                             )
                             stateHolder.handleGlobalMeshDeliveryResult(
                                 messageId = queuedMessage.messageId,
@@ -99,7 +113,13 @@ fun NavGraph(
                             val transportResult = submitGlobalQueuedMessage(
                                 queuedMessage = queuedMessage,
                                 currentUsername = { stateHolder.uiState.globalChatUsername },
-                                submitTransport = bleRuntimeState.submitGlobalMeshMessage
+                                submitTransport = bleRuntimeState.submitGlobalMeshMessage,
+                                submitWifiDirectDebugTransport =
+                                if (wifiDirectSocketState.globalDebugSendDiagnostics.enabled) {
+                                    wifiDirectSocketState.sendGlobalDebugMessage
+                                } else {
+                                    null
+                                }
                             )
                             stateHolder.handleGlobalMeshDeliveryResult(
                                 messageId = queuedMessage.messageId,
@@ -219,12 +239,11 @@ fun NavGraph(
                 privateChatIdentitiesByPeerId = uiState.privateChatIdentitiesByPeerId,
                 transportSenderSourceLabel = bleRuntimeState.transportSenderSourceLabel,
                 wifiDirectRuntimeStatus = bleRuntimeState.wifiDirectRuntimeStatus,
+                wifiDirectSocketState = wifiDirectSocketState,
                 onStartWifiDirectDiscovery = bleRuntimeState.startWifiDirectDiscovery,
                 onStopWifiDirectDiscovery = bleRuntimeState.stopWifiDirectDiscovery,
                 onConnectWifiDirectPeer = bleRuntimeState.connectToWifiDirectPeer,
                 onDisconnectWifiDirectPeer = bleRuntimeState.disconnectWifiDirectPeer,
-                onReceiveWifiDirectDebugTransportFrame =
-                bleRuntimeState.receiveWifiDirectDebugTransportFrame,
                 identityHandlerStatus = bleRuntimeState.identityHandlerStatus,
                 peerSessionDiagnostics = bleRuntimeState.peerSessionDiagnostics,
                 activeTransportPeerId = bleRuntimeState.activeTransportPeerId,
@@ -285,18 +304,27 @@ fun NavGraph(
 internal suspend fun submitGlobalQueuedMessage(
     queuedMessage: OutgoingChatMessage,
     currentUsername: () -> String,
-    submitTransport: suspend (OutgoingChatMessage, String) -> GlobalMeshDeliveryResult
+    submitTransport: suspend (OutgoingChatMessage, String) -> GlobalMeshDeliveryResult,
+    submitWifiDirectDebugTransport: ((OutgoingChatMessage, String) -> Unit)? = null
 ): GlobalMeshDeliveryResult {
-    return runCatching {
+    val senderId = currentUsername().trim()
+    val transportResult = runCatching {
         submitTransport(
             queuedMessage,
-            currentUsername().trim()
+            senderId
         )
     }.getOrElse { error ->
         GlobalMeshDeliveryResult.Failed(
             reason = error.message ?: "Public mesh transport submission failed."
         )
     }
+    runCatching {
+        submitWifiDirectDebugTransport?.invoke(
+            queuedMessage,
+            senderId
+        )
+    }
+    return transportResult
 }
 
 internal suspend fun submitPrivateQueuedMessage(

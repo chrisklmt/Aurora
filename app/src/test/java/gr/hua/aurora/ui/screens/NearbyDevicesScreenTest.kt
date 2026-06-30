@@ -20,6 +20,7 @@ import gr.hua.aurora.wifidirect.WifiDirectConnectionRole
 import gr.hua.aurora.wifidirect.WifiDirectConnectionState
 import gr.hua.aurora.wifidirect.WifiDirectConnectionStatus
 import gr.hua.aurora.wifidirect.WifiDirectGroupFormedState
+import gr.hua.aurora.wifidirect.WifiDirectGlobalDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectPeer
 import gr.hua.aurora.wifidirect.WifiDirectPermissionStatus
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
@@ -576,6 +577,20 @@ class NearbyDevicesScreenTest {
                         )
                     ),
                     DebugInfoSection(
+                        title = "Global send",
+                        items = listOf(
+                            DebugInfoItem("Global send", "disabled"),
+                            DebugInfoItem("Submitted", "0"),
+                            DebugInfoItem("Failures", "0"),
+                            DebugInfoItem("Last size", "none"),
+                            DebugInfoItem(
+                                "Note",
+                                "Experimental debug only. Normal chat still uses BLE unless Wi-Fi Direct global send is enabled. Private Chat still uses BLE.",
+                                preferFullWidth = true
+                            )
+                        )
+                    ),
+                    DebugInfoSection(
                         title = "Smoke",
                         items = listOf(
                             DebugInfoItem("Smoke", "not ready"),
@@ -690,6 +705,43 @@ class NearbyDevicesScreenTest {
                     submitFailures = 1,
                     lastSubmittedFrameSize = 18,
                     lastSendBridgeError = "Wi-Fi Direct send bridge disabled."
+                )
+            )
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectGlobalSendDebugSectionShowsCompactDiagnostics() {
+        assertEquals(
+            DebugInfoSection(
+                title = "Global send",
+                items = listOf(
+                    DebugInfoItem("Global send", "enabled"),
+                    DebugInfoItem("Submitted", "3"),
+                    DebugInfoItem("Failures", "1"),
+                    DebugInfoItem("Last result", "failed"),
+                    DebugInfoItem("Last size", "96 B"),
+                    DebugInfoItem(
+                        "Last error",
+                        "Wi-Fi Direct Global send requires the send bridge to be enabled.",
+                        preferFullWidth = true
+                    ),
+                    DebugInfoItem(
+                        "Note",
+                        "Experimental debug only. Normal chat still uses BLE unless Wi-Fi Direct global send is enabled. Private Chat still uses BLE.",
+                        preferFullWidth = true
+                    )
+                )
+            ),
+            buildNearbyWifiDirectGlobalSendDebugSection(
+                diagnostics = WifiDirectGlobalDebugSendDiagnostics(
+                    enabled = true,
+                    globalFramesSubmitted = 3,
+                    globalSubmitFailures = 1,
+                    lastGlobalFrameSize = 96,
+                    lastGlobalSendResult = "failed",
+                    lastGlobalSendError =
+                    "Wi-Fi Direct Global send requires the send bridge to be enabled."
                 )
             )
         )

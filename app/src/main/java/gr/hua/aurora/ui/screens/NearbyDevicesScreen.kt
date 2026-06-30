@@ -63,9 +63,9 @@ import gr.hua.aurora.ui.components.DebugInfoCardModel
 import gr.hua.aurora.ui.components.DebugInfoItem
 import gr.hua.aurora.ui.components.DebugInfoSection
 import gr.hua.aurora.ui.components.buildAuroraAvailabilityUiState
+import gr.hua.aurora.wifidirect.RememberedWifiDirectSocketState
 import gr.hua.aurora.wifidirect.WifiDirectPeer
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
-import gr.hua.aurora.wifidirect.rememberWifiDirectSocketState
 import kotlinx.coroutines.launch
 
 private const val nearbyDevicesLogTag = "NearbyDevicesScreen"
@@ -112,7 +112,7 @@ private data class NearbyBleSessionState(
 )
 
 @Composable
-fun NearbyDevicesScreen(
+internal fun NearbyDevicesScreen(
     nearbyDevices: List<NearbyDevicePreview>,
     contacts: List<AuroraContact>,
     privateChatIdentitiesByPeerId: Map<String, PrivateChatIdentity>,
@@ -128,13 +128,11 @@ fun NearbyDevicesScreen(
     bleConnector: AndroidBleConnector,
     transportSenderSourceLabel: String,
     wifiDirectRuntimeStatus: WifiDirectRuntimeStatus,
+    wifiDirectSocketState: RememberedWifiDirectSocketState,
     onStartWifiDirectDiscovery: () -> Unit,
     onStopWifiDirectDiscovery: () -> Unit,
     onConnectWifiDirectPeer: (WifiDirectPeer) -> Unit,
     onDisconnectWifiDirectPeer: () -> Unit,
-    onReceiveWifiDirectDebugTransportFrame:
-    (gr.hua.aurora.ble.transport.BleGattTransportFrame)
-    -> gr.hua.aurora.ble.transport.BleTransportReceiveResult,
     identityHandlerStatus: String,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
     activeTransportPeerId: String?,
@@ -177,10 +175,6 @@ fun NearbyDevicesScreen(
     var activeIdentityExchangeDeviceKey by remember {
         mutableStateOf<String?>(null)
     }
-    val wifiDirectSocketState = rememberWifiDirectSocketState(
-        runtimeStatus = wifiDirectRuntimeStatus,
-        processReceiveBridgeFrame = onReceiveWifiDirectDebugTransportFrame
-    )
     val debugCard = buildNearbyDebugCard(
         showDebugDiagnostics = showDebugDiagnostics,
         advertiseStatus = bleAdvertiseStatus,
@@ -190,6 +184,7 @@ fun NearbyDevicesScreen(
         wifiDirectSocketDiagnostics = wifiDirectSocketState.diagnostics,
         wifiDirectAdapterDiagnostics = wifiDirectSocketState.adapterDiagnostics,
         wifiDirectSendBridgeDiagnostics = wifiDirectSocketState.sendBridgeDiagnostics,
+        wifiDirectGlobalDebugSendDiagnostics = wifiDirectSocketState.globalDebugSendDiagnostics,
         wifiDirectSmokeTestDiagnostics = wifiDirectSocketState.smokeTestDiagnostics,
         wifiDirectReceiveBridgeDiagnostics = wifiDirectSocketState.receiveBridgeDiagnostics,
         identityHandlerStatus = identityHandlerStatus,
@@ -197,6 +192,7 @@ fun NearbyDevicesScreen(
     )
     val handleResetLocalData = remember(wifiDirectSocketState, onResetLocalData) {
         {
+            wifiDirectSocketState.disableGlobalDebugSend()
             wifiDirectSocketState.disableSendBridge()
             wifiDirectSocketState.disableReceiveBridge()
             onResetLocalData()
@@ -328,6 +324,7 @@ fun NearbyDevicesScreen(
                             socketDiagnostics = wifiDirectSocketState.diagnostics,
                             adapterDiagnostics = wifiDirectSocketState.adapterDiagnostics,
                             sendBridgeDiagnostics = wifiDirectSocketState.sendBridgeDiagnostics,
+                            globalSendDiagnostics = wifiDirectSocketState.globalDebugSendDiagnostics,
                             smokeTestDiagnostics = wifiDirectSocketState.smokeTestDiagnostics,
                             receiveBridgeDiagnostics = wifiDirectSocketState.receiveBridgeDiagnostics,
                             onStartDiscovery = onStartWifiDirectDiscovery,
@@ -342,6 +339,8 @@ fun NearbyDevicesScreen(
                             onSendSmokeTestFrame = {
                                 wifiDirectSocketState.sendSmokeTestFrame(currentUsername)
                             },
+                            onSetGlobalDebugSendEnabled =
+                            wifiDirectSocketState.setGlobalDebugSendEnabled,
                             onSetSendBridgeEnabled = wifiDirectSocketState.setSendBridgeEnabled,
                             onSetReceiveBridgeEnabled = wifiDirectSocketState.setReceiveBridgeEnabled,
                             onCloseSocket = wifiDirectSocketState.closeSocket
@@ -1409,6 +1408,8 @@ internal fun buildNearbyDebugCard(
         gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics(),
     wifiDirectSendBridgeDiagnostics: gr.hua.aurora.wifidirect.WifiDirectSendBridgeDiagnostics =
         gr.hua.aurora.wifidirect.WifiDirectSendBridgeDiagnostics(),
+    wifiDirectGlobalDebugSendDiagnostics: gr.hua.aurora.wifidirect.WifiDirectGlobalDebugSendDiagnostics =
+        gr.hua.aurora.wifidirect.WifiDirectGlobalDebugSendDiagnostics(),
     wifiDirectSmokeTestDiagnostics: gr.hua.aurora.wifidirect.WifiDirectSmokeTestDiagnostics =
         gr.hua.aurora.wifidirect.WifiDirectSmokeTestDiagnostics(),
     wifiDirectReceiveBridgeDiagnostics: gr.hua.aurora.wifidirect.WifiDirectReceiveBridgeDiagnostics =
@@ -1442,6 +1443,9 @@ internal fun buildNearbyDebugCard(
             ),
             buildNearbyWifiDirectSendBridgeDebugSection(
                 diagnostics = wifiDirectSendBridgeDiagnostics
+            ),
+            buildNearbyWifiDirectGlobalSendDebugSection(
+                diagnostics = wifiDirectGlobalDebugSendDiagnostics
             ),
             buildNearbyWifiDirectSmokeTestDebugSection(
                 diagnostics = wifiDirectSmokeTestDiagnostics

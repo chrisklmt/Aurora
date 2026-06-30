@@ -6,6 +6,7 @@ import gr.hua.aurora.protocol.GlobalMeshDeliveryResult
 import gr.hua.aurora.protocol.PrivateChatMessageSendResult
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -24,6 +25,73 @@ class NavGraphSubmissionTest {
 
         assertEquals(
             GlobalMeshDeliveryResult.Failed("writer unavailable"),
+            result
+        )
+    }
+
+    @Test
+    fun globalSubmitAlsoInvokesWifiDirectDebugTransportWhenProvided() = runBlocking {
+        val queuedMessage = sampleOutgoingMessage(threadId = "global")
+        val wifiDirectInvocations = mutableListOf<Pair<String, String>>()
+
+        val result = submitGlobalQueuedMessage(
+            queuedMessage = queuedMessage,
+            currentUsername = { "Chris" },
+            submitTransport = { message, senderId ->
+                assertEquals(queuedMessage, message)
+                assertEquals("Chris", senderId)
+                GlobalMeshDeliveryResult.QueuedToActivePeer("peer-123")
+            },
+            submitWifiDirectDebugTransport = { message, senderId ->
+                wifiDirectInvocations += message.messageId to senderId
+            }
+        )
+
+        assertEquals(
+            GlobalMeshDeliveryResult.QueuedToActivePeer("peer-123"),
+            result
+        )
+        assertEquals(listOf(queuedMessage.messageId to "Chris"), wifiDirectInvocations)
+    }
+
+    @Test
+    fun globalSubmitDoesNotUseWifiDirectDebugTransportWhenNotProvided() = runBlocking {
+        val queuedMessage = sampleOutgoingMessage(threadId = "global")
+        var wifiDirectInvoked = false
+
+        val result = submitGlobalQueuedMessage(
+            queuedMessage = queuedMessage,
+            currentUsername = { "Chris" },
+            submitTransport = { _, _ ->
+                GlobalMeshDeliveryResult.QueuedToActivePeer("peer-123")
+            },
+            submitWifiDirectDebugTransport = null
+        )
+
+        assertEquals(
+            GlobalMeshDeliveryResult.QueuedToActivePeer("peer-123"),
+            result
+        )
+        assertFalse(wifiDirectInvoked)
+    }
+
+    @Test
+    fun globalSubmitDoesNotLetWifiDirectDebugFailuresOverrideBleResult() = runBlocking {
+        val queuedMessage = sampleOutgoingMessage(threadId = "global")
+
+        val result = submitGlobalQueuedMessage(
+            queuedMessage = queuedMessage,
+            currentUsername = { "Chris" },
+            submitTransport = { _, _ ->
+                GlobalMeshDeliveryResult.QueuedToActivePeer("peer-123")
+            },
+            submitWifiDirectDebugTransport = { _, _ ->
+                error("wifi direct bridge unavailable")
+            }
+        )
+
+        assertEquals(
+            GlobalMeshDeliveryResult.QueuedToActivePeer("peer-123"),
             result
         )
     }
