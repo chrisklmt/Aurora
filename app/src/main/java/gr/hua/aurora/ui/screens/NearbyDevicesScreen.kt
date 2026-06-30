@@ -190,6 +190,7 @@ fun NearbyDevicesScreen(
         wifiDirectSocketDiagnostics = wifiDirectSocketState.diagnostics,
         wifiDirectAdapterDiagnostics = wifiDirectSocketState.adapterDiagnostics,
         wifiDirectSendBridgeDiagnostics = wifiDirectSocketState.sendBridgeDiagnostics,
+        wifiDirectSmokeTestDiagnostics = wifiDirectSocketState.smokeTestDiagnostics,
         wifiDirectReceiveBridgeDiagnostics = wifiDirectSocketState.receiveBridgeDiagnostics,
         identityHandlerStatus = identityHandlerStatus,
         peerSessionDiagnostics = peerSessionDiagnostics
@@ -327,6 +328,7 @@ fun NearbyDevicesScreen(
                             socketDiagnostics = wifiDirectSocketState.diagnostics,
                             adapterDiagnostics = wifiDirectSocketState.adapterDiagnostics,
                             sendBridgeDiagnostics = wifiDirectSocketState.sendBridgeDiagnostics,
+                            smokeTestDiagnostics = wifiDirectSocketState.smokeTestDiagnostics,
                             receiveBridgeDiagnostics = wifiDirectSocketState.receiveBridgeDiagnostics,
                             onStartDiscovery = onStartWifiDirectDiscovery,
                             onStopDiscovery = onStopWifiDirectDiscovery,
@@ -337,6 +339,9 @@ fun NearbyDevicesScreen(
                             onSendSocketFrame = wifiDirectSocketState.sendFrame,
                             onSendAdapterFrame = wifiDirectSocketState.sendAdapterFrame,
                             onSendBridgedFrame = wifiDirectSocketState.sendBridgedFrame,
+                            onSendSmokeTestFrame = {
+                                wifiDirectSocketState.sendSmokeTestFrame(currentUsername)
+                            },
                             onSetSendBridgeEnabled = wifiDirectSocketState.setSendBridgeEnabled,
                             onSetReceiveBridgeEnabled = wifiDirectSocketState.setReceiveBridgeEnabled,
                             onCloseSocket = wifiDirectSocketState.closeSocket
@@ -1404,6 +1409,8 @@ internal fun buildNearbyDebugCard(
         gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics(),
     wifiDirectSendBridgeDiagnostics: gr.hua.aurora.wifidirect.WifiDirectSendBridgeDiagnostics =
         gr.hua.aurora.wifidirect.WifiDirectSendBridgeDiagnostics(),
+    wifiDirectSmokeTestDiagnostics: gr.hua.aurora.wifidirect.WifiDirectSmokeTestDiagnostics =
+        gr.hua.aurora.wifidirect.WifiDirectSmokeTestDiagnostics(),
     wifiDirectReceiveBridgeDiagnostics: gr.hua.aurora.wifidirect.WifiDirectReceiveBridgeDiagnostics =
         gr.hua.aurora.wifidirect.WifiDirectReceiveBridgeDiagnostics(),
     identityHandlerStatus: String,
@@ -1435,6 +1442,9 @@ internal fun buildNearbyDebugCard(
             ),
             buildNearbyWifiDirectSendBridgeDebugSection(
                 diagnostics = wifiDirectSendBridgeDiagnostics
+            ),
+            buildNearbyWifiDirectSmokeTestDebugSection(
+                diagnostics = wifiDirectSmokeTestDiagnostics
             ),
             buildNearbyWifiDirectReceiveBridgeDebugSection(
                 diagnostics = wifiDirectReceiveBridgeDiagnostics

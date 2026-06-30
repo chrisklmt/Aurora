@@ -19,12 +19,14 @@ internal data class RememberedWifiDirectSocketState(
     val diagnostics: WifiDirectSocketDiagnostics,
     val adapterDiagnostics: WifiDirectTransportAdapterDiagnostics,
     val sendBridgeDiagnostics: WifiDirectSendBridgeDiagnostics,
+    val smokeTestDiagnostics: WifiDirectSmokeTestDiagnostics,
     val receiveBridgeDiagnostics: WifiDirectReceiveBridgeDiagnostics,
     val startServer: (String?) -> Unit,
     val connectClient: (String) -> Unit,
     val sendFrame: () -> Unit,
     val sendAdapterFrame: () -> Unit,
     val sendBridgedFrame: () -> Unit,
+    val sendSmokeTestFrame: (String) -> Unit,
     val setSendBridgeEnabled: (Boolean) -> Unit,
     val disableSendBridge: () -> Unit,
     val setReceiveBridgeEnabled: (Boolean) -> Unit,
@@ -65,6 +67,13 @@ internal fun rememberWifiDirectSocketState(
     val sendBridge = remember(transportAdapter) {
         WifiDirectSendBridge(transportAdapter)
     }
+    val smokeTestSender = remember(sendBridge, transportAdapter) {
+        WifiDirectSmokeTestSender(
+            submitFrame = sendBridge::submit,
+            sendBridgeDiagnostics = sendBridge::currentDiagnostics,
+            transportAdapterDiagnostics = transportAdapter::currentDiagnostics
+        )
+    }
     var diagnostics by remember(resolvedController) {
         mutableStateOf(resolvedController.currentDiagnostics())
     }
@@ -73,6 +82,9 @@ internal fun rememberWifiDirectSocketState(
     }
     var sendBridgeDiagnostics by remember(sendBridge) {
         mutableStateOf(sendBridge.currentDiagnostics())
+    }
+    var smokeTestDiagnostics by remember(smokeTestSender) {
+        mutableStateOf(smokeTestSender.currentDiagnostics())
     }
     var receiveBridgeDiagnostics by remember(receiveBridge) {
         mutableStateOf(
@@ -105,6 +117,11 @@ internal fun rememberWifiDirectSocketState(
             sendBridge.submit(wifiDirectSyntheticTransportFrame())
         }
     }
+    val sendSmokeTestFrame = remember(smokeTestSender) {
+        { senderId: String ->
+            smokeTestSender.sendPublicSmokeTest(senderId)
+        }
+    }
     val setSendBridgeEnabled = remember(sendBridge) {
         { enabled: Boolean ->
             sendBridge.setEnabled(enabled)
@@ -134,12 +151,13 @@ internal fun rememberWifiDirectSocketState(
         }
     }
 
-    DisposableEffect(resolvedController, mainHandler, sendBridge, receiveBridge) {
+    DisposableEffect(resolvedController, mainHandler, sendBridge, smokeTestSender, receiveBridge) {
         val listener = object : WifiDirectSocketController.Listener {
             override fun onSocketDiagnosticsChanged(diagnosticsUpdate: WifiDirectSocketDiagnostics) {
                 mainHandler.post {
                     diagnostics = diagnosticsUpdate
                     adapterDiagnostics = transportAdapter.currentDiagnostics()
+                    smokeTestDiagnostics = smokeTestSender.currentDiagnostics()
                 }
             }
         }
@@ -149,6 +167,7 @@ internal fun rememberWifiDirectSocketState(
             ) {
                 mainHandler.post {
                     adapterDiagnostics = diagnosticsUpdate
+                    smokeTestDiagnostics = smokeTestSender.currentDiagnostics()
                 }
             }
 
@@ -164,6 +183,16 @@ internal fun rememberWifiDirectSocketState(
             ) {
                 mainHandler.post {
                     sendBridgeDiagnostics = diagnosticsUpdate
+                    smokeTestDiagnostics = smokeTestSender.currentDiagnostics()
+                }
+            }
+        }
+        val smokeTestListener = object : WifiDirectSmokeTestSender.Listener {
+            override fun onSmokeTestDiagnosticsChanged(
+                diagnosticsUpdate: WifiDirectSmokeTestDiagnostics
+            ) {
+                mainHandler.post {
+                    smokeTestDiagnostics = diagnosticsUpdate
                 }
             }
         }
@@ -180,11 +209,13 @@ internal fun rememberWifiDirectSocketState(
         resolvedController.addListener(listener)
         transportAdapter.addListener(adapterListener)
         sendBridge.addListener(sendBridgeListener)
+        smokeTestSender.addListener(smokeTestListener)
         receiveBridge?.addListener(receiveBridgeListener)
         onDispose {
             resolvedController.removeListener(listener)
             transportAdapter.removeListener(adapterListener)
             sendBridge.removeListener(sendBridgeListener)
+            smokeTestSender.removeListener(smokeTestListener)
             receiveBridge?.removeListener(receiveBridgeListener)
             transportAdapter.dispose()
             resolvedController.dispose()
@@ -220,12 +251,14 @@ internal fun rememberWifiDirectSocketState(
         diagnostics = diagnostics,
         adapterDiagnostics = adapterDiagnostics,
         sendBridgeDiagnostics = sendBridgeDiagnostics,
+        smokeTestDiagnostics = smokeTestDiagnostics,
         receiveBridgeDiagnostics = receiveBridgeDiagnostics,
         startServer = startServer,
         connectClient = connectClient,
         sendFrame = sendFrame,
         sendAdapterFrame = sendAdapterFrame,
         sendBridgedFrame = sendBridgedFrame,
+        sendSmokeTestFrame = sendSmokeTestFrame,
         setSendBridgeEnabled = setSendBridgeEnabled,
         disableSendBridge = disableSendBridge,
         setReceiveBridgeEnabled = setReceiveBridgeEnabled,

@@ -29,6 +29,7 @@ import gr.hua.aurora.wifidirect.WifiDirectSocketRole
 import gr.hua.aurora.wifidirect.WifiDirectSocketState
 import gr.hua.aurora.wifidirect.WifiDirectReceiveBridgeDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectSendBridgeDiagnostics
+import gr.hua.aurora.wifidirect.WifiDirectSmokeTestDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectTransportState
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -575,6 +576,22 @@ class NearbyDevicesScreenTest {
                         )
                     ),
                     DebugInfoSection(
+                        title = "Smoke",
+                        items = listOf(
+                            DebugInfoItem("Smoke", "not ready"),
+                            DebugInfoItem("Bridge", "disabled"),
+                            DebugInfoItem("Adapter", "disabled"),
+                            DebugInfoItem("Sent", "0"),
+                            DebugInfoItem("Failures", "0"),
+                            DebugInfoItem("Last size", "none"),
+                            DebugInfoItem(
+                                "Note",
+                                "Debug-only Wi-Fi Direct smoke test. Normal chat sending still uses BLE.",
+                                preferFullWidth = true
+                            )
+                        )
+                    ),
+                    DebugInfoSection(
                         title = "Receive bridge",
                         items = listOf(
                             DebugInfoItem("Bridge", "disabled"),
@@ -673,6 +690,47 @@ class NearbyDevicesScreenTest {
                     submitFailures = 1,
                     lastSubmittedFrameSize = 18,
                     lastSendBridgeError = "Wi-Fi Direct send bridge disabled."
+                )
+            )
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectSmokeTestDebugSectionShowsCompactDiagnostics() {
+        assertEquals(
+            DebugInfoSection(
+                title = "Smoke",
+                items = listOf(
+                    DebugInfoItem("Smoke", "ready"),
+                    DebugInfoItem("Bridge", "enabled"),
+                    DebugInfoItem("Adapter", "ready"),
+                    DebugInfoItem("Sent", "1"),
+                    DebugInfoItem("Failures", "1"),
+                    DebugInfoItem("Last result", "failed"),
+                    DebugInfoItem("Last size", "96 B"),
+                    DebugInfoItem(
+                        "Last error",
+                        "Wi-Fi Direct smoke test requires the send bridge to be enabled.",
+                        preferFullWidth = true
+                    ),
+                    DebugInfoItem(
+                        "Note",
+                        "Debug-only Wi-Fi Direct smoke test. Normal chat sending still uses BLE.",
+                        preferFullWidth = true
+                    )
+                )
+            ),
+            buildNearbyWifiDirectSmokeTestDebugSection(
+                diagnostics = WifiDirectSmokeTestDiagnostics(
+                    ready = true,
+                    sendBridgeEnabled = true,
+                    adapterState = gr.hua.aurora.wifidirect.WifiDirectTransportAdapterState.READY,
+                    smokeFramesSent = 1,
+                    smokeSendFailures = 1,
+                    lastSmokeFrameSize = 96,
+                    lastSmokeSendResult = "failed",
+                    lastSmokeError =
+                    "Wi-Fi Direct smoke test requires the send bridge to be enabled."
                 )
             )
         )
@@ -1129,6 +1187,7 @@ class NearbyDevicesScreenTest {
                 canSendFrame = true,
                 canSendAdapterFrame = true,
                 canSendBridgedFrame = false,
+                canSendSmokeTestFrame = false,
                 canCloseSocket = true
             ),
             nearbyWifiDirectSocketControlsState(
@@ -1161,6 +1220,7 @@ class NearbyDevicesScreenTest {
                 canSendFrame = true,
                 canSendAdapterFrame = true,
                 canSendBridgedFrame = true,
+                canSendSmokeTestFrame = true,
                 canCloseSocket = true
             ),
             nearbyWifiDirectSocketControlsState(
@@ -1182,6 +1242,11 @@ class NearbyDevicesScreenTest {
                 ),
                 sendBridgeDiagnostics = WifiDirectSendBridgeDiagnostics(
                     enabled = true
+                ),
+                smokeTestDiagnostics = WifiDirectSmokeTestDiagnostics(
+                    ready = true,
+                    sendBridgeEnabled = true,
+                    adapterState = gr.hua.aurora.wifidirect.WifiDirectTransportAdapterState.READY
                 )
             )
         )

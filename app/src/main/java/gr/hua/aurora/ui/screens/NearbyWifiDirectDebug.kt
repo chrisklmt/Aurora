@@ -22,6 +22,7 @@ import gr.hua.aurora.wifidirect.WifiDirectSocketDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectSocketState
 import gr.hua.aurora.wifidirect.WifiDirectReceiveBridgeDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectSendBridgeDiagnostics
+import gr.hua.aurora.wifidirect.WifiDirectSmokeTestDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterState
 import gr.hua.aurora.wifidirect.wifiDirectFrameByteSummary
@@ -50,6 +51,7 @@ import gr.hua.aurora.wifidirect.wifiDirectTransportAdapterByteSummary
 import gr.hua.aurora.wifidirect.wifiDirectTransportAdapterStateSummary
 import gr.hua.aurora.wifidirect.wifiDirectReceiveBridgeStateSummary
 import gr.hua.aurora.wifidirect.wifiDirectSendBridgeStateSummary
+import gr.hua.aurora.wifidirect.wifiDirectSmokeTestStateSummary
 
 internal fun buildNearbyWifiDirectDebugSection(
     runtimeStatus: WifiDirectRuntimeStatus
@@ -390,6 +392,80 @@ internal fun buildNearbyWifiDirectSendBridgeDebugSection(
     )
 }
 
+internal fun buildNearbyWifiDirectSmokeTestDebugSection(
+    diagnostics: WifiDirectSmokeTestDiagnostics
+): DebugInfoSection {
+    val items = buildList {
+        add(
+            DebugInfoItem(
+                "Smoke",
+                wifiDirectSmokeTestStateSummary(diagnostics)
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Bridge",
+                wifiDirectSendBridgeStateSummary(
+                    WifiDirectSendBridgeDiagnostics(enabled = diagnostics.sendBridgeEnabled)
+                )
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Adapter",
+                wifiDirectTransportAdapterStateSummary(diagnostics.adapterState)
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Sent",
+                diagnostics.smokeFramesSent.toString()
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Failures",
+                diagnostics.smokeSendFailures.toString()
+            )
+        )
+        diagnostics.lastSmokeSendResult?.takeIf { it.isNotBlank() }?.let { resultText ->
+            add(
+                DebugInfoItem(
+                    "Last result",
+                    resultText
+                )
+            )
+        }
+        add(
+            DebugInfoItem(
+                "Last size",
+                wifiDirectFrameSizeSummary(diagnostics.lastSmokeFrameSize)
+            )
+        )
+        diagnostics.lastSmokeError?.takeIf { it.isNotBlank() }?.let { errorText ->
+            add(
+                DebugInfoItem(
+                    "Last error",
+                    errorText,
+                    preferFullWidth = true
+                )
+            )
+        }
+        add(
+            DebugInfoItem(
+                "Note",
+                diagnostics.note,
+                preferFullWidth = true
+            )
+        )
+    }
+
+    return DebugInfoSection(
+        title = "Smoke",
+        items = items
+    )
+}
+
 internal fun buildNearbyWifiDirectReceiveBridgeDebugSection(
     diagnostics: WifiDirectReceiveBridgeDiagnostics
 ): DebugInfoSection {
@@ -475,6 +551,7 @@ internal data class NearbyWifiDirectSocketControlsState(
     val canSendFrame: Boolean,
     val canSendAdapterFrame: Boolean,
     val canSendBridgedFrame: Boolean = false,
+    val canSendSmokeTestFrame: Boolean = false,
     val canCloseSocket: Boolean,
     val connectHost: String? = null,
     val helpText: String? = null
@@ -484,7 +561,8 @@ internal fun nearbyWifiDirectSocketControlsState(
     runtimeStatus: WifiDirectRuntimeStatus,
     diagnostics: WifiDirectSocketDiagnostics,
     adapterDiagnostics: WifiDirectTransportAdapterDiagnostics = WifiDirectTransportAdapterDiagnostics(),
-    sendBridgeDiagnostics: WifiDirectSendBridgeDiagnostics = WifiDirectSendBridgeDiagnostics()
+    sendBridgeDiagnostics: WifiDirectSendBridgeDiagnostics = WifiDirectSendBridgeDiagnostics(),
+    smokeTestDiagnostics: WifiDirectSmokeTestDiagnostics = WifiDirectSmokeTestDiagnostics()
 ): NearbyWifiDirectSocketControlsState {
     return wifiDirectSocketCommandAvailability(
         runtimeStatus = runtimeStatus,
@@ -492,7 +570,8 @@ internal fun nearbyWifiDirectSocketControlsState(
     ).toNearbySocketControlsState(
         canSendAdapterFrame = adapterDiagnostics.state == WifiDirectTransportAdapterState.READY,
         canSendBridgedFrame = adapterDiagnostics.state == WifiDirectTransportAdapterState.READY &&
-            sendBridgeDiagnostics.enabled
+            sendBridgeDiagnostics.enabled,
+        canSendSmokeTestFrame = smokeTestDiagnostics.ready
     )
 }
 
@@ -622,6 +701,7 @@ internal fun NearbyWifiDirectDebugControls(
     socketDiagnostics: WifiDirectSocketDiagnostics,
     adapterDiagnostics: WifiDirectTransportAdapterDiagnostics,
     sendBridgeDiagnostics: WifiDirectSendBridgeDiagnostics,
+    smokeTestDiagnostics: WifiDirectSmokeTestDiagnostics,
     receiveBridgeDiagnostics: WifiDirectReceiveBridgeDiagnostics,
     onStartDiscovery: () -> Unit,
     onStopDiscovery: () -> Unit,
@@ -632,6 +712,7 @@ internal fun NearbyWifiDirectDebugControls(
     onSendSocketFrame: () -> Unit,
     onSendAdapterFrame: () -> Unit,
     onSendBridgedFrame: () -> Unit,
+    onSendSmokeTestFrame: () -> Unit,
     onSetSendBridgeEnabled: (Boolean) -> Unit,
     onSetReceiveBridgeEnabled: (Boolean) -> Unit,
     onCloseSocket: () -> Unit
@@ -641,7 +722,8 @@ internal fun NearbyWifiDirectDebugControls(
         runtimeStatus = runtimeStatus,
         diagnostics = socketDiagnostics,
         adapterDiagnostics = adapterDiagnostics,
-        sendBridgeDiagnostics = sendBridgeDiagnostics
+        sendBridgeDiagnostics = sendBridgeDiagnostics,
+        smokeTestDiagnostics = smokeTestDiagnostics
     )
 
     Column(
@@ -745,6 +827,12 @@ internal fun NearbyWifiDirectDebugControls(
                 Text("Send bridged frame")
             }
             TextButton(
+                onClick = onSendSmokeTestFrame,
+                enabled = socketControlsState.canSendSmokeTestFrame
+            ) {
+                Text("Send Wi-Fi Direct smoke test frame")
+            }
+            TextButton(
                 onClick = onCloseSocket,
                 enabled = socketControlsState.canCloseSocket
             ) {
@@ -753,6 +841,11 @@ internal fun NearbyWifiDirectDebugControls(
         }
         Text(
             text = "Wi-Fi Direct send bridge: ${wifiDirectSendBridgeStateSummary(sendBridgeDiagnostics)}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = "Wi-Fi Direct smoke test: ${wifiDirectSmokeTestStateSummary(smokeTestDiagnostics)}",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -815,7 +908,8 @@ internal fun nearbyWifiDirectEnabledValue(
 
 private fun WifiDirectSocketCommandAvailability.toNearbySocketControlsState(
     canSendAdapterFrame: Boolean,
-    canSendBridgedFrame: Boolean
+    canSendBridgedFrame: Boolean,
+    canSendSmokeTestFrame: Boolean
 ): NearbyWifiDirectSocketControlsState {
     return NearbyWifiDirectSocketControlsState(
         canStartServer = canStartServer,
@@ -823,6 +917,7 @@ private fun WifiDirectSocketCommandAvailability.toNearbySocketControlsState(
         canSendFrame = canSendFrame,
         canSendAdapterFrame = canSendAdapterFrame,
         canSendBridgedFrame = canSendBridgedFrame,
+        canSendSmokeTestFrame = canSendSmokeTestFrame,
         canCloseSocket = canCloseSocket,
         connectHost = connectHost,
         helpText = helpText
