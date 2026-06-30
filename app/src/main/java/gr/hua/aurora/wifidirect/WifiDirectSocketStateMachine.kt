@@ -45,7 +45,12 @@ internal class WifiDirectSocketStateMachine(
 
     fun recordNotConnectedError(): WifiDirectSocketDiagnostics {
         return update { current ->
-            current.copy(lastError = "Debug socket not connected.")
+            current.copy(
+                lastError = "Debug frame transport not connected.",
+                frameDiagnostics = current.frameDiagnostics.copy(
+                    lastError = "Debug frame transport not connected."
+                )
+            )
         }
     }
 
@@ -60,7 +65,11 @@ internal class WifiDirectSocketStateMachine(
                 role = role,
                 endpoint = endpoint,
                 isConnected = false,
-                lastError = reason
+                lastError = reason,
+                frameDiagnostics = current.frameDiagnostics.copy(
+                    state = WifiDirectFrameTransportState.FAILED,
+                    lastError = reason
+                )
             )
         }
     }
@@ -79,7 +88,11 @@ internal class WifiDirectSocketStateMachine(
                     port = current.endpoint?.port ?: requestedPort.takeIf { it > 0 }
                 ),
                 isConnected = false,
-                lastError = null
+                lastError = null,
+                frameDiagnostics = current.frameDiagnostics.copy(
+                    state = WifiDirectFrameTransportState.IDLE,
+                    lastError = null
+                )
             )
         }
     }
@@ -98,7 +111,11 @@ internal class WifiDirectSocketStateMachine(
                     port = port
                 ),
                 isConnected = false,
-                lastError = null
+                lastError = null,
+                frameDiagnostics = current.frameDiagnostics.copy(
+                    state = WifiDirectFrameTransportState.IDLE,
+                    lastError = null
+                )
             )
         }
     }
@@ -117,7 +134,11 @@ internal class WifiDirectSocketStateMachine(
                     port = current.endpoint?.port ?: requestedPort.takeIf { it > 0 }
                 ),
                 isConnected = false,
-                lastError = null
+                lastError = null,
+                frameDiagnostics = current.frameDiagnostics.copy(
+                    state = WifiDirectFrameTransportState.IDLE,
+                    lastError = null
+                )
             )
         }
     }
@@ -133,7 +154,11 @@ internal class WifiDirectSocketStateMachine(
                 role = role,
                 endpoint = endpoint ?: current.endpoint,
                 isConnected = true,
-                lastError = null
+                lastError = null,
+                frameDiagnostics = current.frameDiagnostics.copy(
+                    state = WifiDirectFrameTransportState.READY,
+                    lastError = null
+                )
             )
         }
     }
@@ -145,7 +170,11 @@ internal class WifiDirectSocketStateMachine(
             current.copy(
                 state = WifiDirectSocketState.CLOSING,
                 isConnected = false,
-                lastError = null
+                lastError = null,
+                frameDiagnostics = current.frameDiagnostics.copy(
+                    state = WifiDirectFrameTransportState.IDLE,
+                    lastError = null
+                )
             )
         }
     }
@@ -156,7 +185,10 @@ internal class WifiDirectSocketStateMachine(
         return updateIfCurrent(token) { current ->
             current.copy(
                 state = WifiDirectSocketState.IDLE,
-                isConnected = false
+                isConnected = false,
+                frameDiagnostics = current.frameDiagnostics.copy(
+                    state = WifiDirectFrameTransportState.IDLE
+                )
             )
         }
     }
@@ -169,35 +201,55 @@ internal class WifiDirectSocketStateMachine(
             current.copy(
                 state = WifiDirectSocketState.FAILED,
                 isConnected = false,
-                lastError = reason
+                lastError = reason,
+                frameDiagnostics = current.frameDiagnostics.copy(
+                    state = WifiDirectFrameTransportState.FAILED,
+                    lastError = reason
+                )
             )
         }
     }
 
-    fun recordSentMessage(
+    fun recordSentFrame(
         token: Long,
         message: String,
+        frameSize: Int,
         bytesSent: Long
     ): WifiDirectSocketDiagnostics? {
         return updateIfCurrent(token) { current ->
             current.copy(
                 lastSentMessage = message,
                 bytesSent = current.bytesSent + bytesSent,
-                lastError = null
+                lastError = null,
+                frameDiagnostics = current.frameDiagnostics.copy(
+                    state = WifiDirectFrameTransportState.READY,
+                    framesSent = current.frameDiagnostics.framesSent + 1L,
+                    bytesSent = current.frameDiagnostics.bytesSent + bytesSent,
+                    lastFrameSize = frameSize,
+                    lastError = null
+                )
             )
         }
     }
 
-    fun recordReceivedMessage(
+    fun recordReceivedFrame(
         token: Long,
         message: String,
+        frameSize: Int,
         bytesReceived: Long
     ): WifiDirectSocketDiagnostics? {
         return updateIfCurrent(token) { current ->
             current.copy(
                 lastReceivedMessage = message,
                 bytesReceived = current.bytesReceived + bytesReceived,
-                lastError = null
+                lastError = null,
+                frameDiagnostics = current.frameDiagnostics.copy(
+                    state = WifiDirectFrameTransportState.READY,
+                    framesReceived = current.frameDiagnostics.framesReceived + 1L,
+                    bytesReceived = current.frameDiagnostics.bytesReceived + bytesReceived,
+                    lastFrameSize = frameSize,
+                    lastError = null
+                )
             )
         }
     }

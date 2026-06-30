@@ -10,7 +10,7 @@ class WifiDirectSocketCommandGuardTest {
             WifiDirectSocketCommandAvailability(
                 canStartServer = true,
                 canConnectClient = false,
-                canSendPing = false,
+                canSendFrame = false,
                 canCloseSocket = false
             ),
             wifiDirectSocketCommandAvailability(
@@ -32,7 +32,7 @@ class WifiDirectSocketCommandGuardTest {
             WifiDirectSocketCommandAvailability(
                 canStartServer = false,
                 canConnectClient = true,
-                canSendPing = false,
+                canSendFrame = false,
                 canCloseSocket = false,
                 connectHost = "192.168.49.1"
             ),
@@ -56,7 +56,7 @@ class WifiDirectSocketCommandGuardTest {
             WifiDirectSocketCommandAvailability(
                 canStartServer = false,
                 canConnectClient = false,
-                canSendPing = false,
+                canSendFrame = false,
                 canCloseSocket = false,
                 helpText = "Wi-Fi Direct group not formed."
             ),
@@ -68,12 +68,12 @@ class WifiDirectSocketCommandGuardTest {
     }
 
     @Test
-    fun connectedStateEnablesPingAndClose() {
+    fun connectedStateEnablesFrameSendAndClose() {
         assertEquals(
             WifiDirectSocketCommandAvailability(
                 canStartServer = false,
                 canConnectClient = false,
-                canSendPing = true,
+                canSendFrame = true,
                 canCloseSocket = true
             ),
             wifiDirectSocketCommandAvailability(

@@ -58,7 +58,7 @@ class WifiDirectSocketStateMachineTest {
     }
 
     @Test
-    fun sentAndReceivedCountersAccumulate() {
+    fun sentAndReceivedFrameCountersAccumulate() {
         val stateMachine = WifiDirectSocketStateMachine(initialPort = 8988)
         val token = stateMachine.nextOperationToken()
 
@@ -70,23 +70,32 @@ class WifiDirectSocketStateMachineTest {
                 port = 8988
             )
         )
-        stateMachine.recordSentMessage(
+        stateMachine.recordSentFrame(
             token = token,
             message = "ping",
-            bytesSent = 5
+            frameSize = 4,
+            bytesSent = 8
         )
         val diagnostics = requireNotNull(
-            stateMachine.recordReceivedMessage(
+            stateMachine.recordReceivedFrame(
                 token = token,
                 message = "pong",
-                bytesReceived = 5
+                frameSize = 4,
+                bytesReceived = 8
             )
         )
 
         assertEquals("ping", diagnostics.lastSentMessage)
         assertEquals("pong", diagnostics.lastReceivedMessage)
-        assertEquals(5L, diagnostics.bytesSent)
-        assertEquals(5L, diagnostics.bytesReceived)
+        assertEquals(8L, diagnostics.bytesSent)
+        assertEquals(8L, diagnostics.bytesReceived)
+        assertEquals(
+            WifiDirectFrameTransportState.READY,
+            diagnostics.frameDiagnostics.state
+        )
+        assertEquals(1L, diagnostics.frameDiagnostics.framesSent)
+        assertEquals(1L, diagnostics.frameDiagnostics.framesReceived)
+        assertEquals(4, diagnostics.frameDiagnostics.lastFrameSize)
     }
 
     @Test
@@ -116,5 +125,9 @@ class WifiDirectSocketStateMachineTest {
         assertEquals(WifiDirectSocketRole.CLIENT, diagnostics.role)
         assertEquals("Group owner address unavailable.", diagnostics.lastError)
         assertTrue(diagnostics.endpoint?.port == 8988)
+        assertEquals(
+            WifiDirectFrameTransportState.FAILED,
+            diagnostics.frameDiagnostics.state
+        )
     }
 }

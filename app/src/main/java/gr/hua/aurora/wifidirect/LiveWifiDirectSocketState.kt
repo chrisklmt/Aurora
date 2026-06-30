@@ -17,7 +17,7 @@ internal data class RememberedWifiDirectSocketState(
     val diagnostics: WifiDirectSocketDiagnostics,
     val startServer: (String?) -> Unit,
     val connectClient: (String) -> Unit,
-    val sendPing: () -> Unit,
+    val sendFrame: () -> Unit,
     val closeSocket: () -> Unit
 )
 
@@ -47,9 +47,9 @@ internal fun rememberWifiDirectSocketState(
             resolvedController.connectClient(host)
         }
     }
-    val sendPing = remember(resolvedController) {
+    val sendFrame = remember(resolvedController) {
         {
-            resolvedController.sendDebugPing()
+            resolvedController.sendDebugFrame()
         }
     }
     val closeSocket = remember(resolvedController) {
@@ -103,7 +103,7 @@ internal fun rememberWifiDirectSocketState(
         diagnostics = diagnostics,
         startServer = startServer,
         connectClient = connectClient,
-        sendPing = sendPing,
+        sendFrame = sendFrame,
         closeSocket = closeSocket
     )
 }

@@ -530,6 +530,20 @@ class NearbyDevicesScreenTest {
                         )
                     ),
                     DebugInfoSection(
+                        title = "Frame",
+                        items = listOf(
+                            DebugInfoItem("Transport", "idle"),
+                            DebugInfoItem("Frames", "0/0"),
+                            DebugInfoItem("Bytes", "0/0"),
+                            DebugInfoItem("Last size", "none"),
+                            DebugInfoItem(
+                                "Note",
+                                "Wi-Fi Direct chat routing not wired yet.",
+                                preferFullWidth = true
+                            )
+                        )
+                    ),
+                    DebugInfoSection(
                         title = "Identity",
                         items = listOf(
                             DebugInfoItem("Handler", "ready"),
@@ -736,7 +750,7 @@ class NearbyDevicesScreenTest {
                     DebugInfoItem("Endpoint", "192.168.49.1:8988"),
                     DebugInfoItem("Sent", "ping"),
                     DebugInfoItem("Received", "pong"),
-                    DebugInfoItem("Bytes", "5/5"),
+                    DebugInfoItem("Bytes", "8/8"),
                     DebugInfoItem(
                         "Note",
                         "Wi-Fi Direct chat transport not wired yet.",
@@ -755,8 +769,40 @@ class NearbyDevicesScreenTest {
                     isConnected = true,
                     lastSentMessage = "ping",
                     lastReceivedMessage = "pong",
-                    bytesSent = 5,
-                    bytesReceived = 5
+                    bytesSent = 8,
+                    bytesReceived = 8
+                )
+            )
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectFrameDebugSectionShowsCompactDiagnostics() {
+        assertEquals(
+            DebugInfoSection(
+                title = "Frame",
+                items = listOf(
+                    DebugInfoItem("Transport", "ready"),
+                    DebugInfoItem("Frames", "1/1"),
+                    DebugInfoItem("Bytes", "8/8"),
+                    DebugInfoItem("Last size", "4 B"),
+                    DebugInfoItem(
+                        "Note",
+                        "Wi-Fi Direct chat routing not wired yet.",
+                        preferFullWidth = true
+                    )
+                )
+            ),
+            buildNearbyWifiDirectFrameDebugSection(
+                diagnostics = WifiDirectSocketDiagnostics(
+                    frameDiagnostics = gr.hua.aurora.wifidirect.WifiDirectFrameDiagnostics(
+                        state = gr.hua.aurora.wifidirect.WifiDirectFrameTransportState.READY,
+                        framesSent = 1,
+                        framesReceived = 1,
+                        bytesSent = 8,
+                        bytesReceived = 8,
+                        lastFrameSize = 4
+                    )
                 )
             )
         )
@@ -824,7 +870,7 @@ class NearbyDevicesScreenTest {
             NearbyWifiDirectSocketControlsState(
                 canStartServer = false,
                 canConnectClient = false,
-                canSendPing = false,
+                canSendFrame = false,
                 canCloseSocket = false,
                 helpText = "Wi-Fi Direct group not formed."
             ),
@@ -841,7 +887,7 @@ class NearbyDevicesScreenTest {
             NearbyWifiDirectSocketControlsState(
                 canStartServer = true,
                 canConnectClient = false,
-                canSendPing = false,
+                canSendFrame = false,
                 canCloseSocket = false
             ),
             nearbyWifiDirectSocketControlsState(
@@ -863,7 +909,7 @@ class NearbyDevicesScreenTest {
             NearbyWifiDirectSocketControlsState(
                 canStartServer = false,
                 canConnectClient = true,
-                canSendPing = false,
+                canSendFrame = false,
                 canCloseSocket = false,
                 connectHost = "192.168.49.1"
             ),
@@ -887,7 +933,7 @@ class NearbyDevicesScreenTest {
             NearbyWifiDirectSocketControlsState(
                 canStartServer = false,
                 canConnectClient = false,
-                canSendPing = false,
+                canSendFrame = false,
                 canCloseSocket = false,
                 helpText = "Wi-Fi Direct role unavailable."
             ),
@@ -906,7 +952,7 @@ class NearbyDevicesScreenTest {
             NearbyWifiDirectSocketControlsState(
                 canStartServer = false,
                 canConnectClient = false,
-                canSendPing = false,
+                canSendFrame = false,
                 canCloseSocket = false,
                 connectHost = null,
                 helpText = "Group owner address unavailable."

@@ -47,7 +47,7 @@ class AndroidWifiDirectSocketControllerTest {
     }
 
     @Test
-    fun clientTransitionsThroughConnectingToConnectedAndCanPing() {
+    fun clientTransitionsThroughConnectingToConnectedAndCanSendDebugFrame() {
         val server = AndroidWifiDirectSocketController(requestedPort = 0)
 
         try {
@@ -72,7 +72,7 @@ class AndroidWifiDirectSocketControllerTest {
                         server.currentDiagnostics().state == WifiDirectSocketState.CONNECTED
                 }
 
-                client.sendDebugPing()
+                client.sendDebugFrame()
 
                 awaitCondition {
                     server.currentDiagnostics().lastReceivedMessage == "ping" &&
@@ -91,6 +91,30 @@ class AndroidWifiDirectSocketControllerTest {
                     "pong",
                     server.currentDiagnostics().lastSentMessage
                 )
+                assertEquals(
+                    WifiDirectFrameTransportState.READY,
+                    client.currentDiagnostics().frameDiagnostics.state
+                )
+                assertEquals(
+                    1L,
+                    client.currentDiagnostics().frameDiagnostics.framesSent
+                )
+                assertEquals(
+                    1L,
+                    client.currentDiagnostics().frameDiagnostics.framesReceived
+                )
+                assertEquals(
+                    8L,
+                    client.currentDiagnostics().frameDiagnostics.bytesSent
+                )
+                assertEquals(
+                    8L,
+                    client.currentDiagnostics().frameDiagnostics.bytesReceived
+                )
+                assertEquals(
+                    4,
+                    client.currentDiagnostics().frameDiagnostics.lastFrameSize
+                )
             } finally {
                 client.dispose()
             }
@@ -100,19 +124,23 @@ class AndroidWifiDirectSocketControllerTest {
     }
 
     @Test
-    fun sendPingFailsClearlyWhenNotConnected() {
+    fun sendFrameFailsClearlyWhenNotConnected() {
         val controller = AndroidWifiDirectSocketController(requestedPort = 0)
 
         try {
-            controller.sendDebugPing()
+            controller.sendDebugFrame()
 
             assertEquals(
-                "Debug socket not connected.",
+                "Debug frame transport not connected.",
                 controller.currentDiagnostics().lastError
             )
             assertEquals(
                 WifiDirectSocketState.IDLE,
                 controller.currentDiagnostics().state
+            )
+            assertEquals(
+                "Debug frame transport not connected.",
+                controller.currentDiagnostics().frameDiagnostics.lastError
             )
         } finally {
             controller.dispose()
@@ -219,6 +247,43 @@ class AndroidWifiDirectSocketControllerTest {
             }
         } finally {
             firstController.dispose()
+        }
+    }
+
+    @Test
+    fun closeWhileConnectedReturnsToIdleWithoutFrameFailure() {
+        val server = AndroidWifiDirectSocketController(requestedPort = 0)
+
+        try {
+            server.startServer(hostHint = "192.168.49.1")
+            awaitCondition {
+                server.currentDiagnostics().state == WifiDirectSocketState.SERVER_LISTENING
+            }
+            val listeningPort = requireNotNull(server.currentDiagnostics().endpoint?.port)
+            val client = AndroidWifiDirectSocketController(requestedPort = listeningPort)
+
+            try {
+                client.connectClient("127.0.0.1")
+                awaitCondition {
+                    client.currentDiagnostics().state == WifiDirectSocketState.CONNECTED &&
+                        server.currentDiagnostics().state == WifiDirectSocketState.CONNECTED
+                }
+
+                client.closeSocket()
+
+                awaitCondition {
+                    client.currentDiagnostics().state == WifiDirectSocketState.IDLE
+                }
+
+                assertEquals(
+                    WifiDirectFrameTransportState.IDLE,
+                    client.currentDiagnostics().frameDiagnostics.state
+                )
+            } finally {
+                client.dispose()
+            }
+        } finally {
+            server.dispose()
         }
     }
 

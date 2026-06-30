@@ -317,7 +317,7 @@ fun NearbyDevicesScreen(
                             onDisconnect = onDisconnectWifiDirectPeer,
                             onStartSocketServer = wifiDirectSocketState.startServer,
                             onConnectSocketClient = wifiDirectSocketState.connectClient,
-                            onSendSocketPing = wifiDirectSocketState.sendPing,
+                            onSendSocketFrame = wifiDirectSocketState.sendFrame,
                             onCloseSocket = wifiDirectSocketState.closeSocket
                         )
                     }
@@ -1398,6 +1398,9 @@ internal fun buildNearbyDebugCard(
                 runtimeStatus = wifiDirectRuntimeStatus
             ),
             buildNearbyWifiDirectSocketDebugSection(
+                diagnostics = wifiDirectSocketDiagnostics
+            ),
+            buildNearbyWifiDirectFrameDebugSection(
                 diagnostics = wifiDirectSocketDiagnostics
             ),
             buildNearbyIdentityDebugSection(

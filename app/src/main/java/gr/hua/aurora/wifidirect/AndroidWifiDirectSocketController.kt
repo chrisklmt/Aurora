@@ -10,7 +10,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 private const val wifiDirectSocketConnectTimeoutMillis = 5_000
-private const val wifiDirectDebugPingMessage = "ping"
 
 internal class AndroidWifiDirectSocketController internal constructor(
     private val requestedPort: Int = wifiDirectDebugSocketPort,
@@ -36,7 +35,7 @@ internal class AndroidWifiDirectSocketController internal constructor(
         createClientSocket = createClientSocket,
         connectTimeoutMillis = connectTimeoutMillis
     )
-    private val socketIoLoop = WifiDirectSocketIoLoop()
+    private val frameIoLoop = WifiDirectFrameIoLoop()
 
     private var serverSocket: ServerSocket? = null
     private var socket: Socket? = null
@@ -135,16 +134,16 @@ internal class AndroidWifiDirectSocketController internal constructor(
         }
     }
 
-    override fun sendDebugPing() {
+    override fun sendDebugFrame() {
         if (!currentDiagnostics().isConnected) {
             emit(stateMachine.recordNotConnectedError())
             return
         }
         val token = currentTokenSnapshot()
         ioScope.launch {
-            sendMessage(
+            sendFrame(
                 token = token,
-                message = wifiDirectDebugPingMessage
+                frame = wifiDirectDebugPingFrame()
             )
         }
     }
@@ -203,19 +202,21 @@ internal class AndroidWifiDirectSocketController internal constructor(
         activeSocket: Socket
     ) {
         ioScope.launch {
-            socketIoLoop.readUntilClosed(
+            frameIoLoop.readUntilClosed(
                 socket = activeSocket,
                 isActive = { stateMachine.isCurrentToken(token) },
-                onIncomingMessage = { incomingMessage ->
+                onIncomingFrame = { incomingFrame ->
+                    val frame = incomingFrame.frame
                     emitIfPresent(
-                        stateMachine.recordReceivedMessage(
+                        stateMachine.recordReceivedFrame(
                             token = token,
-                            message = incomingMessage.text,
-                            bytesReceived = incomingMessage.byteCount
+                            message = wifiDirectFrameDebugLabel(frame),
+                            frameSize = frame.payloadSize,
+                            bytesReceived = incomingFrame.frameByteCount
                         )
                     )
-                    incomingMessage.autoReply?.let { reply ->
-                        sendMessage(token, reply)
+                    wifiDirectDebugAutoReplyFrameOrNull(frame)?.let { reply ->
+                        sendFrame(token, reply)
                     }
                 },
                 onClosed = {
@@ -226,7 +227,7 @@ internal class AndroidWifiDirectSocketController internal constructor(
                     if (stateMachine.isCurrentToken(token)) {
                         failSocket(
                             token = token,
-                            reason = "Debug socket read failed: ${error::class.java.simpleName}"
+                            reason = "Debug frame read failed: ${safeFrameErrorDetail(error)}"
                         )
                     }
                 }
@@ -234,30 +235,31 @@ internal class AndroidWifiDirectSocketController internal constructor(
         }
     }
 
-    private fun sendMessage(
+    private fun sendFrame(
         token: Long,
-        message: String
+        frame: WifiDirectFrame
     ) {
         val activeSocket = currentSocket(token) ?: run {
             emit(stateMachine.recordNotConnectedError())
             return
         }
 
-        socketIoLoop.writeLine(
+        frameIoLoop.writeFrame(
             socket = activeSocket,
-            message = message
+            frame = frame
         ).onSuccess { byteCount ->
             emitIfPresent(
-                stateMachine.recordSentMessage(
+                stateMachine.recordSentFrame(
                     token = token,
-                    message = message,
+                    message = wifiDirectFrameDebugLabel(frame),
+                    frameSize = frame.payloadSize,
                     bytesSent = byteCount
                 )
             )
         }.onFailure { error ->
             failSocket(
                 token = token,
-                reason = "Debug socket send failed: ${error::class.java.simpleName}"
+                reason = "Debug frame send failed: ${safeFrameErrorDetail(error)}"
             )
         }
     }
@@ -350,5 +352,12 @@ internal class AndroidWifiDirectSocketController internal constructor(
         listeners.forEach { listener ->
             listener.onSocketDiagnosticsChanged(updated)
         }
+    }
+
+    private fun safeFrameErrorDetail(
+        error: Throwable
+    ): String {
+        return error.message?.trim()?.takeIf { it.isNotEmpty() }
+            ?: error::class.java.simpleName
     }
 }

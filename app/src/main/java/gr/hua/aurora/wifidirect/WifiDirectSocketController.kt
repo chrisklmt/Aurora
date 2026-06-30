@@ -41,7 +41,8 @@ internal data class WifiDirectSocketDiagnostics(
     val lastError: String? = null,
     val bytesSent: Long = 0L,
     val bytesReceived: Long = 0L,
-    val note: String = wifiDirectSocketFoundationNote
+    val note: String = wifiDirectSocketFoundationNote,
+    val frameDiagnostics: WifiDirectFrameDiagnostics = WifiDirectFrameDiagnostics()
 )
 
 internal interface WifiDirectSocketController {
@@ -52,7 +53,7 @@ internal interface WifiDirectSocketController {
     fun currentDiagnostics(): WifiDirectSocketDiagnostics
     fun startServer(hostHint: String? = null)
     fun connectClient(host: String)
-    fun sendDebugPing()
+    fun sendDebugFrame()
     fun closeSocket()
     fun addListener(listener: Listener)
     fun removeListener(listener: Listener)

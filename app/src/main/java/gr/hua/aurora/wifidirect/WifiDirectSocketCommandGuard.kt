@@ -3,7 +3,7 @@ package gr.hua.aurora.wifidirect
 internal data class WifiDirectSocketCommandAvailability(
     val canStartServer: Boolean,
     val canConnectClient: Boolean,
-    val canSendPing: Boolean,
+    val canSendFrame: Boolean,
     val canCloseSocket: Boolean,
     val connectHost: String? = null,
     val helpText: String? = null
@@ -17,7 +17,7 @@ internal fun wifiDirectSocketCommandAvailability(
         WifiDirectSocketState.CONNECTED -> WifiDirectSocketCommandAvailability(
             canStartServer = false,
             canConnectClient = false,
-            canSendPing = true,
+            canSendFrame = true,
             canCloseSocket = true
         )
         WifiDirectSocketState.STARTING_SERVER,
@@ -26,7 +26,7 @@ internal fun wifiDirectSocketCommandAvailability(
         WifiDirectSocketState.CLOSING -> WifiDirectSocketCommandAvailability(
             canStartServer = false,
             canConnectClient = false,
-            canSendPing = false,
+            canSendFrame = false,
             canCloseSocket = true,
             helpText = wifiDirectSocketActivityHint(diagnostics.state)
         )
@@ -40,7 +40,7 @@ internal fun wifiDirectSocketCommandAvailability(
                 return WifiDirectSocketCommandAvailability(
                     canStartServer = false,
                     canConnectClient = false,
-                    canSendPing = false,
+                    canSendFrame = false,
                     canCloseSocket = false,
                     helpText = "Wi-Fi Direct group not formed."
                 )
@@ -50,7 +50,7 @@ internal fun wifiDirectSocketCommandAvailability(
                 WifiDirectConnectionRole.GROUP_OWNER -> WifiDirectSocketCommandAvailability(
                     canStartServer = true,
                     canConnectClient = false,
-                    canSendPing = false,
+                    canSendFrame = false,
                     canCloseSocket = false
                 )
                 WifiDirectConnectionRole.CLIENT -> {
@@ -59,7 +59,7 @@ internal fun wifiDirectSocketCommandAvailability(
                     WifiDirectSocketCommandAvailability(
                         canStartServer = false,
                         canConnectClient = ownerAddress != null,
-                        canSendPing = false,
+                        canSendFrame = false,
                         canCloseSocket = false,
                         connectHost = ownerAddress,
                         helpText = if (ownerAddress == null) {
@@ -72,7 +72,7 @@ internal fun wifiDirectSocketCommandAvailability(
                 WifiDirectConnectionRole.UNKNOWN -> WifiDirectSocketCommandAvailability(
                     canStartServer = false,
                     canConnectClient = false,
-                    canSendPing = false,
+                    canSendFrame = false,
                     canCloseSocket = false,
                     helpText = "Wi-Fi Direct role unavailable."
                 )
