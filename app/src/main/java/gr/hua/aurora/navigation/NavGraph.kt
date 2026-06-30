@@ -128,7 +128,10 @@ fun NavGraph(
                 onRenameChat = { peerId, customName ->
                     stateHolder.renamePrivateChat(peerId, customName)
                 },
-                onDeleteChat = stateHolder::deletePrivateChat,
+                onDeleteChat = { peerId ->
+                    stateHolder.deletePrivateChat(peerId)
+                    bleRuntimeState.clearSessionForPeer(peerId)
+                },
                 onResetLocalData = onResetLocalData,
                 onBack = onNavigateBackOrGlobal
             )
@@ -220,6 +223,8 @@ fun NavGraph(
                 onStopWifiDirectDiscovery = bleRuntimeState.stopWifiDirectDiscovery,
                 onConnectWifiDirectPeer = bleRuntimeState.connectToWifiDirectPeer,
                 onDisconnectWifiDirectPeer = bleRuntimeState.disconnectWifiDirectPeer,
+                onReceiveWifiDirectDebugTransportFrame =
+                bleRuntimeState.receiveWifiDirectDebugTransportFrame,
                 identityHandlerStatus = bleRuntimeState.identityHandlerStatus,
                 peerSessionDiagnostics = bleRuntimeState.peerSessionDiagnostics,
                 activeTransportPeerId = bleRuntimeState.activeTransportPeerId,

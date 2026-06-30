@@ -27,6 +27,7 @@ import gr.hua.aurora.wifidirect.WifiDirectSocketDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectSocketEndpoint
 import gr.hua.aurora.wifidirect.WifiDirectSocketRole
 import gr.hua.aurora.wifidirect.WifiDirectSocketState
+import gr.hua.aurora.wifidirect.WifiDirectReceiveBridgeDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectTransportState
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -559,6 +560,20 @@ class NearbyDevicesScreenTest {
                         )
                     ),
                     DebugInfoSection(
+                        title = "Bridge",
+                        items = listOf(
+                            DebugInfoItem("Bridge", "disabled"),
+                            DebugInfoItem("Bridged", "0"),
+                            DebugInfoItem("Failures", "0"),
+                            DebugInfoItem("Last size", "none"),
+                            DebugInfoItem(
+                                "Note",
+                                "Debug bridge only; normal send path still uses BLE.",
+                                preferFullWidth = true
+                            )
+                        )
+                    ),
+                    DebugInfoSection(
                         title = "Identity",
                         items = listOf(
                             DebugInfoItem("Handler", "ready"),
@@ -576,6 +591,40 @@ class NearbyDevicesScreenTest {
                 wifiDirectSocketDiagnostics = WifiDirectSocketDiagnostics(),
                 identityHandlerStatus = "Identity handler ready. Local agreement private key loaded.",
                 peerSessionDiagnostics = diagnostics
+            )
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectReceiveBridgeDebugSectionShowsCompactDiagnostics() {
+        assertEquals(
+            DebugInfoSection(
+                title = "Bridge",
+                items = listOf(
+                    DebugInfoItem("Bridge", "enabled"),
+                    DebugInfoItem("Bridged", "2"),
+                    DebugInfoItem("Failures", "1"),
+                    DebugInfoItem("Last size", "18 B"),
+                    DebugInfoItem(
+                        "Last error",
+                        "Invalid Aurora transport frame payload.",
+                        preferFullWidth = true
+                    ),
+                    DebugInfoItem(
+                        "Note",
+                        "Debug bridge only; normal send path still uses BLE.",
+                        preferFullWidth = true
+                    )
+                )
+            ),
+            buildNearbyWifiDirectReceiveBridgeDebugSection(
+                diagnostics = WifiDirectReceiveBridgeDiagnostics(
+                    enabled = true,
+                    framesBridged = 2,
+                    bridgeFailures = 1,
+                    lastBridgedFrameSize = 18,
+                    lastBridgeError = "Invalid Aurora transport frame payload."
+                )
             )
         )
     }

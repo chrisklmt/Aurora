@@ -20,6 +20,7 @@ import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
 import gr.hua.aurora.wifidirect.WifiDirectSocketCommandAvailability
 import gr.hua.aurora.wifidirect.WifiDirectSocketDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectSocketState
+import gr.hua.aurora.wifidirect.WifiDirectReceiveBridgeDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterState
 import gr.hua.aurora.wifidirect.wifiDirectFrameByteSummary
@@ -46,6 +47,7 @@ import gr.hua.aurora.wifidirect.wifiDirectSupportSummary
 import gr.hua.aurora.wifidirect.wifiDirectTransportSummary
 import gr.hua.aurora.wifidirect.wifiDirectTransportAdapterByteSummary
 import gr.hua.aurora.wifidirect.wifiDirectTransportAdapterStateSummary
+import gr.hua.aurora.wifidirect.wifiDirectReceiveBridgeStateSummary
 
 internal fun buildNearbyWifiDirectDebugSection(
     runtimeStatus: WifiDirectRuntimeStatus
@@ -334,6 +336,58 @@ internal fun buildNearbyWifiDirectAdapterDebugSection(
     )
 }
 
+internal fun buildNearbyWifiDirectReceiveBridgeDebugSection(
+    diagnostics: WifiDirectReceiveBridgeDiagnostics
+): DebugInfoSection {
+    val items = buildList {
+        add(
+            DebugInfoItem(
+                "Bridge",
+                wifiDirectReceiveBridgeStateSummary(diagnostics)
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Bridged",
+                diagnostics.framesBridged.toString()
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Failures",
+                diagnostics.bridgeFailures.toString()
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Last size",
+                wifiDirectFrameSizeSummary(diagnostics.lastBridgedFrameSize)
+            )
+        )
+        diagnostics.lastBridgeError?.takeIf { it.isNotBlank() }?.let { errorText ->
+            add(
+                DebugInfoItem(
+                    "Last error",
+                    errorText,
+                    preferFullWidth = true
+                )
+            )
+        }
+        add(
+            DebugInfoItem(
+                "Note",
+                diagnostics.note,
+                preferFullWidth = true
+            )
+        )
+    }
+
+    return DebugInfoSection(
+        title = "Bridge",
+        items = items
+    )
+}
+
 internal data class NearbyWifiDirectDebugControlsState(
     val canStartDiscovery: Boolean,
     val canStopDiscovery: Boolean,
@@ -509,6 +563,7 @@ internal fun NearbyWifiDirectDebugControls(
     runtimeStatus: WifiDirectRuntimeStatus,
     socketDiagnostics: WifiDirectSocketDiagnostics,
     adapterDiagnostics: WifiDirectTransportAdapterDiagnostics,
+    receiveBridgeDiagnostics: WifiDirectReceiveBridgeDiagnostics,
     onStartDiscovery: () -> Unit,
     onStopDiscovery: () -> Unit,
     onConnectToPeer: (WifiDirectPeer) -> Unit,
@@ -517,6 +572,7 @@ internal fun NearbyWifiDirectDebugControls(
     onConnectSocketClient: (String) -> Unit,
     onSendSocketFrame: () -> Unit,
     onSendAdapterFrame: () -> Unit,
+    onSetReceiveBridgeEnabled: (Boolean) -> Unit,
     onCloseSocket: () -> Unit
 ) {
     val controlsState = nearbyWifiDirectDebugControlsState(runtimeStatus)
@@ -578,6 +634,19 @@ internal fun NearbyWifiDirectDebugControls(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             TextButton(
+                onClick = {
+                    onSetReceiveBridgeEnabled(!receiveBridgeDiagnostics.enabled)
+                }
+            ) {
+                Text(
+                    if (receiveBridgeDiagnostics.enabled) {
+                        "Disable receive bridge"
+                    } else {
+                        "Enable receive bridge"
+                    }
+                )
+            }
+            TextButton(
                 onClick = onSendSocketFrame,
                 enabled = socketControlsState.canSendFrame
             ) {
@@ -596,6 +665,11 @@ internal fun NearbyWifiDirectDebugControls(
                 Text("Close socket")
             }
         }
+        Text(
+            text = "Wi-Fi Direct receive bridge: ${wifiDirectReceiveBridgeStateSummary(receiveBridgeDiagnostics)}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
         socketControlsState.helpText?.let { helpText ->
             Text(
                 text = helpText,

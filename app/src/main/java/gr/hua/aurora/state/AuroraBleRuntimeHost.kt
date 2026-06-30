@@ -39,6 +39,7 @@ import gr.hua.aurora.ble.noop.NoOpBleTransportSender
 import gr.hua.aurora.ble.permissions.BluetoothPermissionStatus
 import gr.hua.aurora.ble.permissions.rememberBluetoothPermissionStatusState
 import gr.hua.aurora.ble.transport.AndroidBleTransportSender
+import gr.hua.aurora.ble.transport.BleGattTransportFrame
 import gr.hua.aurora.ble.transport.BleGattTransportFrameWriter
 import gr.hua.aurora.ble.transport.BleTransportFrameBridge
 import gr.hua.aurora.ble.transport.BleTransportFrameReceiver
@@ -112,6 +113,7 @@ data class AuroraBleRuntimeState(
     val stopWifiDirectDiscovery: () -> Unit,
     val connectToWifiDirectPeer: (gr.hua.aurora.wifidirect.WifiDirectPeer) -> Unit,
     val disconnectWifiDirectPeer: () -> Unit,
+    val receiveWifiDirectDebugTransportFrame: (BleGattTransportFrame) -> BleTransportReceiveResult,
     val peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
     val globalMeshDiagnostics: GlobalMeshDiagnostics,
     val identityHandlerStatus: String,
@@ -124,6 +126,7 @@ data class AuroraBleRuntimeState(
     val exchangeIdentityWithPeer: suspend (BleDiscoveredDevice, String?) -> PeerIdentityExchangeSendResult,
     val connectToTransportPeer: (String, String?) -> Unit,
     val disconnectTransportPeer: () -> Unit,
+    val clearSessionForPeer: (String) -> Unit,
     val resetLocalIdentityAndSessions: () -> Unit
 )
 
@@ -425,89 +428,40 @@ fun rememberAuroraBleRuntimeState(
             )
         )
     }
-    val transportFrameBridge = remember(transportFrameReceiver, mainHandler) {
-        BleTransportFrameBridge(
-            receiver = transportFrameReceiver,
-            dispatch = { runnable ->
-                mainHandler.post(runnable)
-            },
-            onReceiveResult = { result ->
-                Log.d(auroraBleRuntimeLogTag, "BLE transport receive result: $result")
-                peerSessionDiagnostics = peerSessionRegistry.diagnosticsSnapshot()
-                identityExchangeRuntimeStatusText(result)?.let { statusText ->
-                    lastIdentityExchangeStatus = statusText
-                }
-                incomingMessageRuntimeStatusText(result)?.let { statusText ->
-                    lastIncomingMessageStatus = statusText
-                }
-                if (
-                    result is BleTransportReceiveResult.Processed &&
-                    (
-                        result.processingResult is IncomingTransportFrameProcessingResult.Received ||
-                            result.processingResult is IncomingTransportFrameProcessingResult.RelayOnlyEncrypted
-                        )
-                ) {
-                    val immediateSourcePeerId = runtimeSourcePeerId(
-                        sourceDeviceAddress = result.sourceDeviceAddress,
-                        activeTransportPeerId = activeTransportPeerId,
-                        activeTransportDeviceAddress = activeTransportDeviceAddress,
-                        reachablePeers = discoveredAuroraPeers
-                    )
-                    when (val processingResult = result.processingResult) {
-                        is IncomingTransportFrameProcessingResult.Received -> {
-                            when (processingResult.message.frame.type) {
-                                MessageFrameType.GLOBAL_TEXT -> {
-                                    runtimeScope.launch {
-                                        val meshResult = relayReceivedPublicMeshMessage(
-                                            message = processingResult.message,
-                                            ingestionResult = processingResult.ingestionResult,
-                                            coordinator = globalMeshDeliveryCoordinator,
-                                            transportSender = bleTransportSender,
-                                            activeTransportPeerId = activeTransportPeerId,
-                                            activeTransportDeviceAddress = activeTransportDeviceAddress,
-                                            isActiveTransportConnected = bleConnectionStatus == BleConnectionStatus.CONNECTED,
-                                            localPeerId = localPeerId,
-                                            reachablePeers = discoveredAuroraPeers,
-                                            immediateSourcePeerId = immediateSourcePeerId,
-                                            immediateSourceDeviceAddress = result.sourceDeviceAddress,
-                                            connectToReachablePeer = ::connectToReachablePeerAndAwait,
-                                            onConnectOnSendStatusChanged = { statusText ->
-                                                lastConnectOnSendStatus = statusText
-                                            }
-                                        )
-                                        refreshGlobalMeshDiagnostics()
-                                        lastGlobalMeshStatus = globalMeshStatusText(meshResult)
-                                    }
-                                }
-                                MessageFrameType.PRIVATE_TEXT -> {
-                                    val relayEnvelope = processingResult.message.relayEnvelope
-                                    if (relayEnvelope != null) {
-                                        runtimeScope.launch {
-                                            relayPrivateEncryptedMessage(
-                                                envelope = relayEnvelope,
-                                                seenMessageIds = privateMeshSeenMessageIds,
-                                                transportSender = bleTransportSender,
-                                                activeTransportPeerId = activeTransportPeerId,
-                                                activeTransportDeviceAddress = activeTransportDeviceAddress,
-                                                isActiveTransportConnected = bleConnectionStatus == BleConnectionStatus.CONNECTED,
-                                                localPeerId = localPeerId,
-                                                reachablePeers = discoveredAuroraPeers,
-                                                immediateSourcePeerId = immediateSourcePeerId,
-                                                immediateSourceDeviceAddress = result.sourceDeviceAddress,
-                                                connectToReachablePeer = ::connectToReachablePeerAndAwait
-                                            )
-                                        }
-                                    }
-                                }
-                                MessageFrameType.IDENTITY_EXCHANGE,
-                                MessageFrameType.CONTROL -> Unit
-                            }
-                        }
-                        is IncomingTransportFrameProcessingResult.RelayOnlyEncrypted -> {
+    fun handleIncomingTransportReceiveResult(
+        source: String,
+        result: BleTransportReceiveResult
+    ) {
+        Log.d(auroraBleRuntimeLogTag, "$source transport receive result: $result")
+        peerSessionDiagnostics = peerSessionRegistry.diagnosticsSnapshot()
+        identityExchangeRuntimeStatusText(result)?.let { statusText ->
+            lastIdentityExchangeStatus = statusText
+        }
+        incomingMessageRuntimeStatusText(result)?.let { statusText ->
+            lastIncomingMessageStatus = statusText
+        }
+        if (
+            result is BleTransportReceiveResult.Processed &&
+            (
+                result.processingResult is IncomingTransportFrameProcessingResult.Received ||
+                    result.processingResult is IncomingTransportFrameProcessingResult.RelayOnlyEncrypted
+                )
+        ) {
+            val immediateSourcePeerId = runtimeSourcePeerId(
+                sourceDeviceAddress = result.sourceDeviceAddress,
+                activeTransportPeerId = activeTransportPeerId,
+                activeTransportDeviceAddress = activeTransportDeviceAddress,
+                reachablePeers = discoveredAuroraPeers
+            )
+            when (val processingResult = result.processingResult) {
+                is IncomingTransportFrameProcessingResult.Received -> {
+                    when (processingResult.message.frame.type) {
+                        MessageFrameType.GLOBAL_TEXT -> {
                             runtimeScope.launch {
-                                relayPrivateEncryptedMessage(
-                                    envelope = processingResult.envelope,
-                                    seenMessageIds = privateMeshSeenMessageIds,
+                                val meshResult = relayReceivedPublicMeshMessage(
+                                    message = processingResult.message,
+                                    ingestionResult = processingResult.ingestionResult,
+                                    coordinator = globalMeshDeliveryCoordinator,
                                     transportSender = bleTransportSender,
                                     activeTransportPeerId = activeTransportPeerId,
                                     activeTransportDeviceAddress = activeTransportDeviceAddress,
@@ -516,16 +470,85 @@ fun rememberAuroraBleRuntimeState(
                                     reachablePeers = discoveredAuroraPeers,
                                     immediateSourcePeerId = immediateSourcePeerId,
                                     immediateSourceDeviceAddress = result.sourceDeviceAddress,
-                                    connectToReachablePeer = ::connectToReachablePeerAndAwait
+                                    connectToReachablePeer = ::connectToReachablePeerAndAwait,
+                                    onConnectOnSendStatusChanged = { statusText ->
+                                        lastConnectOnSendStatus = statusText
+                                    }
                                 )
+                                refreshGlobalMeshDiagnostics()
+                                lastGlobalMeshStatus = globalMeshStatusText(meshResult)
                             }
                         }
-                        is IncomingTransportFrameProcessingResult.IdentityHandled,
-                        is IncomingTransportFrameProcessingResult.IdentityHandlingUnavailable -> Unit
+                        MessageFrameType.PRIVATE_TEXT -> {
+                            val relayEnvelope = processingResult.message.relayEnvelope
+                            if (relayEnvelope != null) {
+                                runtimeScope.launch {
+                                    relayPrivateEncryptedMessage(
+                                        envelope = relayEnvelope,
+                                        seenMessageIds = privateMeshSeenMessageIds,
+                                        transportSender = bleTransportSender,
+                                        activeTransportPeerId = activeTransportPeerId,
+                                        activeTransportDeviceAddress = activeTransportDeviceAddress,
+                                        isActiveTransportConnected = bleConnectionStatus == BleConnectionStatus.CONNECTED,
+                                        localPeerId = localPeerId,
+                                        reachablePeers = discoveredAuroraPeers,
+                                        immediateSourcePeerId = immediateSourcePeerId,
+                                        immediateSourceDeviceAddress = result.sourceDeviceAddress,
+                                        connectToReachablePeer = ::connectToReachablePeerAndAwait
+                                    )
+                                }
+                            }
+                        }
+                        MessageFrameType.IDENTITY_EXCHANGE,
+                        MessageFrameType.CONTROL -> Unit
                     }
                 }
-                refreshGlobalMeshDiagnostics()
-                logIdentityExchangeReceiveResult(result)
+                is IncomingTransportFrameProcessingResult.RelayOnlyEncrypted -> {
+                    runtimeScope.launch {
+                        relayPrivateEncryptedMessage(
+                            envelope = processingResult.envelope,
+                            seenMessageIds = privateMeshSeenMessageIds,
+                            transportSender = bleTransportSender,
+                            activeTransportPeerId = activeTransportPeerId,
+                            activeTransportDeviceAddress = activeTransportDeviceAddress,
+                            isActiveTransportConnected = bleConnectionStatus == BleConnectionStatus.CONNECTED,
+                            localPeerId = localPeerId,
+                            reachablePeers = discoveredAuroraPeers,
+                            immediateSourcePeerId = immediateSourcePeerId,
+                            immediateSourceDeviceAddress = result.sourceDeviceAddress,
+                            connectToReachablePeer = ::connectToReachablePeerAndAwait
+                        )
+                    }
+                }
+                is IncomingTransportFrameProcessingResult.IdentityHandled,
+                is IncomingTransportFrameProcessingResult.IdentityHandlingUnavailable -> Unit
+            }
+        }
+        refreshGlobalMeshDiagnostics()
+        logIdentityExchangeReceiveResult(result)
+    }
+    val receiveWifiDirectDebugTransportFrame = remember(
+        transportFrameReceiver,
+        runtimeGeneration,
+        activeTransportPeerId,
+        activeTransportDeviceAddress,
+        bleConnectionStatus,
+        discoveredAuroraPeers
+    ) {
+        { frame: BleGattTransportFrame ->
+            val result = transportFrameReceiver.receive(frame)
+            handleIncomingTransportReceiveResult("Wi-Fi Direct", result)
+            result
+        }
+    }
+    val transportFrameBridge = remember(transportFrameReceiver, mainHandler) {
+        BleTransportFrameBridge(
+            receiver = transportFrameReceiver,
+            dispatch = { runnable ->
+                mainHandler.post(runnable)
+            },
+            onReceiveResult = { result ->
+                handleIncomingTransportReceiveResult("BLE", result)
             }
         )
     }
@@ -654,6 +677,12 @@ fun rememberAuroraBleRuntimeState(
         )
         bleConnector.disconnect()
         clearTransportConnectionState()
+    }
+    val clearSessionForPeer: (String) -> Unit = { peerId ->
+        val didClear = peerSessionRegistry.clearPeer(peerId)
+        if (didClear) {
+            peerSessionDiagnostics = peerSessionRegistry.diagnosticsSnapshot()
+        }
     }
     val resetLocalIdentityAndSessions: () -> Unit = {
         Log.d(auroraBleRuntimeLogTag, "BLE runtime local identity reset requested")
@@ -849,6 +878,7 @@ fun rememberAuroraBleRuntimeState(
         stopWifiDirectDiscovery = wifiDirectRuntimeState.stopDiscovery,
         connectToWifiDirectPeer = wifiDirectRuntimeState.connectToPeer,
         disconnectWifiDirectPeer = wifiDirectRuntimeState.disconnect,
+        receiveWifiDirectDebugTransportFrame = receiveWifiDirectDebugTransportFrame,
         peerSessionDiagnostics = peerSessionDiagnostics,
         globalMeshDiagnostics = globalMeshDiagnostics,
         identityHandlerStatus = identityHandlerStatus,
@@ -861,6 +891,7 @@ fun rememberAuroraBleRuntimeState(
         exchangeIdentityWithPeer = exchangeIdentityWithPeer,
         connectToTransportPeer = connectToTransportPeer,
         disconnectTransportPeer = disconnectTransportPeer,
+        clearSessionForPeer = clearSessionForPeer,
         resetLocalIdentityAndSessions = resetLocalIdentityAndSessions
     )
 }

@@ -132,6 +132,9 @@ fun NearbyDevicesScreen(
     onStopWifiDirectDiscovery: () -> Unit,
     onConnectWifiDirectPeer: (WifiDirectPeer) -> Unit,
     onDisconnectWifiDirectPeer: () -> Unit,
+    onReceiveWifiDirectDebugTransportFrame:
+    (gr.hua.aurora.ble.transport.BleGattTransportFrame)
+    -> gr.hua.aurora.ble.transport.BleTransportReceiveResult,
     identityHandlerStatus: String,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
     activeTransportPeerId: String?,
@@ -175,7 +178,8 @@ fun NearbyDevicesScreen(
         mutableStateOf<String?>(null)
     }
     val wifiDirectSocketState = rememberWifiDirectSocketState(
-        runtimeStatus = wifiDirectRuntimeStatus
+        runtimeStatus = wifiDirectRuntimeStatus,
+        processReceiveBridgeFrame = onReceiveWifiDirectDebugTransportFrame
     )
     val debugCard = buildNearbyDebugCard(
         showDebugDiagnostics = showDebugDiagnostics,
@@ -185,9 +189,16 @@ fun NearbyDevicesScreen(
         wifiDirectRuntimeStatus = wifiDirectRuntimeStatus,
         wifiDirectSocketDiagnostics = wifiDirectSocketState.diagnostics,
         wifiDirectAdapterDiagnostics = wifiDirectSocketState.adapterDiagnostics,
+        wifiDirectReceiveBridgeDiagnostics = wifiDirectSocketState.receiveBridgeDiagnostics,
         identityHandlerStatus = identityHandlerStatus,
         peerSessionDiagnostics = peerSessionDiagnostics
     )
+    val handleResetLocalData = remember(wifiDirectSocketState, onResetLocalData) {
+        {
+            wifiDirectSocketState.disableReceiveBridge()
+            onResetLocalData()
+        }
+    }
 
     LaunchedEffect(
         discoveredBleDevices,
@@ -220,7 +231,7 @@ fun NearbyDevicesScreen(
             AuroraAvailabilityIndicator(uiState = availabilityState)
         },
         username = currentUsername,
-        onUsernameTripleTap = onResetLocalData,
+        onUsernameTripleTap = handleResetLocalData,
         rightAction = AuroraTopBarAction.BACK,
         onRightActionClick = onBack
     ) {
@@ -313,6 +324,7 @@ fun NearbyDevicesScreen(
                             runtimeStatus = wifiDirectRuntimeStatus,
                             socketDiagnostics = wifiDirectSocketState.diagnostics,
                             adapterDiagnostics = wifiDirectSocketState.adapterDiagnostics,
+                            receiveBridgeDiagnostics = wifiDirectSocketState.receiveBridgeDiagnostics,
                             onStartDiscovery = onStartWifiDirectDiscovery,
                             onStopDiscovery = onStopWifiDirectDiscovery,
                             onConnectToPeer = onConnectWifiDirectPeer,
@@ -321,6 +333,7 @@ fun NearbyDevicesScreen(
                             onConnectSocketClient = wifiDirectSocketState.connectClient,
                             onSendSocketFrame = wifiDirectSocketState.sendFrame,
                             onSendAdapterFrame = wifiDirectSocketState.sendAdapterFrame,
+                            onSetReceiveBridgeEnabled = wifiDirectSocketState.setReceiveBridgeEnabled,
                             onCloseSocket = wifiDirectSocketState.closeSocket
                         )
                     }
@@ -1384,6 +1397,8 @@ internal fun buildNearbyDebugCard(
     wifiDirectSocketDiagnostics: gr.hua.aurora.wifidirect.WifiDirectSocketDiagnostics,
     wifiDirectAdapterDiagnostics: gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics =
         gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics(),
+    wifiDirectReceiveBridgeDiagnostics: gr.hua.aurora.wifidirect.WifiDirectReceiveBridgeDiagnostics =
+        gr.hua.aurora.wifidirect.WifiDirectReceiveBridgeDiagnostics(),
     identityHandlerStatus: String,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics
 ): DebugInfoCardModel? {
@@ -1410,6 +1425,9 @@ internal fun buildNearbyDebugCard(
             ),
             buildNearbyWifiDirectAdapterDebugSection(
                 diagnostics = wifiDirectAdapterDiagnostics
+            ),
+            buildNearbyWifiDirectReceiveBridgeDebugSection(
+                diagnostics = wifiDirectReceiveBridgeDiagnostics
             ),
             buildNearbyIdentityDebugSection(
                 identityHandlerStatus = identityHandlerStatus,
