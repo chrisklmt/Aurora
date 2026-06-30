@@ -65,6 +65,7 @@ import gr.hua.aurora.ui.components.DebugInfoSection
 import gr.hua.aurora.ui.components.buildAuroraAvailabilityUiState
 import gr.hua.aurora.wifidirect.WifiDirectPeer
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
+import gr.hua.aurora.wifidirect.rememberWifiDirectSocketState
 import kotlinx.coroutines.launch
 
 private const val nearbyDevicesLogTag = "NearbyDevicesScreen"
@@ -173,12 +174,16 @@ fun NearbyDevicesScreen(
     var activeIdentityExchangeDeviceKey by remember {
         mutableStateOf<String?>(null)
     }
+    val wifiDirectSocketState = rememberWifiDirectSocketState(
+        runtimeStatus = wifiDirectRuntimeStatus
+    )
     val debugCard = buildNearbyDebugCard(
         showDebugDiagnostics = showDebugDiagnostics,
         advertiseStatus = bleAdvertiseStatus,
         gattServerStatus = bleGattServerStatus,
         scanStatus = bleScanStatus,
         wifiDirectRuntimeStatus = wifiDirectRuntimeStatus,
+        wifiDirectSocketDiagnostics = wifiDirectSocketState.diagnostics,
         identityHandlerStatus = identityHandlerStatus,
         peerSessionDiagnostics = peerSessionDiagnostics
     )
@@ -305,10 +310,15 @@ fun NearbyDevicesScreen(
                         DebugInfoCard(card = card)
                         NearbyWifiDirectDebugControls(
                             runtimeStatus = wifiDirectRuntimeStatus,
+                            socketDiagnostics = wifiDirectSocketState.diagnostics,
                             onStartDiscovery = onStartWifiDirectDiscovery,
                             onStopDiscovery = onStopWifiDirectDiscovery,
                             onConnectToPeer = onConnectWifiDirectPeer,
-                            onDisconnect = onDisconnectWifiDirectPeer
+                            onDisconnect = onDisconnectWifiDirectPeer,
+                            onStartSocketServer = wifiDirectSocketState.startServer,
+                            onConnectSocketClient = wifiDirectSocketState.connectClient,
+                            onSendSocketPing = wifiDirectSocketState.sendPing,
+                            onCloseSocket = wifiDirectSocketState.closeSocket
                         )
                     }
                 }
@@ -1368,6 +1378,7 @@ internal fun buildNearbyDebugCard(
     gattServerStatus: BleGattServerStatus,
     scanStatus: BleScanStatus,
     wifiDirectRuntimeStatus: WifiDirectRuntimeStatus,
+    wifiDirectSocketDiagnostics: gr.hua.aurora.wifidirect.WifiDirectSocketDiagnostics,
     identityHandlerStatus: String,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics
 ): DebugInfoCardModel? {
@@ -1385,6 +1396,9 @@ internal fun buildNearbyDebugCard(
             ),
             buildNearbyWifiDirectDebugSection(
                 runtimeStatus = wifiDirectRuntimeStatus
+            ),
+            buildNearbyWifiDirectSocketDebugSection(
+                diagnostics = wifiDirectSocketDiagnostics
             ),
             buildNearbyIdentityDebugSection(
                 identityHandlerStatus = identityHandlerStatus,

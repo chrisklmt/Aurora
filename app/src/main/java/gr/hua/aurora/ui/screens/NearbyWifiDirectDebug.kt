@@ -17,6 +17,9 @@ import gr.hua.aurora.wifidirect.WifiDirectConnectionState
 import gr.hua.aurora.wifidirect.WifiDirectEnabledState
 import gr.hua.aurora.wifidirect.WifiDirectPeer
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
+import gr.hua.aurora.wifidirect.WifiDirectSocketDiagnostics
+import gr.hua.aurora.wifidirect.WifiDirectSocketRole
+import gr.hua.aurora.wifidirect.WifiDirectSocketState
 import gr.hua.aurora.wifidirect.wifiDirectConnectionRoleSummary
 import gr.hua.aurora.wifidirect.wifiDirectConnectionSummary
 import gr.hua.aurora.wifidirect.wifiDirectDiscoveryBlockedReason
@@ -26,6 +29,12 @@ import gr.hua.aurora.wifidirect.wifiDirectGroupFormedSummary
 import gr.hua.aurora.wifidirect.wifiDirectMissingPermissionsSummary
 import gr.hua.aurora.wifidirect.wifiDirectPeerMatches
 import gr.hua.aurora.wifidirect.wifiDirectPermissionsSummary
+import gr.hua.aurora.wifidirect.wifiDirectSocketByteSummary
+import gr.hua.aurora.wifidirect.wifiDirectSocketConnectedSummary
+import gr.hua.aurora.wifidirect.wifiDirectSocketEndpointSummary
+import gr.hua.aurora.wifidirect.wifiDirectSocketMessageSummary
+import gr.hua.aurora.wifidirect.wifiDirectSocketRoleSummary
+import gr.hua.aurora.wifidirect.wifiDirectSocketStateSummary
 import gr.hua.aurora.wifidirect.wifiDirectSupportSummary
 import gr.hua.aurora.wifidirect.wifiDirectTransportSummary
 
@@ -135,6 +144,76 @@ internal fun buildNearbyWifiDirectDebugSection(
     )
 }
 
+internal fun buildNearbyWifiDirectSocketDebugSection(
+    diagnostics: WifiDirectSocketDiagnostics
+): DebugInfoSection {
+    val items = buildList {
+        add(
+            DebugInfoItem(
+                "Socket",
+                wifiDirectSocketStateSummary(diagnostics.state)
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Role",
+                wifiDirectSocketRoleSummary(diagnostics.role)
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Connected",
+                wifiDirectSocketConnectedSummary(diagnostics.isConnected)
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Endpoint",
+                wifiDirectSocketEndpointSummary(diagnostics.endpoint)
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Sent",
+                wifiDirectSocketMessageSummary(diagnostics.lastSentMessage)
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Received",
+                wifiDirectSocketMessageSummary(diagnostics.lastReceivedMessage)
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Bytes",
+                wifiDirectSocketByteSummary(diagnostics)
+            )
+        )
+        diagnostics.lastError?.takeIf { it.isNotBlank() }?.let { errorText ->
+            add(
+                DebugInfoItem(
+                    "Last error",
+                    errorText,
+                    preferFullWidth = true
+                )
+            )
+        }
+        add(
+            DebugInfoItem(
+                "Note",
+                diagnostics.note,
+                preferFullWidth = true
+            )
+        )
+    }
+
+    return DebugInfoSection(
+        title = "Socket",
+        items = items
+    )
+}
+
 internal data class NearbyWifiDirectDebugControlsState(
     val canStartDiscovery: Boolean,
     val canStopDiscovery: Boolean,
@@ -160,6 +239,87 @@ internal fun nearbyWifiDirectDebugControlsState(
         disconnectLabel = nearbyWifiDirectDisconnectLabel(runtimeStatus),
         startDisabledReason = startDisabledReason
     )
+}
+
+internal data class NearbyWifiDirectSocketControlsState(
+    val canStartServer: Boolean,
+    val canConnectClient: Boolean,
+    val canSendPing: Boolean,
+    val canCloseSocket: Boolean,
+    val connectHost: String? = null,
+    val helpText: String? = null
+)
+
+internal fun nearbyWifiDirectSocketControlsState(
+    runtimeStatus: WifiDirectRuntimeStatus,
+    diagnostics: WifiDirectSocketDiagnostics
+): NearbyWifiDirectSocketControlsState {
+    return when (diagnostics.state) {
+        WifiDirectSocketState.CONNECTED -> NearbyWifiDirectSocketControlsState(
+            canStartServer = false,
+            canConnectClient = false,
+            canSendPing = true,
+            canCloseSocket = true
+        )
+        WifiDirectSocketState.STARTING_SERVER,
+        WifiDirectSocketState.SERVER_LISTENING,
+        WifiDirectSocketState.CONNECTING,
+        WifiDirectSocketState.CLOSING -> NearbyWifiDirectSocketControlsState(
+            canStartServer = false,
+            canConnectClient = false,
+            canSendPing = false,
+            canCloseSocket = true,
+            helpText = nearbyWifiDirectSocketActivityHint(diagnostics.state)
+        )
+        WifiDirectSocketState.IDLE,
+        WifiDirectSocketState.FAILED -> {
+            val connectionStatus = runtimeStatus.connectionStatus
+            if (
+                connectionStatus.state != WifiDirectConnectionState.CONNECTED ||
+                connectionStatus.groupFormed != gr.hua.aurora.wifidirect.WifiDirectGroupFormedState.YES
+            ) {
+                return NearbyWifiDirectSocketControlsState(
+                    canStartServer = false,
+                    canConnectClient = false,
+                    canSendPing = false,
+                    canCloseSocket = false,
+                    helpText = "Wi-Fi Direct group not formed."
+                )
+            }
+
+            when (connectionStatus.role) {
+                WifiDirectSocketRole.SERVER.toConnectionRole() -> NearbyWifiDirectSocketControlsState(
+                    canStartServer = true,
+                    canConnectClient = false,
+                    canSendPing = false,
+                    canCloseSocket = false
+                )
+                WifiDirectSocketRole.CLIENT.toConnectionRole() -> {
+                    val ownerAddress = connectionStatus.groupOwnerAddress?.trim()
+                        ?.takeIf { it.isNotEmpty() }
+                    NearbyWifiDirectSocketControlsState(
+                        canStartServer = false,
+                        canConnectClient = ownerAddress != null,
+                        canSendPing = false,
+                        canCloseSocket = false,
+                        connectHost = ownerAddress,
+                        helpText = if (ownerAddress == null) {
+                            "Group owner address unavailable."
+                        } else {
+                            null
+                        }
+                    )
+                }
+                else -> NearbyWifiDirectSocketControlsState(
+                    canStartServer = false,
+                    canConnectClient = false,
+                    canSendPing = false,
+                    canCloseSocket = false,
+                    helpText = "Wi-Fi Direct role unavailable."
+                )
+            }
+        }
+    }
 }
 
 internal fun nearbyWifiDirectPeerListValue(
@@ -285,12 +445,21 @@ internal fun nearbyCanDisconnectWifiDirect(
 @Composable
 internal fun NearbyWifiDirectDebugControls(
     runtimeStatus: WifiDirectRuntimeStatus,
+    socketDiagnostics: WifiDirectSocketDiagnostics,
     onStartDiscovery: () -> Unit,
     onStopDiscovery: () -> Unit,
     onConnectToPeer: (WifiDirectPeer) -> Unit,
-    onDisconnect: () -> Unit
+    onDisconnect: () -> Unit,
+    onStartSocketServer: (String?) -> Unit,
+    onConnectSocketClient: (String) -> Unit,
+    onSendSocketPing: () -> Unit,
+    onCloseSocket: () -> Unit
 ) {
     val controlsState = nearbyWifiDirectDebugControlsState(runtimeStatus)
+    val socketControlsState = nearbyWifiDirectSocketControlsState(
+        runtimeStatus = runtimeStatus,
+        diagnostics = socketDiagnostics
+    )
 
     Column(
         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -317,6 +486,51 @@ internal fun NearbyWifiDirectDebugControls(
             ) {
                 Text(controlsState.disconnectLabel)
             }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            TextButton(
+                onClick = {
+                    onStartSocketServer(runtimeStatus.connectionStatus.groupOwnerAddress)
+                },
+                enabled = socketControlsState.canStartServer
+            ) {
+                Text("Start socket server")
+            }
+            TextButton(
+                onClick = {
+                    socketControlsState.connectHost?.let(onConnectSocketClient)
+                },
+                enabled = socketControlsState.canConnectClient
+            ) {
+                Text("Connect socket client")
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            TextButton(
+                onClick = onSendSocketPing,
+                enabled = socketControlsState.canSendPing
+            ) {
+                Text("Send debug ping")
+            }
+            TextButton(
+                onClick = onCloseSocket,
+                enabled = socketControlsState.canCloseSocket
+            ) {
+                Text("Close socket")
+            }
+        }
+        socketControlsState.helpText?.let { helpText ->
+            Text(
+                text = helpText,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
         runtimeStatus.peers.forEach { peer ->
             NearbyWifiDirectPeerActionRow(
@@ -361,4 +575,26 @@ internal fun nearbyWifiDirectEnabledValue(
     state: WifiDirectEnabledState
 ): String {
     return wifiDirectEnabledSummary(state)
+}
+
+private fun nearbyWifiDirectSocketActivityHint(
+    state: WifiDirectSocketState
+): String? {
+    return when (state) {
+        WifiDirectSocketState.STARTING_SERVER -> "Starting debug socket server."
+        WifiDirectSocketState.SERVER_LISTENING -> "Waiting for a socket client."
+        WifiDirectSocketState.CONNECTING -> "Connecting to the group owner socket."
+        WifiDirectSocketState.CLOSING -> "Closing Wi-Fi Direct debug socket."
+        WifiDirectSocketState.IDLE,
+        WifiDirectSocketState.CONNECTED,
+        WifiDirectSocketState.FAILED -> null
+    }
+}
+
+private fun WifiDirectSocketRole.toConnectionRole(): gr.hua.aurora.wifidirect.WifiDirectConnectionRole {
+    return when (this) {
+        WifiDirectSocketRole.SERVER -> gr.hua.aurora.wifidirect.WifiDirectConnectionRole.GROUP_OWNER
+        WifiDirectSocketRole.CLIENT -> gr.hua.aurora.wifidirect.WifiDirectConnectionRole.CLIENT
+        WifiDirectSocketRole.UNKNOWN -> gr.hua.aurora.wifidirect.WifiDirectConnectionRole.UNKNOWN
+    }
 }

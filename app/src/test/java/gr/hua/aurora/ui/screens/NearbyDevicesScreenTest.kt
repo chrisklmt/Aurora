@@ -23,6 +23,10 @@ import gr.hua.aurora.wifidirect.WifiDirectGroupFormedState
 import gr.hua.aurora.wifidirect.WifiDirectPeer
 import gr.hua.aurora.wifidirect.WifiDirectPermissionStatus
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
+import gr.hua.aurora.wifidirect.WifiDirectSocketDiagnostics
+import gr.hua.aurora.wifidirect.WifiDirectSocketEndpoint
+import gr.hua.aurora.wifidirect.WifiDirectSocketRole
+import gr.hua.aurora.wifidirect.WifiDirectSocketState
 import gr.hua.aurora.wifidirect.WifiDirectTransportState
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -466,6 +470,7 @@ class NearbyDevicesScreenTest {
                 gattServerStatus = BleGattServerStatus.HOSTING,
                 scanStatus = BleScanStatus.SCANNING,
                 wifiDirectRuntimeStatus = wifiDirectRuntimeStatus(),
+                wifiDirectSocketDiagnostics = WifiDirectSocketDiagnostics(),
                 identityHandlerStatus = "Identity handler ready.",
                 peerSessionDiagnostics = PeerSessionRegistryDiagnostics(
                     establishedPeerIds = emptyList(),
@@ -508,6 +513,23 @@ class NearbyDevicesScreenTest {
                         )
                     ),
                     DebugInfoSection(
+                        title = "Socket",
+                        items = listOf(
+                            DebugInfoItem("Socket", "idle"),
+                            DebugInfoItem("Role", "unknown"),
+                            DebugInfoItem("Connected", "no"),
+                            DebugInfoItem("Endpoint", "port 8988"),
+                            DebugInfoItem("Sent", "none"),
+                            DebugInfoItem("Received", "none"),
+                            DebugInfoItem("Bytes", "0/0"),
+                            DebugInfoItem(
+                                "Note",
+                                "Wi-Fi Direct chat transport not wired yet.",
+                                preferFullWidth = true
+                            )
+                        )
+                    ),
+                    DebugInfoSection(
                         title = "Identity",
                         items = listOf(
                             DebugInfoItem("Handler", "ready"),
@@ -522,6 +544,7 @@ class NearbyDevicesScreenTest {
                 gattServerStatus = BleGattServerStatus.HOSTING,
                 scanStatus = BleScanStatus.SCANNING,
                 wifiDirectRuntimeStatus = wifiDirectRuntimeStatus(),
+                wifiDirectSocketDiagnostics = WifiDirectSocketDiagnostics(),
                 identityHandlerStatus = "Identity handler ready. Local agreement private key loaded.",
                 peerSessionDiagnostics = diagnostics
             )
@@ -702,6 +725,44 @@ class NearbyDevicesScreenTest {
     }
 
     @Test
+    fun nearbyWifiDirectSocketDebugSectionShowsCompactDiagnostics() {
+        assertEquals(
+            DebugInfoSection(
+                title = "Socket",
+                items = listOf(
+                    DebugInfoItem("Socket", "connected"),
+                    DebugInfoItem("Role", "client"),
+                    DebugInfoItem("Connected", "yes"),
+                    DebugInfoItem("Endpoint", "192.168.49.1:8988"),
+                    DebugInfoItem("Sent", "ping"),
+                    DebugInfoItem("Received", "pong"),
+                    DebugInfoItem("Bytes", "5/5"),
+                    DebugInfoItem(
+                        "Note",
+                        "Wi-Fi Direct chat transport not wired yet.",
+                        preferFullWidth = true
+                    )
+                )
+            ),
+            buildNearbyWifiDirectSocketDebugSection(
+                diagnostics = WifiDirectSocketDiagnostics(
+                    state = WifiDirectSocketState.CONNECTED,
+                    role = WifiDirectSocketRole.CLIENT,
+                    endpoint = WifiDirectSocketEndpoint(
+                        host = "192.168.49.1",
+                        port = 8988
+                    ),
+                    isConnected = true,
+                    lastSentMessage = "ping",
+                    lastReceivedMessage = "pong",
+                    bytesSent = 5,
+                    bytesReceived = 5
+                )
+            )
+        )
+    }
+
+    @Test
     fun nearbyWifiDirectPeerActionStateReflectsConnectAndDisconnectProgress() {
         val peer = WifiDirectPeer(
             deviceName = "Aurora Alpha",
@@ -753,6 +814,113 @@ class NearbyDevicesScreenTest {
                     )
                 ),
                 peer = peer
+            )
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectSocketControlsRequireFormedGroupBeforeEnablingSocketActions() {
+        assertEquals(
+            NearbyWifiDirectSocketControlsState(
+                canStartServer = false,
+                canConnectClient = false,
+                canSendPing = false,
+                canCloseSocket = false,
+                helpText = "Wi-Fi Direct group not formed."
+            ),
+            nearbyWifiDirectSocketControlsState(
+                runtimeStatus = wifiDirectRuntimeStatus(),
+                diagnostics = WifiDirectSocketDiagnostics()
+            )
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectSocketControlsEnableServerForGroupOwner() {
+        assertEquals(
+            NearbyWifiDirectSocketControlsState(
+                canStartServer = true,
+                canConnectClient = false,
+                canSendPing = false,
+                canCloseSocket = false
+            ),
+            nearbyWifiDirectSocketControlsState(
+                runtimeStatus = wifiDirectRuntimeStatus(
+                    connectionStatus = WifiDirectConnectionStatus(
+                        state = WifiDirectConnectionState.CONNECTED,
+                        groupFormed = WifiDirectGroupFormedState.YES,
+                        role = WifiDirectConnectionRole.GROUP_OWNER
+                    )
+                ),
+                diagnostics = WifiDirectSocketDiagnostics()
+            )
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectSocketControlsEnableClientForKnownOwnerAddress() {
+        assertEquals(
+            NearbyWifiDirectSocketControlsState(
+                canStartServer = false,
+                canConnectClient = true,
+                canSendPing = false,
+                canCloseSocket = false,
+                connectHost = "192.168.49.1"
+            ),
+            nearbyWifiDirectSocketControlsState(
+                runtimeStatus = wifiDirectRuntimeStatus(
+                    connectionStatus = WifiDirectConnectionStatus(
+                        state = WifiDirectConnectionState.CONNECTED,
+                        groupFormed = WifiDirectGroupFormedState.YES,
+                        role = WifiDirectConnectionRole.CLIENT,
+                        groupOwnerAddress = "192.168.49.1"
+                    )
+                ),
+                diagnostics = WifiDirectSocketDiagnostics()
+            )
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectSocketControlsShowClearReasonWhenRoleOrAddressIsUnavailable() {
+        assertEquals(
+            NearbyWifiDirectSocketControlsState(
+                canStartServer = false,
+                canConnectClient = false,
+                canSendPing = false,
+                canCloseSocket = false,
+                helpText = "Wi-Fi Direct role unavailable."
+            ),
+            nearbyWifiDirectSocketControlsState(
+                runtimeStatus = wifiDirectRuntimeStatus(
+                    connectionStatus = WifiDirectConnectionStatus(
+                        state = WifiDirectConnectionState.CONNECTED,
+                        groupFormed = WifiDirectGroupFormedState.YES,
+                        role = WifiDirectConnectionRole.UNKNOWN
+                    )
+                ),
+                diagnostics = WifiDirectSocketDiagnostics()
+            )
+        )
+        assertEquals(
+            NearbyWifiDirectSocketControlsState(
+                canStartServer = false,
+                canConnectClient = false,
+                canSendPing = false,
+                canCloseSocket = false,
+                connectHost = null,
+                helpText = "Group owner address unavailable."
+            ),
+            nearbyWifiDirectSocketControlsState(
+                runtimeStatus = wifiDirectRuntimeStatus(
+                    connectionStatus = WifiDirectConnectionStatus(
+                        state = WifiDirectConnectionState.CONNECTED,
+                        groupFormed = WifiDirectGroupFormedState.YES,
+                        role = WifiDirectConnectionRole.CLIENT,
+                        groupOwnerAddress = null
+                    )
+                ),
+                diagnostics = WifiDirectSocketDiagnostics()
             )
         )
     }
