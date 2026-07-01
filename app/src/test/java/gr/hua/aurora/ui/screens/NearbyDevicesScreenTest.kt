@@ -23,6 +23,7 @@ import gr.hua.aurora.wifidirect.WifiDirectGroupFormedState
 import gr.hua.aurora.wifidirect.WifiDirectGlobalDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectPeer
 import gr.hua.aurora.wifidirect.WifiDirectPermissionStatus
+import gr.hua.aurora.wifidirect.WifiDirectPrivateDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
 import gr.hua.aurora.wifidirect.WifiDirectSocketDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectSocketEndpoint
@@ -516,6 +517,8 @@ class NearbyDevicesScreenTest {
                 "Socket/frame",
                 "Bridges",
                 "Global debug send",
+                "Manual test readiness",
+                "Manual test",
                 "Identity"
             ),
             card.sections.map { it.title }
@@ -524,8 +527,79 @@ class NearbyDevicesScreenTest {
         assertTrue(globalSection.items.contains(DebugInfoItem("Overall", "Not ready", preferFullWidth = true)))
         assertTrue(globalSection.items.contains(DebugInfoItem("Guide", "For Wi-Fi Direct Global test: connect group, connect socket, enable send bridge on sender, enable receive bridge on receiver, enable Global send.", preferFullWidth = true)))
         assertTrue(globalSection.items.contains(DebugInfoItem("Note", "Normal chat still uses BLE. Private Chat still uses BLE.", preferFullWidth = true)))
+        val readinessSection = card.sections.first { it.title == "Manual test readiness" }
+        assertTrue(readinessSection.items.contains(DebugInfoItem("Overall", "Not ready", preferFullWidth = true)))
+        assertTrue(readinessSection.items.contains(DebugInfoItem("Global send", "disabled")))
+        assertTrue(readinessSection.items.contains(DebugInfoItem("Private send", "disabled")))
+        val manualTestSection = card.sections.first { it.title == "Manual test" }
+        assertTrue(
+            manualTestSection.items.contains(
+                DebugInfoItem(
+                    "Step 9",
+                    "For Global: enable Global Wi-Fi Direct debug send, then send Global Chat message.",
+                    preferFullWidth = true
+                )
+            )
+        )
+        assertTrue(
+            manualTestSection.items.contains(
+                DebugInfoItem(
+                    "Step 10",
+                    "For Private: open Private Chat, enable Private Wi-Fi Direct debug send, then send Private Chat message.",
+                    preferFullWidth = true
+                )
+            )
+        )
         val bridgesSection = card.sections.first { it.title == "Bridges" }
         assertTrue(bridgesSection.items.contains(DebugInfoItem("Receive warn", "Receive bridge disabled.", preferFullWidth = true)))
+    }
+
+    @Test
+    fun nearbyWifiDirectManualReadinessReportsGlobalAndPrivateDebugStates() {
+        assertEquals(
+            NearbyWifiDirectManualTestReadiness(
+                overallStatus = "Ready for Private debug send",
+                discoveryStatus = "ready",
+                groupStatus = "connected",
+                socketFrameStatus = "ready",
+                adapterStatus = "ready",
+                sendBridgeStatus = "enabled",
+                receiveBridgeStatus = "enabled",
+                globalDebugSendStatus = "enabled",
+                privateDebugSendStatus = "enabled"
+            ),
+            nearbyWifiDirectManualTestReadiness(
+                runtimeStatus = wifiDirectRuntimeStatus(
+                    connectionStatus = WifiDirectConnectionStatus(
+                        state = WifiDirectConnectionState.CONNECTED,
+                        groupFormed = WifiDirectGroupFormedState.YES,
+                        role = WifiDirectConnectionRole.CLIENT,
+                        groupOwnerAddress = "192.168.49.1"
+                    )
+                ),
+                socketDiagnostics = WifiDirectSocketDiagnostics(
+                    state = WifiDirectSocketState.CONNECTED,
+                    isConnected = true
+                ),
+                adapterDiagnostics = WifiDirectTransportAdapterDiagnostics(
+                    state = WifiDirectTransportAdapterState.READY
+                ),
+                sendBridgeDiagnostics = WifiDirectSendBridgeDiagnostics(enabled = true),
+                globalSendDiagnostics = WifiDirectGlobalDebugSendDiagnostics(enabled = true),
+                privateDebugSendDiagnostics = WifiDirectPrivateDebugSendDiagnostics(enabled = true),
+                receiveBridgeDiagnostics = WifiDirectReceiveBridgeDiagnostics(enabled = true)
+            )
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectManualChecklistSectionListsGlobalAndPrivateSteps() {
+        val section = buildNearbyWifiDirectManualChecklistSection()
+
+        assertEquals("Manual test", section.title)
+        assertTrue(section.items.any { it.value.contains("Global Wi-Fi Direct debug send") })
+        assertTrue(section.items.any { it.value.contains("Private Wi-Fi Direct debug send") })
+        assertTrue(section.items.any { it.value.contains("no Delivered/ACK", ignoreCase = true) })
     }
 
     @Test

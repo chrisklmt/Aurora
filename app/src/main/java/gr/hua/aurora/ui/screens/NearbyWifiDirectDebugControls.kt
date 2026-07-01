@@ -210,6 +210,7 @@ internal fun NearbyWifiDirectDebugControls(
     onSetGlobalDebugSendEnabled: (Boolean) -> Unit,
     onSetSendBridgeEnabled: (Boolean) -> Unit,
     onSetReceiveBridgeEnabled: (Boolean) -> Unit,
+    onResetDiagnostics: () -> Unit,
     onCloseSocket: () -> Unit
 ) {
     val controlsState = nearbyWifiDirectDebugControlsState(runtimeStatus)
@@ -465,6 +466,28 @@ internal fun NearbyWifiDirectDebugControls(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+        }
+        NearbyWifiDirectControlGroup(title = "Diagnostics") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                TextButton(
+                    onClick = onResetDiagnostics
+                ) {
+                    Text("Reset Wi-Fi Direct diagnostics")
+                }
+            }
+            Text(
+                text = "Clears Wi-Fi Direct debug counters, results, and errors only.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "Does not disconnect the group or clear chats, contacts, or identity.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

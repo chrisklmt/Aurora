@@ -47,6 +47,10 @@ internal class AndroidWifiDirectSocketController internal constructor(
         return stateMachine.currentDiagnostics()
     }
 
+    override fun resetDiagnostics() {
+        emit(stateMachine.resetDiagnostics())
+    }
+
     override fun startServer(hostHint: String?) {
         val trimmedHostHint = hostHint?.trim()?.takeIf { it.isNotEmpty() }
         val token = stateMachine.nextOperationToken()

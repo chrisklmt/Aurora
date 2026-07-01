@@ -61,6 +61,22 @@ internal class WifiDirectPrivateDebugSendBridge(
         listeners -= listener
     }
 
+    fun resetDiagnostics() {
+        emit(
+            synchronized(stateLock) {
+                privateSubmissionAttempts = 0L
+                privateSubmissionSuccesses = 0L
+                privateSubmitFailures = 0L
+                lastPrivateMessageId = null
+                lastPrivateTargetPeerId = null
+                lastPrivateFrameSize = null
+                lastPrivateSendResult = null
+                lastPrivateSendError = null
+                currentDiagnosticsLocked()
+            }
+        )
+    }
+
     fun setEnabled(enabled: Boolean) {
         emit(
             synchronized(stateLock) {

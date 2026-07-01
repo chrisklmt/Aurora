@@ -3,6 +3,7 @@ package gr.hua.aurora.ui.screens
 import gr.hua.aurora.ui.components.DebugInfoItem
 import gr.hua.aurora.ui.components.DebugInfoSection
 import gr.hua.aurora.wifidirect.WifiDirectEnabledState
+import gr.hua.aurora.wifidirect.WifiDirectPrivateDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectPeer
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
 import gr.hua.aurora.wifidirect.WifiDirectSocketDiagnostics
@@ -39,6 +40,23 @@ import gr.hua.aurora.wifidirect.wifiDirectGlobalDebugSendModeSummary
 import gr.hua.aurora.wifidirect.wifiDirectGlobalDebugSendStateSummary
 import gr.hua.aurora.wifidirect.wifiDirectSendBridgeStateSummary
 import gr.hua.aurora.wifidirect.wifiDirectSmokeTestStateSummary
+
+private val nearbyWifiDirectManualTestSteps = listOf(
+    "Enable Debug Mode.",
+    "Start Wi-Fi Direct discovery.",
+    "Connect/group devices.",
+    "Start socket server on group owner.",
+    "Connect socket client on peer.",
+    "Verify ping/pong or debug frame.",
+    "Enable send bridge on sender.",
+    "Enable receive bridge on receiver.",
+    "For Global: enable Global Wi-Fi Direct debug send, then send Global Chat message.",
+    "For Private: open Private Chat, enable Private Wi-Fi Direct debug send, then send Private Chat message.",
+    "Verify receiver sees one message only.",
+    "Verify BLE still works if Wi-Fi Direct debug send fails.",
+    "Verify disabling receive bridge prevents Wi-Fi Direct frames from changing chat UI.",
+    "Verify no Delivered/ACK appears."
+)
 
 internal fun buildNearbyWifiDirectDebugSection(
     runtimeStatus: WifiDirectRuntimeStatus
@@ -872,6 +890,38 @@ internal fun buildNearbyWifiDirectGlobalWorkflowDebugSection(
     return DebugInfoSection(
         title = "Global debug send",
         items = items
+    )
+}
+
+internal fun buildNearbyWifiDirectManualReadinessSection(
+    readiness: NearbyWifiDirectManualTestReadiness
+): DebugInfoSection {
+    return DebugInfoSection(
+        title = "Manual test readiness",
+        items = listOf(
+            DebugInfoItem("Overall", readiness.overallStatus, preferFullWidth = true),
+            DebugInfoItem("Discovery", readiness.discoveryStatus),
+            DebugInfoItem("Group", readiness.groupStatus),
+            DebugInfoItem("Socket/frame", readiness.socketFrameStatus),
+            DebugInfoItem("Adapter", readiness.adapterStatus),
+            DebugInfoItem("Send bridge", readiness.sendBridgeStatus),
+            DebugInfoItem("Receive bridge", readiness.receiveBridgeStatus),
+            DebugInfoItem("Global send", readiness.globalDebugSendStatus),
+            DebugInfoItem("Private send", readiness.privateDebugSendStatus)
+        )
+    )
+}
+
+internal fun buildNearbyWifiDirectManualChecklistSection(): DebugInfoSection {
+    return DebugInfoSection(
+        title = "Manual test",
+        items = nearbyWifiDirectManualTestSteps.mapIndexed { index, step ->
+            DebugInfoItem(
+                label = "Step ${index + 1}",
+                value = step,
+                preferFullWidth = true
+            )
+        }
     )
 }
 

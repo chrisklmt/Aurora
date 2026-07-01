@@ -254,6 +254,26 @@ internal class WifiDirectSocketStateMachine(
         }
     }
 
+    fun resetDiagnostics(): WifiDirectSocketDiagnostics {
+        return update { current ->
+            current.copy(
+                lastSentMessage = null,
+                lastReceivedMessage = null,
+                lastError = null,
+                bytesSent = 0L,
+                bytesReceived = 0L,
+                frameDiagnostics = current.frameDiagnostics.copy(
+                    framesSent = 0L,
+                    framesReceived = 0L,
+                    bytesSent = 0L,
+                    bytesReceived = 0L,
+                    lastFrameSize = null,
+                    lastError = null
+                )
+            )
+        }
+    }
+
     private fun update(
         transform: (WifiDirectSocketDiagnostics) -> WifiDirectSocketDiagnostics
     ): WifiDirectSocketDiagnostics {

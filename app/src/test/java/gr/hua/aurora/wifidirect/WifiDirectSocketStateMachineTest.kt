@@ -130,4 +130,49 @@ class WifiDirectSocketStateMachineTest {
             diagnostics.frameDiagnostics.state
         )
     }
+
+    @Test
+    fun resetDiagnosticsKeepsConnectionStateButClearsCounters() {
+        val stateMachine = WifiDirectSocketStateMachine(initialPort = 8988)
+        val token = stateMachine.nextOperationToken()
+
+        stateMachine.markConnected(
+            token = token,
+            role = WifiDirectSocketRole.CLIENT,
+            endpoint = WifiDirectSocketEndpoint(
+                host = "127.0.0.1",
+                port = 8988
+            )
+        )
+        stateMachine.recordSentFrame(
+            token = token,
+            message = "ping",
+            frameSize = 4,
+            bytesSent = 8
+        )
+        stateMachine.recordReceivedFrame(
+            token = token,
+            message = "pong",
+            frameSize = 4,
+            bytesReceived = 8
+        )
+
+        val diagnostics = stateMachine.resetDiagnostics()
+
+        assertEquals(WifiDirectSocketState.CONNECTED, diagnostics.state)
+        assertEquals(WifiDirectSocketRole.CLIENT, diagnostics.role)
+        assertTrue(diagnostics.isConnected)
+        assertNull(diagnostics.lastSentMessage)
+        assertNull(diagnostics.lastReceivedMessage)
+        assertNull(diagnostics.lastError)
+        assertEquals(0L, diagnostics.bytesSent)
+        assertEquals(0L, diagnostics.bytesReceived)
+        assertEquals(WifiDirectFrameTransportState.READY, diagnostics.frameDiagnostics.state)
+        assertEquals(0L, diagnostics.frameDiagnostics.framesSent)
+        assertEquals(0L, diagnostics.frameDiagnostics.framesReceived)
+        assertEquals(0L, diagnostics.frameDiagnostics.bytesSent)
+        assertEquals(0L, diagnostics.frameDiagnostics.bytesReceived)
+        assertNull(diagnostics.frameDiagnostics.lastFrameSize)
+        assertNull(diagnostics.frameDiagnostics.lastError)
+    }
 }

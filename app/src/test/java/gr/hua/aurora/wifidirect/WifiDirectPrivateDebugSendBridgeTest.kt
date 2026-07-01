@@ -141,6 +141,33 @@ class WifiDirectPrivateDebugSendBridgeTest {
         assertTrue(privateBridge.currentDiagnostics().enabled)
     }
 
+    @Test
+    fun resetDiagnosticsClearsResultsWithoutDisablingPrivateDebugSend() {
+        val bridge = WifiDirectPrivateDebugSendBridge(
+            submitFrame = { _, onResult -> onResult(Result.success(Unit)) },
+            sendBridgeDiagnostics = { WifiDirectSendBridgeDiagnostics(enabled = true) },
+            transportAdapterDiagnostics = {
+                WifiDirectTransportAdapterDiagnostics(
+                    state = WifiDirectTransportAdapterState.READY
+                )
+            }
+        )
+        bridge.setEnabled(true)
+        bridge.submitPrivateMessage(samplePreparedFrame())
+
+        bridge.resetDiagnostics()
+
+        assertTrue(bridge.currentDiagnostics().enabled)
+        assertEquals(0L, bridge.currentDiagnostics().privateSubmissionAttempts)
+        assertEquals(0L, bridge.currentDiagnostics().privateSubmissionSuccesses)
+        assertEquals(0L, bridge.currentDiagnostics().privateSubmitFailures)
+        assertEquals(null, bridge.currentDiagnostics().lastPrivateMessageId)
+        assertEquals(null, bridge.currentDiagnostics().lastPrivateTargetPeerId)
+        assertEquals(null, bridge.currentDiagnostics().lastPrivateFrameSize)
+        assertEquals(null, bridge.currentDiagnostics().lastPrivateSendResult)
+        assertEquals(null, bridge.currentDiagnostics().lastPrivateSendError)
+    }
+
     private fun samplePreparedFrame(): PreparedPrivateChatTransportFrame {
         return PrivateChatTransportFrameFactory.build(
             message = OutgoingChatMessage(

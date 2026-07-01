@@ -176,4 +176,29 @@ class WifiDirectSmokeTestSenderTest {
         assertEquals("failed", sender.currentDiagnostics().lastSmokeSendResult)
         assertEquals("socket closed", sender.currentDiagnostics().lastSmokeError)
     }
+
+    @Test
+    fun resetDiagnosticsClearsCountersWhileKeepingReadiness() {
+        val sender = WifiDirectSmokeTestSender(
+            submitFrame = { _, onResult -> onResult(Result.success(Unit)) },
+            sendBridgeDiagnostics = { WifiDirectSendBridgeDiagnostics(enabled = true) },
+            transportAdapterDiagnostics = {
+                WifiDirectTransportAdapterDiagnostics(
+                    state = WifiDirectTransportAdapterState.READY
+                )
+            }
+        )
+
+        sender.sendPublicSmokeTest("debug-user")
+        sender.resetDiagnostics()
+
+        assertTrue(sender.currentDiagnostics().ready)
+        assertTrue(sender.currentDiagnostics().sendBridgeEnabled)
+        assertEquals(WifiDirectTransportAdapterState.READY, sender.currentDiagnostics().adapterState)
+        assertEquals(0L, sender.currentDiagnostics().smokeFramesSent)
+        assertEquals(0L, sender.currentDiagnostics().smokeSendFailures)
+        assertEquals(null, sender.currentDiagnostics().lastSmokeFrameSize)
+        assertEquals(null, sender.currentDiagnostics().lastSmokeSendResult)
+        assertEquals(null, sender.currentDiagnostics().lastSmokeError)
+    }
 }

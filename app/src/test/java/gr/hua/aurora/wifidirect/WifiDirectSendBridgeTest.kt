@@ -136,6 +136,22 @@ class WifiDirectSendBridgeTest {
         assertEquals(true, receiveBridge.currentDiagnostics().enabled)
     }
 
+    @Test
+    fun resetDiagnosticsClearsCountersWithoutDisablingBridge() {
+        val adapter = FakeTransportAdapter()
+        val bridge = WifiDirectSendBridge(adapter::submit)
+
+        bridge.setEnabled(true)
+        bridge.submitPayload("hello".toByteArray())
+        bridge.resetDiagnostics()
+
+        assertEquals(true, bridge.currentDiagnostics().enabled)
+        assertEquals(0L, bridge.currentDiagnostics().framesSubmitted)
+        assertEquals(0L, bridge.currentDiagnostics().submitFailures)
+        assertEquals(null, bridge.currentDiagnostics().lastSubmittedFrameSize)
+        assertEquals(null, bridge.currentDiagnostics().lastSendBridgeError)
+    }
+
     private class FakeTransportAdapter(
         private val submitFailure: Throwable? = null
     ) {

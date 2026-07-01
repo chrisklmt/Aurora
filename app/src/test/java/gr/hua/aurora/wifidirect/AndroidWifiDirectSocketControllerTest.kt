@@ -287,6 +287,51 @@ class AndroidWifiDirectSocketControllerTest {
         }
     }
 
+    @Test
+    fun resetDiagnosticsWhileConnectedClearsCountersWithoutDisconnecting() {
+        val server = AndroidWifiDirectSocketController(requestedPort = 0)
+
+        try {
+            server.startServer(hostHint = "192.168.49.1")
+            awaitCondition {
+                server.currentDiagnostics().state == WifiDirectSocketState.SERVER_LISTENING
+            }
+            val listeningPort = requireNotNull(server.currentDiagnostics().endpoint?.port)
+            val client = AndroidWifiDirectSocketController(requestedPort = listeningPort)
+
+            try {
+                client.connectClient("127.0.0.1")
+                awaitCondition {
+                    client.currentDiagnostics().state == WifiDirectSocketState.CONNECTED &&
+                        server.currentDiagnostics().state == WifiDirectSocketState.CONNECTED
+                }
+
+                client.sendDebugFrame()
+
+                awaitCondition {
+                    client.currentDiagnostics().lastReceivedMessage == "pong"
+                }
+
+                client.resetDiagnostics()
+
+                assertEquals(WifiDirectSocketState.CONNECTED, client.currentDiagnostics().state)
+                assertTrue(client.currentDiagnostics().isConnected)
+                assertEquals(WifiDirectFrameTransportState.READY, client.currentDiagnostics().frameDiagnostics.state)
+                assertEquals(0L, client.currentDiagnostics().bytesSent)
+                assertEquals(0L, client.currentDiagnostics().bytesReceived)
+                assertEquals(0L, client.currentDiagnostics().frameDiagnostics.framesSent)
+                assertEquals(0L, client.currentDiagnostics().frameDiagnostics.framesReceived)
+                assertEquals(null, client.currentDiagnostics().lastSentMessage)
+                assertEquals(null, client.currentDiagnostics().lastReceivedMessage)
+                assertEquals(null, client.currentDiagnostics().lastError)
+            } finally {
+                client.dispose()
+            }
+        } finally {
+            server.dispose()
+        }
+    }
+
     private fun awaitCondition(
         timeoutMillis: Long = 5_000L,
         condition: () -> Boolean

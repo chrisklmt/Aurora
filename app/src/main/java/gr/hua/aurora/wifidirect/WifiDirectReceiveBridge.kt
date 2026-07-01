@@ -47,6 +47,18 @@ internal class WifiDirectReceiveBridge(
         listeners -= listener
     }
 
+    fun resetDiagnostics() {
+        emit(
+            synchronized(stateLock) {
+                framesBridged = 0L
+                bridgeFailures = 0L
+                lastBridgedFrameSize = null
+                lastBridgeError = null
+                currentDiagnosticsLocked()
+            }
+        )
+    }
+
     fun setEnabled(
         enabled: Boolean
     ) {

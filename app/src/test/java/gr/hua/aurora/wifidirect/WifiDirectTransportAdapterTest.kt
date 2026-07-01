@@ -215,6 +215,41 @@ class WifiDirectTransportAdapterTest {
         }
     }
 
+    @Test
+    fun resetDiagnosticsClearsCountersAndPreservesReadyState() {
+        val transport = FakeWifiDirectTransport(isReady = true)
+        val adapter = WifiDirectTransportAdapter(
+            frameSink = transport,
+            frameSource = transport,
+            enabled = true
+        )
+        val codec = WifiDirectTransportFrameCodec()
+
+        try {
+            adapter.submitPayload("debug-adapter".toByteArray())
+            transport.emitIncoming(
+                codec.encode(
+                    WifiDirectTransportFrame.fromPayload("hello".toByteArray())
+                )
+            )
+
+            adapter.resetDiagnostics()
+
+            assertEquals(
+                WifiDirectTransportAdapterState.READY,
+                adapter.currentDiagnostics().state
+            )
+            assertEquals(0L, adapter.currentDiagnostics().framesSubmitted)
+            assertEquals(0L, adapter.currentDiagnostics().framesReceived)
+            assertEquals(0L, adapter.currentDiagnostics().bytesSubmitted)
+            assertEquals(0L, adapter.currentDiagnostics().bytesReceived)
+            assertEquals(null, adapter.currentDiagnostics().lastFrameSize)
+            assertEquals(null, adapter.currentDiagnostics().lastError)
+        } finally {
+            adapter.dispose()
+        }
+    }
+
     private fun captureFailure(
         block: () -> Unit
     ): Throwable? {

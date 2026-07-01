@@ -282,6 +282,29 @@ class WifiDirectReceiveBridgeTest {
         assertTrue(!bridge.currentDiagnostics().enabled)
     }
 
+    @Test
+    fun resetDiagnosticsClearsCountersWithoutDisablingReceiveBridge() {
+        val bridge = WifiDirectReceiveBridge {
+            BleTransportReceiveResult.Buffered(
+                groupId = 1,
+                receivedChunks = 1,
+                expectedChunks = 1
+            )
+        }
+
+        bridge.setEnabled(true)
+        bridge.onTransportFrameReceived(
+            WifiDirectTransportFrame.fromPayload(validBleTransportFrameBytes())
+        )
+        bridge.resetDiagnostics()
+
+        assertTrue(bridge.currentDiagnostics().enabled)
+        assertEquals(0L, bridge.currentDiagnostics().framesBridged)
+        assertEquals(0L, bridge.currentDiagnostics().bridgeFailures)
+        assertNull(bridge.currentDiagnostics().lastBridgedFrameSize)
+        assertNull(bridge.currentDiagnostics().lastBridgeError)
+    }
+
     private fun validBleTransportFrameBytes(): ByteArray {
         return requireNotNull(
             BleGattTransportFrame.create(

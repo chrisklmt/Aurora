@@ -41,6 +41,7 @@ internal data class RememberedWifiDirectSocketState(
     val disableSendBridge: () -> Unit,
     val setReceiveBridgeEnabled: (Boolean) -> Unit,
     val disableReceiveBridge: () -> Unit,
+    val resetDiagnostics: () -> Unit,
     val closeSocket: () -> Unit
 )
 
@@ -213,6 +214,36 @@ internal fun rememberWifiDirectSocketState(
             resolvedController.closeSocket()
         }
     }
+    val resetDiagnostics = remember(
+        resolvedController,
+        transportAdapter,
+        sendBridge,
+        globalDebugSender,
+        privateDebugSender,
+        smokeTestSender,
+        receiveBridge
+    ) {
+        {
+            resolvedController.resetDiagnostics()
+            transportAdapter.resetDiagnostics()
+            sendBridge.resetDiagnostics()
+            globalDebugSender.resetDiagnostics()
+            privateDebugSender.resetDiagnostics()
+            smokeTestSender.resetDiagnostics()
+            receiveBridge?.resetDiagnostics()
+                ?: run {
+                    receiveBridgeDiagnostics = WifiDirectReceiveBridgeDiagnostics()
+                }
+            diagnostics = resolvedController.currentDiagnostics()
+            adapterDiagnostics = transportAdapter.currentDiagnostics()
+            sendBridgeDiagnostics = sendBridge.currentDiagnostics()
+            globalDebugSendDiagnostics = globalDebugSender.currentDiagnostics()
+            privateDebugSendDiagnostics = privateDebugSender.currentDiagnostics()
+            smokeTestDiagnostics = smokeTestSender.currentDiagnostics()
+            receiveBridgeDiagnostics =
+                receiveBridge?.currentDiagnostics() ?: WifiDirectReceiveBridgeDiagnostics()
+        }
+    }
 
     DisposableEffect(
         resolvedController,
@@ -370,6 +401,7 @@ internal fun rememberWifiDirectSocketState(
         disableSendBridge = disableSendBridge,
         setReceiveBridgeEnabled = setReceiveBridgeEnabled,
         disableReceiveBridge = disableReceiveBridge,
+        resetDiagnostics = resetDiagnostics,
         closeSocket = closeSocket
     )
 }

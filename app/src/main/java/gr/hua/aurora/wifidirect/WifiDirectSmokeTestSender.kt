@@ -62,6 +62,19 @@ internal class WifiDirectSmokeTestSender(
         listeners -= listener
     }
 
+    fun resetDiagnostics() {
+        emit(
+            synchronized(stateLock) {
+                smokeFramesSent = 0L
+                smokeSendFailures = 0L
+                lastSmokeFrameSize = null
+                lastSmokeSendResult = null
+                lastSmokeError = null
+                currentDiagnosticsLocked()
+            }
+        )
+    }
+
     fun sendPublicSmokeTest(
         senderId: String,
         onResult: (Result<Unit>) -> Unit = {}

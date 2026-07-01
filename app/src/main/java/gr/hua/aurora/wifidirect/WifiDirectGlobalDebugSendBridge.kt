@@ -63,6 +63,21 @@ internal class WifiDirectGlobalDebugSendBridge(
         listeners -= listener
     }
 
+    fun resetDiagnostics() {
+        emit(
+            synchronized(stateLock) {
+                globalSubmissionAttempts = 0L
+                globalSubmissionSuccesses = 0L
+                globalSubmitFailures = 0L
+                lastGlobalMessageId = null
+                lastGlobalFrameSize = null
+                lastGlobalSendResult = null
+                lastGlobalSendError = null
+                currentDiagnosticsLocked()
+            }
+        )
+    }
+
     fun setEnabled(enabled: Boolean) {
         emit(
             synchronized(stateLock) {

@@ -48,6 +48,18 @@ internal class WifiDirectSendBridge(
         listeners -= listener
     }
 
+    fun resetDiagnostics() {
+        emit(
+            synchronized(stateLock) {
+                framesSubmitted = 0L
+                submitFailures = 0L
+                lastSubmittedFrameSize = null
+                lastSendBridgeError = null
+                currentDiagnosticsLocked()
+            }
+        )
+    }
+
     fun setEnabled(
         enabled: Boolean
     ) {

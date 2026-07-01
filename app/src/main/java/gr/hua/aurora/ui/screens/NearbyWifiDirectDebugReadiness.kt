@@ -2,6 +2,7 @@ package gr.hua.aurora.ui.screens
 
 import gr.hua.aurora.wifidirect.WifiDirectConnectionState
 import gr.hua.aurora.wifidirect.WifiDirectGlobalDebugSendDiagnostics
+import gr.hua.aurora.wifidirect.WifiDirectPrivateDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectReceiveBridgeDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
 import gr.hua.aurora.wifidirect.WifiDirectSendBridgeDiagnostics
@@ -19,6 +20,18 @@ internal const val nearbyWifiDirectGlobalDebugGuidance =
 
 internal const val nearbyWifiDirectGlobalDebugBleNote =
     "Normal chat still uses BLE. Private Chat still uses BLE."
+
+internal data class NearbyWifiDirectManualTestReadiness(
+    val overallStatus: String,
+    val discoveryStatus: String,
+    val groupStatus: String,
+    val socketFrameStatus: String,
+    val adapterStatus: String,
+    val sendBridgeStatus: String,
+    val receiveBridgeStatus: String,
+    val globalDebugSendStatus: String,
+    val privateDebugSendStatus: String
+)
 
 internal data class NearbyWifiDirectGlobalDebugReadiness(
     val overallStatus: String,
@@ -115,5 +128,56 @@ internal fun nearbyWifiDirectGlobalDebugReadiness(
         } else {
             "Receive bridge disabled."
         }
+    )
+}
+
+internal fun nearbyWifiDirectManualTestReadiness(
+    runtimeStatus: WifiDirectRuntimeStatus,
+    socketDiagnostics: WifiDirectSocketDiagnostics,
+    adapterDiagnostics: WifiDirectTransportAdapterDiagnostics,
+    sendBridgeDiagnostics: WifiDirectSendBridgeDiagnostics,
+    globalSendDiagnostics: WifiDirectGlobalDebugSendDiagnostics,
+    privateDebugSendDiagnostics: WifiDirectPrivateDebugSendDiagnostics,
+    receiveBridgeDiagnostics: WifiDirectReceiveBridgeDiagnostics
+): NearbyWifiDirectManualTestReadiness {
+    val socketControlsState = nearbyWifiDirectSocketControlsState(
+        runtimeStatus = runtimeStatus,
+        diagnostics = socketDiagnostics,
+        adapterDiagnostics = adapterDiagnostics,
+        sendBridgeDiagnostics = sendBridgeDiagnostics
+    )
+    val discoveryReady = wifiDirectDiscoveryBlockedReason(runtimeStatus.permissionStatus) == null
+    val groupConnected =
+        runtimeStatus.connectionStatus.state == WifiDirectConnectionState.CONNECTED &&
+            runtimeStatus.connectionStatus.groupFormed ==
+            gr.hua.aurora.wifidirect.WifiDirectGroupFormedState.YES
+    val socketFrameReady = socketControlsState.canSendFrame
+    val adapterReady = adapterDiagnostics.state == WifiDirectTransportAdapterState.READY
+    val sendBridgeEnabled = sendBridgeDiagnostics.enabled
+    val receiveBridgeEnabled = receiveBridgeDiagnostics.enabled
+    val globalDebugSendEnabled = globalSendDiagnostics.enabled
+    val privateDebugSendEnabled = privateDebugSendDiagnostics.enabled
+    val baseDebugSendReady =
+        groupConnected && socketFrameReady && adapterReady && sendBridgeEnabled
+
+    val overallStatus = when {
+        privateDebugSendEnabled && baseDebugSendReady && receiveBridgeEnabled ->
+            "Ready for Private debug send"
+        globalDebugSendEnabled && baseDebugSendReady && receiveBridgeEnabled ->
+            "Ready for Global debug send"
+        baseDebugSendReady -> "Ready for smoke test"
+        else -> "Not ready"
+    }
+
+    return NearbyWifiDirectManualTestReadiness(
+        overallStatus = overallStatus,
+        discoveryStatus = if (discoveryReady) "ready" else "not ready",
+        groupStatus = if (groupConnected) "connected" else "not connected",
+        socketFrameStatus = if (socketFrameReady) "ready" else "not ready",
+        adapterStatus = if (adapterReady) "ready" else "not ready",
+        sendBridgeStatus = if (sendBridgeEnabled) "enabled" else "disabled",
+        receiveBridgeStatus = if (receiveBridgeEnabled) "enabled" else "disabled",
+        globalDebugSendStatus = if (globalDebugSendEnabled) "enabled" else "disabled",
+        privateDebugSendStatus = if (privateDebugSendEnabled) "enabled" else "disabled"
     )
 }

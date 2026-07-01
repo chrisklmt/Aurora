@@ -18,7 +18,7 @@ import gr.hua.aurora.wifidirect.wifiDirectSendBridgeStateSummary
 import gr.hua.aurora.wifidirect.wifiDirectTransportAdapterStateSummary
 
 internal const val privateChatWifiDirectDebugNote =
-    "Debug only. BLE remains the normal Private Chat path."
+    "Debug only. Receiver must have the Wi-Fi Direct receive bridge enabled. BLE remains the normal Private Chat path."
 
 internal data class WifiDirectPrivateDebugGuard(
     val privateDebugSendEnabled: Boolean,

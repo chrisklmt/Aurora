@@ -254,7 +254,7 @@ class PrivateChatScreenTest {
                             ),
                             DebugInfoItem(
                                 "Note",
-                                "Debug only. BLE remains the normal Private Chat path.",
+                                "Debug only. Receiver must have the Wi-Fi Direct receive bridge enabled. BLE remains the normal Private Chat path.",
                                 preferFullWidth = true
                             )
                         )
@@ -328,6 +328,14 @@ class PrivateChatScreenTest {
         assertEquals("disabled", diagnostics.privateDebugSendStatus)
         assertFalse(diagnostics.guard.persistsRawSessionSecrets)
         assertFalse(diagnostics.guard.exposesPlaintextToRelays)
+    }
+
+    @Test
+    fun privateChatWifiDirectDebugNoteStaysDebugOnlyAndMentionsReceiveBridge() {
+        assertEquals(
+            "Debug only. Receiver must have the Wi-Fi Direct receive bridge enabled. BLE remains the normal Private Chat path.",
+            privateChatWifiDirectDebugNote
+        )
     }
 
     @Test

@@ -101,6 +101,20 @@ internal class WifiDirectTransportAdapter(
         listeners -= listener
     }
 
+    fun resetDiagnostics() {
+        emit(
+            synchronized(stateLock) {
+                framesSubmitted = 0L
+                framesReceived = 0L
+                bytesSubmitted = 0L
+                bytesReceived = 0L
+                lastFrameSize = null
+                lastError = null
+                currentDiagnosticsLocked()
+            }
+        )
+    }
+
     fun submitPayload(
         payload: ByteArray,
         onResult: (Result<Unit>) -> Unit = {}

@@ -185,6 +185,7 @@ internal fun NearbyDevicesScreen(
         wifiDirectAdapterDiagnostics = wifiDirectSocketState.adapterDiagnostics,
         wifiDirectSendBridgeDiagnostics = wifiDirectSocketState.sendBridgeDiagnostics,
         wifiDirectGlobalDebugSendDiagnostics = wifiDirectSocketState.globalDebugSendDiagnostics,
+        wifiDirectPrivateDebugSendDiagnostics = wifiDirectSocketState.privateDebugSendDiagnostics,
         wifiDirectSmokeTestDiagnostics = wifiDirectSocketState.smokeTestDiagnostics,
         wifiDirectReceiveBridgeDiagnostics = wifiDirectSocketState.receiveBridgeDiagnostics,
         identityHandlerStatus = identityHandlerStatus,
@@ -343,6 +344,7 @@ internal fun NearbyDevicesScreen(
                             wifiDirectSocketState.setGlobalDebugSendEnabled,
                             onSetSendBridgeEnabled = wifiDirectSocketState.setSendBridgeEnabled,
                             onSetReceiveBridgeEnabled = wifiDirectSocketState.setReceiveBridgeEnabled,
+                            onResetDiagnostics = wifiDirectSocketState.resetDiagnostics,
                             onCloseSocket = wifiDirectSocketState.closeSocket
                         )
                     }
@@ -1410,6 +1412,8 @@ internal fun buildNearbyDebugCard(
         gr.hua.aurora.wifidirect.WifiDirectSendBridgeDiagnostics(),
     wifiDirectGlobalDebugSendDiagnostics: gr.hua.aurora.wifidirect.WifiDirectGlobalDebugSendDiagnostics =
         gr.hua.aurora.wifidirect.WifiDirectGlobalDebugSendDiagnostics(),
+    wifiDirectPrivateDebugSendDiagnostics: gr.hua.aurora.wifidirect.WifiDirectPrivateDebugSendDiagnostics =
+        gr.hua.aurora.wifidirect.WifiDirectPrivateDebugSendDiagnostics(),
     wifiDirectSmokeTestDiagnostics: gr.hua.aurora.wifidirect.WifiDirectSmokeTestDiagnostics =
         gr.hua.aurora.wifidirect.WifiDirectSmokeTestDiagnostics(),
     wifiDirectReceiveBridgeDiagnostics: gr.hua.aurora.wifidirect.WifiDirectReceiveBridgeDiagnostics =
@@ -1460,6 +1464,18 @@ internal fun buildNearbyDebugCard(
                 globalSendDiagnostics = wifiDirectGlobalDebugSendDiagnostics,
                 receiveBridgeDiagnostics = wifiDirectReceiveBridgeDiagnostics
             ),
+            buildNearbyWifiDirectManualReadinessSection(
+                readiness = nearbyWifiDirectManualTestReadiness(
+                    runtimeStatus = wifiDirectRuntimeStatus,
+                    socketDiagnostics = wifiDirectSocketDiagnostics,
+                    adapterDiagnostics = wifiDirectAdapterDiagnostics,
+                    sendBridgeDiagnostics = wifiDirectSendBridgeDiagnostics,
+                    globalSendDiagnostics = wifiDirectGlobalDebugSendDiagnostics,
+                    privateDebugSendDiagnostics = wifiDirectPrivateDebugSendDiagnostics,
+                    receiveBridgeDiagnostics = wifiDirectReceiveBridgeDiagnostics
+                )
+            ),
+            buildNearbyWifiDirectManualChecklistSection(),
             buildNearbyIdentityDebugSection(
                 identityHandlerStatus = identityHandlerStatus,
                 peerSessionDiagnostics = peerSessionDiagnostics

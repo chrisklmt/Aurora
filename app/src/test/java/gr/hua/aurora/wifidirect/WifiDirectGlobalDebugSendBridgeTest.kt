@@ -137,6 +137,32 @@ class WifiDirectGlobalDebugSendBridgeTest {
         )
     }
 
+    @Test
+    fun resetDiagnosticsClearsResultsWithoutDisablingGlobalDebugSend() {
+        val sender = WifiDirectGlobalDebugSendBridge(
+            submitFrame = { _, onResult -> onResult(Result.success(Unit)) },
+            sendBridgeDiagnostics = { WifiDirectSendBridgeDiagnostics(enabled = true) },
+            transportAdapterDiagnostics = {
+                WifiDirectTransportAdapterDiagnostics(
+                    state = WifiDirectTransportAdapterState.READY
+                )
+            }
+        )
+        sender.setEnabled(true)
+        sender.submitGlobalMessage(sampleOutgoingMessage(), "debug-user")
+
+        sender.resetDiagnostics()
+
+        assertEquals(true, sender.currentDiagnostics().enabled)
+        assertEquals(0L, sender.currentDiagnostics().globalSubmissionAttempts)
+        assertEquals(0L, sender.currentDiagnostics().globalSubmissionSuccesses)
+        assertEquals(0L, sender.currentDiagnostics().globalSubmitFailures)
+        assertEquals(null, sender.currentDiagnostics().lastGlobalMessageId)
+        assertEquals(null, sender.currentDiagnostics().lastGlobalFrameSize)
+        assertEquals(null, sender.currentDiagnostics().lastGlobalSendResult)
+        assertEquals(null, sender.currentDiagnostics().lastGlobalSendError)
+    }
+
     private fun sampleOutgoingMessage(
         messageId: String = "global-msg-1",
         threadId: String = "global",

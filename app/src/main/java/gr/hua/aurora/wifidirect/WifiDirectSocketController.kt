@@ -51,6 +51,7 @@ internal interface WifiDirectSocketController {
     }
 
     fun currentDiagnostics(): WifiDirectSocketDiagnostics
+    fun resetDiagnostics()
     fun startServer(hostHint: String? = null)
     fun connectClient(host: String)
     fun sendDebugFrame()
