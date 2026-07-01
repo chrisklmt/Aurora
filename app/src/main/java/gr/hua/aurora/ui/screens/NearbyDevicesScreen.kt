@@ -1429,29 +1429,36 @@ internal fun buildNearbyDebugCard(
                 gattServerStatus = gattServerStatus,
                 scanStatus = scanStatus
             ),
-            buildNearbyWifiDirectDebugSection(
+            buildNearbyWifiDirectDiscoveryDebugSection(
                 runtimeStatus = wifiDirectRuntimeStatus
             ),
-            buildNearbyWifiDirectSocketDebugSection(
-                diagnostics = wifiDirectSocketDiagnostics
+            buildNearbyWifiDirectConnectionDebugSection(
+                runtimeStatus = wifiDirectRuntimeStatus
             ),
-            buildNearbyWifiDirectFrameDebugSection(
-                diagnostics = wifiDirectSocketDiagnostics
+            buildNearbyWifiDirectSocketFrameDebugSection(
+                diagnostics = wifiDirectSocketDiagnostics,
+                adapterDiagnostics = wifiDirectAdapterDiagnostics
             ),
-            buildNearbyWifiDirectAdapterDebugSection(
-                diagnostics = wifiDirectAdapterDiagnostics
+            buildNearbyWifiDirectBridgesDebugSection(
+                sendBridgeDiagnostics = wifiDirectSendBridgeDiagnostics,
+                smokeTestDiagnostics = wifiDirectSmokeTestDiagnostics,
+                receiveBridgeDiagnostics = wifiDirectReceiveBridgeDiagnostics,
+                readiness = nearbyWifiDirectGlobalDebugReadiness(
+                    runtimeStatus = wifiDirectRuntimeStatus,
+                    socketDiagnostics = wifiDirectSocketDiagnostics,
+                    adapterDiagnostics = wifiDirectAdapterDiagnostics,
+                    sendBridgeDiagnostics = wifiDirectSendBridgeDiagnostics,
+                    globalSendDiagnostics = wifiDirectGlobalDebugSendDiagnostics,
+                    receiveBridgeDiagnostics = wifiDirectReceiveBridgeDiagnostics
+                )
             ),
-            buildNearbyWifiDirectSendBridgeDebugSection(
-                diagnostics = wifiDirectSendBridgeDiagnostics
-            ),
-            buildNearbyWifiDirectGlobalSendDebugSection(
-                diagnostics = wifiDirectGlobalDebugSendDiagnostics
-            ),
-            buildNearbyWifiDirectSmokeTestDebugSection(
-                diagnostics = wifiDirectSmokeTestDiagnostics
-            ),
-            buildNearbyWifiDirectReceiveBridgeDebugSection(
-                diagnostics = wifiDirectReceiveBridgeDiagnostics
+            buildNearbyWifiDirectGlobalWorkflowDebugSection(
+                runtimeStatus = wifiDirectRuntimeStatus,
+                socketDiagnostics = wifiDirectSocketDiagnostics,
+                adapterDiagnostics = wifiDirectAdapterDiagnostics,
+                sendBridgeDiagnostics = wifiDirectSendBridgeDiagnostics,
+                globalSendDiagnostics = wifiDirectGlobalDebugSendDiagnostics,
+                receiveBridgeDiagnostics = wifiDirectReceiveBridgeDiagnostics
             ),
             buildNearbyIdentityDebugSection(
                 identityHandlerStatus = identityHandlerStatus,

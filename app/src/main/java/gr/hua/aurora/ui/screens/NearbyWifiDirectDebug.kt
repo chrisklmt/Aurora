@@ -56,6 +56,27 @@ import gr.hua.aurora.wifidirect.wifiDirectGlobalDebugSendStateSummary
 import gr.hua.aurora.wifidirect.wifiDirectSendBridgeStateSummary
 import gr.hua.aurora.wifidirect.wifiDirectSmokeTestStateSummary
 
+private const val nearbyWifiDirectGlobalDebugGuidance =
+    "For Wi-Fi Direct Global test: connect group, connect socket, enable send bridge on sender, enable receive bridge on receiver, enable Global send."
+
+private const val nearbyWifiDirectGlobalDebugBleNote =
+    "Normal chat still uses BLE. Private Chat still uses BLE."
+
+internal data class NearbyWifiDirectGlobalDebugReadiness(
+    val overallStatus: String,
+    val discoveryStatus: String,
+    val connectionStatus: String,
+    val socketFrameStatus: String,
+    val adapterStatus: String,
+    val sendBridgeStatus: String,
+    val receiveBridgeStatus: String,
+    val globalSendStatus: String,
+    val canEnableGlobalDebugSend: Boolean,
+    val globalSendBlockedReason: String? = null,
+    val bridgeMismatchWarning: String? = null,
+    val receiveBridgeWarning: String? = null
+)
+
 internal fun buildNearbyWifiDirectDebugSection(
     runtimeStatus: WifiDirectRuntimeStatus
 ): DebugInfoSection {
@@ -599,6 +620,298 @@ internal fun buildNearbyWifiDirectReceiveBridgeDebugSection(
     )
 }
 
+internal fun buildNearbyWifiDirectDiscoveryDebugSection(
+    runtimeStatus: WifiDirectRuntimeStatus
+): DebugInfoSection {
+    val items = buildList {
+        add(DebugInfoItem("Supported", wifiDirectSupportSummary(runtimeStatus)))
+        add(
+            DebugInfoItem(
+                "Permissions",
+                wifiDirectPermissionsSummary(runtimeStatus.permissionStatus)
+            )
+        )
+        wifiDirectMissingPermissionsSummary(runtimeStatus.permissionStatus)?.let { missingText ->
+            add(DebugInfoItem("Missing", missingText, preferFullWidth = true))
+        }
+        add(DebugInfoItem("Wi-Fi/P2P", nearbyWifiDirectEnabledValue(runtimeStatus.enabledState)))
+        add(
+            DebugInfoItem(
+                "Discovery",
+                wifiDirectDiscoverySummary(runtimeStatus.discoveryState)
+            )
+        )
+        add(DebugInfoItem("Peers", runtimeStatus.peerCount.toString()))
+        runtimeStatus.peers.takeIf { it.isNotEmpty() }?.let { peers ->
+            add(
+                DebugInfoItem(
+                    "Devices",
+                    nearbyWifiDirectPeerListValue(peers),
+                    preferFullWidth = true
+                )
+            )
+        }
+        runtimeStatus.lastError?.takeIf { it.isNotBlank() }?.let { errorText ->
+            add(DebugInfoItem("Last error", errorText, preferFullWidth = true))
+        }
+    }
+
+    return DebugInfoSection(
+        title = "Discovery",
+        items = items
+    )
+}
+
+internal fun buildNearbyWifiDirectConnectionDebugSection(
+    runtimeStatus: WifiDirectRuntimeStatus
+): DebugInfoSection {
+    val connectionStatus = runtimeStatus.connectionStatus
+    val items = buildList {
+        add(
+            DebugInfoItem(
+                "Transport",
+                wifiDirectTransportSummary(runtimeStatus.transportState)
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Connection",
+                wifiDirectConnectionSummary(connectionStatus.state)
+            )
+        )
+        connectionStatus.targetPeer?.let { targetPeer ->
+            add(
+                DebugInfoItem(
+                    "Target",
+                    nearbyWifiDirectPeerValue(targetPeer),
+                    preferFullWidth = true
+                )
+            )
+        }
+        add(
+            DebugInfoItem(
+                "Group",
+                wifiDirectGroupFormedSummary(connectionStatus.groupFormed)
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Role",
+                wifiDirectConnectionRoleSummary(connectionStatus.role)
+            )
+        )
+        connectionStatus.groupOwnerAddress?.let { ownerAddress ->
+            add(DebugInfoItem("Owner", ownerAddress, preferFullWidth = true))
+        }
+        connectionStatus.lastError?.takeIf { it.isNotBlank() }?.let { errorText ->
+            add(DebugInfoItem("Connect error", errorText, preferFullWidth = true))
+        }
+    }
+
+    return DebugInfoSection(
+        title = "Connection/group",
+        items = items
+    )
+}
+
+internal fun buildNearbyWifiDirectSocketFrameDebugSection(
+    diagnostics: WifiDirectSocketDiagnostics,
+    adapterDiagnostics: WifiDirectTransportAdapterDiagnostics
+): DebugInfoSection {
+    val frameDiagnostics = diagnostics.frameDiagnostics
+    val items = buildList {
+        add(DebugInfoItem("Socket", wifiDirectSocketStateSummary(diagnostics.state)))
+        add(DebugInfoItem("Connected", wifiDirectSocketConnectedSummary(diagnostics.isConnected)))
+        add(DebugInfoItem("Endpoint", wifiDirectSocketEndpointSummary(diagnostics.endpoint)))
+        add(
+            DebugInfoItem(
+                "Socket bytes",
+                wifiDirectSocketByteSummary(diagnostics)
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Frame",
+                wifiDirectFrameTransportStateSummary(frameDiagnostics.state)
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Frame bytes",
+                wifiDirectFrameByteSummary(frameDiagnostics)
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Adapter",
+                wifiDirectTransportAdapterStateSummary(adapterDiagnostics.state)
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Adapter bytes",
+                wifiDirectTransportAdapterByteSummary(adapterDiagnostics)
+            )
+        )
+        add(DebugInfoItem("Sent", wifiDirectSocketMessageSummary(diagnostics.lastSentMessage)))
+        add(
+            DebugInfoItem(
+                "Received",
+                wifiDirectSocketMessageSummary(diagnostics.lastReceivedMessage)
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Last size",
+                wifiDirectFrameSizeSummary(
+                    frameDiagnostics.lastFrameSize ?: adapterDiagnostics.lastFrameSize
+                )
+            )
+        )
+        diagnostics.lastError?.takeIf { it.isNotBlank() }?.let { errorText ->
+            add(DebugInfoItem("Socket error", errorText, preferFullWidth = true))
+        }
+        frameDiagnostics.lastError?.takeIf { it.isNotBlank() }?.let { errorText ->
+            add(DebugInfoItem("Frame error", errorText, preferFullWidth = true))
+        }
+        adapterDiagnostics.lastError?.takeIf { it.isNotBlank() }?.let { errorText ->
+            add(DebugInfoItem("Adapter error", errorText, preferFullWidth = true))
+        }
+        add(
+            DebugInfoItem(
+                "Note",
+                "${diagnostics.note} ${adapterDiagnostics.note}".trim(),
+                preferFullWidth = true
+            )
+        )
+    }
+
+    return DebugInfoSection(
+        title = "Socket/frame",
+        items = items
+    )
+}
+
+internal fun buildNearbyWifiDirectBridgesDebugSection(
+    sendBridgeDiagnostics: WifiDirectSendBridgeDiagnostics,
+    smokeTestDiagnostics: WifiDirectSmokeTestDiagnostics,
+    receiveBridgeDiagnostics: WifiDirectReceiveBridgeDiagnostics,
+    readiness: NearbyWifiDirectGlobalDebugReadiness
+): DebugInfoSection {
+    val items = buildList {
+        add(
+            DebugInfoItem(
+                "Send bridge",
+                wifiDirectSendBridgeStateSummary(sendBridgeDiagnostics)
+            )
+        )
+        add(DebugInfoItem("Submitted", sendBridgeDiagnostics.framesSubmitted.toString()))
+        add(DebugInfoItem("Send fail", sendBridgeDiagnostics.submitFailures.toString()))
+        add(
+            DebugInfoItem(
+                "Receive bridge",
+                wifiDirectReceiveBridgeStateSummary(receiveBridgeDiagnostics)
+            )
+        )
+        add(DebugInfoItem("Bridged", receiveBridgeDiagnostics.framesBridged.toString()))
+        add(DebugInfoItem("Recv fail", receiveBridgeDiagnostics.bridgeFailures.toString()))
+        add(
+            DebugInfoItem(
+                "Smoke",
+                wifiDirectSmokeTestStateSummary(smokeTestDiagnostics)
+            )
+        )
+        add(DebugInfoItem("Smoke sent", smokeTestDiagnostics.smokeFramesSent.toString()))
+        add(DebugInfoItem("Smoke fail", smokeTestDiagnostics.smokeSendFailures.toString()))
+        readiness.bridgeMismatchWarning?.let { warningText ->
+            add(DebugInfoItem("Warning", warningText, preferFullWidth = true))
+        }
+        readiness.receiveBridgeWarning?.let { warningText ->
+            add(DebugInfoItem("Receive warn", warningText, preferFullWidth = true))
+        }
+    }
+
+    return DebugInfoSection(
+        title = "Bridges",
+        items = items
+    )
+}
+
+internal fun buildNearbyWifiDirectGlobalWorkflowDebugSection(
+    runtimeStatus: WifiDirectRuntimeStatus,
+    socketDiagnostics: WifiDirectSocketDiagnostics,
+    adapterDiagnostics: WifiDirectTransportAdapterDiagnostics,
+    sendBridgeDiagnostics: WifiDirectSendBridgeDiagnostics,
+    globalSendDiagnostics: WifiDirectGlobalDebugSendDiagnostics,
+    receiveBridgeDiagnostics: WifiDirectReceiveBridgeDiagnostics
+): DebugInfoSection {
+    val readiness = nearbyWifiDirectGlobalDebugReadiness(
+        runtimeStatus = runtimeStatus,
+        socketDiagnostics = socketDiagnostics,
+        adapterDiagnostics = adapterDiagnostics,
+        sendBridgeDiagnostics = sendBridgeDiagnostics,
+        globalSendDiagnostics = globalSendDiagnostics,
+        receiveBridgeDiagnostics = receiveBridgeDiagnostics
+    )
+    val items = buildList {
+        add(DebugInfoItem("Overall", readiness.overallStatus, preferFullWidth = true))
+        add(DebugInfoItem("Discovery", readiness.discoveryStatus))
+        add(DebugInfoItem("Connection", readiness.connectionStatus))
+        add(DebugInfoItem("Socket/frame", readiness.socketFrameStatus))
+        add(DebugInfoItem("Adapter", readiness.adapterStatus))
+        add(DebugInfoItem("Send bridge", readiness.sendBridgeStatus))
+        add(DebugInfoItem("Receive bridge", readiness.receiveBridgeStatus))
+        add(DebugInfoItem("Global send", readiness.globalSendStatus))
+        add(
+            DebugInfoItem(
+                "Mode",
+                wifiDirectGlobalDebugSendModeSummary(globalSendDiagnostics),
+                preferFullWidth = true
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Last msg",
+                globalSendDiagnostics.lastGlobalMessageId ?: "none"
+            )
+        )
+        globalSendDiagnostics.lastGlobalSendResult?.takeIf { it.isNotBlank() }?.let { resultText ->
+            add(DebugInfoItem("Last result", resultText))
+        }
+        add(
+            DebugInfoItem(
+                "Last size",
+                wifiDirectFrameSizeSummary(globalSendDiagnostics.lastGlobalFrameSize)
+            )
+        )
+        readiness.globalSendBlockedReason?.let { reasonText ->
+            add(DebugInfoItem("Blocked", reasonText, preferFullWidth = true))
+        }
+        globalSendDiagnostics.lastGlobalSendError?.takeIf { it.isNotBlank() }?.let { errorText ->
+            add(DebugInfoItem("Last error", errorText, preferFullWidth = true))
+        }
+        add(
+            DebugInfoItem(
+                "Guide",
+                nearbyWifiDirectGlobalDebugGuidance,
+                preferFullWidth = true
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Note",
+                nearbyWifiDirectGlobalDebugBleNote,
+                preferFullWidth = true
+            )
+        )
+    }
+
+    return DebugInfoSection(
+        title = "Global debug send",
+        items = items
+    )
+}
+
 internal data class NearbyWifiDirectDebugControlsState(
     val canStartDiscovery: Boolean,
     val canStopDiscovery: Boolean,
@@ -653,6 +966,89 @@ internal fun nearbyWifiDirectSocketControlsState(
         canSendBridgedFrame = adapterDiagnostics.state == WifiDirectTransportAdapterState.READY &&
             sendBridgeDiagnostics.enabled,
         canSendSmokeTestFrame = smokeTestDiagnostics.ready
+    )
+}
+
+internal fun nearbyWifiDirectGlobalDebugReadiness(
+    runtimeStatus: WifiDirectRuntimeStatus,
+    socketDiagnostics: WifiDirectSocketDiagnostics,
+    adapterDiagnostics: WifiDirectTransportAdapterDiagnostics,
+    sendBridgeDiagnostics: WifiDirectSendBridgeDiagnostics,
+    globalSendDiagnostics: WifiDirectGlobalDebugSendDiagnostics,
+    receiveBridgeDiagnostics: WifiDirectReceiveBridgeDiagnostics
+): NearbyWifiDirectGlobalDebugReadiness {
+    val socketControlsState = nearbyWifiDirectSocketControlsState(
+        runtimeStatus = runtimeStatus,
+        diagnostics = socketDiagnostics,
+        adapterDiagnostics = adapterDiagnostics,
+        sendBridgeDiagnostics = sendBridgeDiagnostics
+    )
+    val discoveryStatus = when {
+        wifiDirectDiscoveryBlockedReason(runtimeStatus.permissionStatus) != null -> "blocked"
+        runtimeStatus.discoveryState == gr.hua.aurora.wifidirect.WifiDirectDiscoveryState.ACTIVE -> {
+            "active"
+        }
+        runtimeStatus.peerCount > 0 -> "peers visible"
+        else -> "inactive"
+    }
+    val connectionReady =
+        runtimeStatus.connectionStatus.state == WifiDirectConnectionState.CONNECTED &&
+            runtimeStatus.connectionStatus.groupFormed == gr.hua.aurora.wifidirect.WifiDirectGroupFormedState.YES
+    val socketFrameReady = socketControlsState.canSendFrame
+    val adapterReady = adapterDiagnostics.state == WifiDirectTransportAdapterState.READY
+    val sendBridgeEnabled = sendBridgeDiagnostics.enabled
+    val receiveBridgeEnabled = receiveBridgeDiagnostics.enabled
+    val globalSendEnabled = globalSendDiagnostics.enabled
+    val canEnableGlobalDebugSend = socketFrameReady && adapterReady && sendBridgeEnabled
+    val blockedReason = if (globalSendEnabled) {
+        null
+    } else {
+        when {
+            !connectionReady -> "Connect a Wi-Fi Direct group first."
+            !socketFrameReady -> "Connect the Wi-Fi Direct socket first."
+            !adapterReady -> "Wi-Fi Direct adapter not ready."
+            !sendBridgeEnabled -> "Enable the send bridge first."
+            else -> null
+        }
+    }
+    val overallStatus = when {
+        globalSendEnabled && canEnableGlobalDebugSend && receiveBridgeEnabled -> {
+            "Ready for Global debug dual-send"
+        }
+        globalSendEnabled && canEnableGlobalDebugSend && !receiveBridgeEnabled -> {
+            "Waiting for receiver bridge"
+        }
+        socketFrameReady -> "Ready to send debug frame"
+        else -> "Not ready"
+    }
+    val mismatchWarning = when {
+        sendBridgeEnabled && !adapterReady -> "Send bridge enabled but adapter not ready."
+        globalSendEnabled && !sendBridgeEnabled -> {
+            "Global debug send enabled but the send bridge is disabled."
+        }
+        globalSendEnabled && !socketFrameReady -> {
+            "Global debug send enabled without a ready socket/frame path."
+        }
+        else -> null
+    }
+
+    return NearbyWifiDirectGlobalDebugReadiness(
+        overallStatus = overallStatus,
+        discoveryStatus = discoveryStatus,
+        connectionStatus = if (connectionReady) "ready" else "not ready",
+        socketFrameStatus = if (socketFrameReady) "ready" else "not ready",
+        adapterStatus = wifiDirectTransportAdapterStateSummary(adapterDiagnostics.state),
+        sendBridgeStatus = wifiDirectSendBridgeStateSummary(sendBridgeDiagnostics),
+        receiveBridgeStatus = wifiDirectReceiveBridgeStateSummary(receiveBridgeDiagnostics),
+        globalSendStatus = wifiDirectGlobalDebugSendStateSummary(globalSendDiagnostics),
+        canEnableGlobalDebugSend = canEnableGlobalDebugSend,
+        globalSendBlockedReason = blockedReason,
+        bridgeMismatchWarning = mismatchWarning,
+        receiveBridgeWarning = if (receiveBridgeEnabled) {
+            null
+        } else {
+            "Receive bridge disabled."
+        }
     )
 }
 
@@ -808,175 +1204,269 @@ internal fun NearbyWifiDirectDebugControls(
         sendBridgeDiagnostics = sendBridgeDiagnostics,
         smokeTestDiagnostics = smokeTestDiagnostics
     )
+    val readiness = nearbyWifiDirectGlobalDebugReadiness(
+        runtimeStatus = runtimeStatus,
+        socketDiagnostics = socketDiagnostics,
+        adapterDiagnostics = adapterDiagnostics,
+        sendBridgeDiagnostics = sendBridgeDiagnostics,
+        globalSendDiagnostics = globalSendDiagnostics,
+        receiveBridgeDiagnostics = receiveBridgeDiagnostics
+    )
 
     Column(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            TextButton(
-                onClick = onStartDiscovery,
-                enabled = controlsState.canStartDiscovery
+        Text(
+            text = "Wi-Fi Direct debug readiness: ${readiness.overallStatus}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = nearbyWifiDirectGlobalDebugGuidance,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = nearbyWifiDirectGlobalDebugBleNote,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        NearbyWifiDirectControlGroup(title = "Discovery") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("Start Wi-Fi Direct")
-            }
-            TextButton(
-                onClick = onStopDiscovery,
-                enabled = controlsState.canStopDiscovery
-            ) {
-                Text("Stop Wi-Fi Direct")
-            }
-            TextButton(
-                onClick = onDisconnect,
-                enabled = controlsState.canDisconnect
-            ) {
-                Text(controlsState.disconnectLabel)
-            }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            TextButton(
-                onClick = {
-                    onStartSocketServer(runtimeStatus.connectionStatus.groupOwnerAddress)
-                },
-                enabled = socketControlsState.canStartServer
-            ) {
-                Text("Start socket server")
-            }
-            TextButton(
-                onClick = {
-                    socketControlsState.connectHost?.let(onConnectSocketClient)
-                },
-                enabled = socketControlsState.canConnectClient
-            ) {
-                Text("Connect socket client")
-            }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            TextButton(
-                onClick = {
-                    onSetGlobalDebugSendEnabled(!globalSendDiagnostics.enabled)
+                TextButton(
+                    onClick = onStartDiscovery,
+                    enabled = controlsState.canStartDiscovery
+                ) {
+                    Text("Start Wi-Fi Direct")
                 }
-            ) {
-                Text(
-                    if (globalSendDiagnostics.enabled) {
-                        "Disable Global send"
-                    } else {
-                        "Enable Global send"
-                    }
-                )
-            }
-            TextButton(
-                onClick = {
-                    onSetSendBridgeEnabled(!sendBridgeDiagnostics.enabled)
+                TextButton(
+                    onClick = onStopDiscovery,
+                    enabled = controlsState.canStopDiscovery
+                ) {
+                    Text("Stop Wi-Fi Direct")
                 }
-            ) {
-                Text(
-                    if (sendBridgeDiagnostics.enabled) {
-                        "Disable send bridge"
-                    } else {
-                        "Enable send bridge"
-                    }
-                )
             }
-            TextButton(
-                onClick = {
-                    onSetReceiveBridgeEnabled(!receiveBridgeDiagnostics.enabled)
-                }
-            ) {
-                Text(
-                    if (receiveBridgeDiagnostics.enabled) {
-                        "Disable receive bridge"
-                    } else {
-                        "Enable receive bridge"
-                    }
-                )
-            }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            TextButton(
-                onClick = onSendSocketFrame,
-                enabled = socketControlsState.canSendFrame
-            ) {
-                Text("Send debug frame")
-            }
-            TextButton(
-                onClick = onSendAdapterFrame,
-                enabled = socketControlsState.canSendAdapterFrame
-            ) {
-                Text("Send adapter frame")
-            }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            TextButton(
-                onClick = onSendBridgedFrame,
-                enabled = socketControlsState.canSendBridgedFrame
-            ) {
-                Text("Send bridged frame")
-            }
-            TextButton(
-                onClick = onSendSmokeTestFrame,
-                enabled = socketControlsState.canSendSmokeTestFrame
-            ) {
-                Text("Send Wi-Fi Direct smoke test frame")
-            }
-            TextButton(
-                onClick = onCloseSocket,
-                enabled = socketControlsState.canCloseSocket
-            ) {
-                Text("Close socket")
-            }
-        }
-        Text(
-            text = "Wi-Fi Direct Global send: ${wifiDirectGlobalDebugSendStateSummary(globalSendDiagnostics)}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            text = "Wi-Fi Direct send bridge: ${wifiDirectSendBridgeStateSummary(sendBridgeDiagnostics)}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            text = "Wi-Fi Direct smoke test: ${wifiDirectSmokeTestStateSummary(smokeTestDiagnostics)}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            text = "Wi-Fi Direct receive bridge: ${wifiDirectReceiveBridgeStateSummary(receiveBridgeDiagnostics)}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        socketControlsState.helpText?.let { helpText ->
             Text(
-                text = helpText,
+                text = "Discovery: ${readiness.discoveryStatus}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            controlsState.startDisabledReason?.let { reasonText ->
+                Text(
+                    text = reasonText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
-        runtimeStatus.peers.forEach { peer ->
-            NearbyWifiDirectPeerActionRow(
-                peer = peer,
-                actionState = nearbyWifiDirectPeerActionState(
-                    runtimeStatus = runtimeStatus,
-                    peer = peer
-                ),
-                onConnectToPeer = onConnectToPeer
+        NearbyWifiDirectControlGroup(title = "Connection/group") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                TextButton(
+                    onClick = onDisconnect,
+                    enabled = controlsState.canDisconnect
+                ) {
+                    Text(controlsState.disconnectLabel)
+                }
+            }
+            Text(
+                text = "Connection: ${readiness.connectionStatus}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            runtimeStatus.peers.forEach { peer ->
+                NearbyWifiDirectPeerActionRow(
+                    peer = peer,
+                    actionState = nearbyWifiDirectPeerActionState(
+                        runtimeStatus = runtimeStatus,
+                        peer = peer
+                    ),
+                    onConnectToPeer = onConnectToPeer
+                )
+            }
         }
+        NearbyWifiDirectControlGroup(title = "Socket/frame") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                TextButton(
+                    onClick = {
+                        onStartSocketServer(runtimeStatus.connectionStatus.groupOwnerAddress)
+                    },
+                    enabled = socketControlsState.canStartServer
+                ) {
+                    Text("Start socket server")
+                }
+                TextButton(
+                    onClick = {
+                        socketControlsState.connectHost?.let(onConnectSocketClient)
+                    },
+                    enabled = socketControlsState.canConnectClient
+                ) {
+                    Text("Connect socket client")
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                TextButton(
+                    onClick = onSendSocketFrame,
+                    enabled = socketControlsState.canSendFrame
+                ) {
+                    Text("Send debug frame")
+                }
+                TextButton(
+                    onClick = onSendAdapterFrame,
+                    enabled = socketControlsState.canSendAdapterFrame
+                ) {
+                    Text("Send adapter frame")
+                }
+                TextButton(
+                    onClick = onCloseSocket,
+                    enabled = socketControlsState.canCloseSocket
+                ) {
+                    Text("Close socket")
+                }
+            }
+            Text(
+                text = "Socket/frame: ${readiness.socketFrameStatus} | Adapter: ${readiness.adapterStatus}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            socketControlsState.helpText?.let { helpText ->
+                Text(
+                    text = helpText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        NearbyWifiDirectControlGroup(title = "Bridges") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                TextButton(
+                    onClick = {
+                        onSetSendBridgeEnabled(!sendBridgeDiagnostics.enabled)
+                    }
+                ) {
+                    Text(
+                        if (sendBridgeDiagnostics.enabled) {
+                            "Disable send bridge"
+                        } else {
+                            "Enable send bridge"
+                        }
+                    )
+                }
+                TextButton(
+                    onClick = {
+                        onSetReceiveBridgeEnabled(!receiveBridgeDiagnostics.enabled)
+                    }
+                ) {
+                    Text(
+                        if (receiveBridgeDiagnostics.enabled) {
+                            "Disable receive bridge"
+                        } else {
+                            "Enable receive bridge"
+                        }
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                TextButton(
+                    onClick = onSendBridgedFrame,
+                    enabled = socketControlsState.canSendBridgedFrame
+                ) {
+                    Text("Send bridged frame")
+                }
+                TextButton(
+                    onClick = onSendSmokeTestFrame,
+                    enabled = socketControlsState.canSendSmokeTestFrame
+                ) {
+                    Text("Send smoke test frame")
+                }
+            }
+            Text(
+                text = "Send bridge: ${readiness.sendBridgeStatus} | Receive bridge: ${readiness.receiveBridgeStatus}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            readiness.bridgeMismatchWarning?.let { warningText ->
+                Text(
+                    text = warningText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            readiness.receiveBridgeWarning?.let { warningText ->
+                Text(
+                    text = warningText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        NearbyWifiDirectControlGroup(title = "Global debug send") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                TextButton(
+                    onClick = {
+                        onSetGlobalDebugSendEnabled(!globalSendDiagnostics.enabled)
+                    },
+                    enabled = globalSendDiagnostics.enabled || readiness.canEnableGlobalDebugSend
+                ) {
+                    Text(
+                        if (globalSendDiagnostics.enabled) {
+                            "Disable Global send"
+                        } else {
+                            "Enable Global send"
+                        }
+                    )
+                }
+            }
+            Text(
+                text = "Global send: ${readiness.globalSendStatus}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            readiness.globalSendBlockedReason?.let { reasonText ->
+                Text(
+                    text = reasonText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun NearbyWifiDirectControlGroup(
+    title: String,
+    content: @Composable () -> Unit
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        content()
     }
 }
 

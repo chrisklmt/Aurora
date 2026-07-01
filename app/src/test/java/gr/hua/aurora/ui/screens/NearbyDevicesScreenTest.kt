@@ -31,10 +31,14 @@ import gr.hua.aurora.wifidirect.WifiDirectSocketState
 import gr.hua.aurora.wifidirect.WifiDirectReceiveBridgeDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectSendBridgeDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectSmokeTestDiagnostics
+import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics
+import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterState
 import gr.hua.aurora.wifidirect.WifiDirectTransportState
 import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NearbyDevicesScreenTest {
@@ -490,148 +494,7 @@ class NearbyDevicesScreenTest {
             establishedPeerIds = listOf("peer-canonical"),
             canonicalPeerIdByAlias = mapOf("peer-legacy" to "peer-canonical")
         )
-
-        assertEquals(
-            DebugInfoCardModel(
-                title = "Debug",
-                sections = listOf(
-                    DebugInfoSection(
-                        title = "Runtime",
-                        items = listOf(
-                            DebugInfoItem("Mode", "Full mesh"),
-                            DebugInfoItem("Scan", "Scanning")
-                        )
-                    ),
-                    DebugInfoSection(
-                        title = "Wi-Fi Direct",
-                        items = listOf(
-                            DebugInfoItem("Supported", "yes"),
-                            DebugInfoItem("Permissions", "granted"),
-                            DebugInfoItem("Wi-Fi/P2P", "enabled"),
-                            DebugInfoItem("Discovery", "inactive"),
-                            DebugInfoItem("Transport", "not wired yet"),
-                            DebugInfoItem("Connection", "disconnected"),
-                            DebugInfoItem("Group", "unknown"),
-                            DebugInfoItem("Role", "unknown"),
-                            DebugInfoItem("Peers", "0")
-                        )
-                    ),
-                    DebugInfoSection(
-                        title = "Socket",
-                        items = listOf(
-                            DebugInfoItem("Socket", "idle"),
-                            DebugInfoItem("Role", "unknown"),
-                            DebugInfoItem("Connected", "no"),
-                            DebugInfoItem("Endpoint", "port 8988"),
-                            DebugInfoItem("Sent", "none"),
-                            DebugInfoItem("Received", "none"),
-                            DebugInfoItem("Bytes", "0/0"),
-                            DebugInfoItem(
-                                "Note",
-                                "Wi-Fi Direct chat transport not wired yet.",
-                                preferFullWidth = true
-                            )
-                        )
-                    ),
-                    DebugInfoSection(
-                        title = "Frame",
-                        items = listOf(
-                            DebugInfoItem("Transport", "idle"),
-                            DebugInfoItem("Frames", "0/0"),
-                            DebugInfoItem("Bytes", "0/0"),
-                            DebugInfoItem("Last size", "none"),
-                            DebugInfoItem(
-                                "Note",
-                                "Wi-Fi Direct chat routing not wired yet.",
-                                preferFullWidth = true
-                            )
-                        )
-                    ),
-                    DebugInfoSection(
-                        title = "Adapter",
-                        items = listOf(
-                            DebugInfoItem("Adapter", "disabled"),
-                            DebugInfoItem("Submitted", "0"),
-                            DebugInfoItem("Received", "0"),
-                            DebugInfoItem("Bytes", "0/0"),
-                            DebugInfoItem("Last size", "none"),
-                            DebugInfoItem(
-                                "Note",
-                                "Wi-Fi Direct chat routing not wired yet.",
-                                preferFullWidth = true
-                            )
-                        )
-                    ),
-                    DebugInfoSection(
-                        title = "Send bridge",
-                        items = listOf(
-                            DebugInfoItem("Bridge", "disabled"),
-                            DebugInfoItem("Submitted", "0"),
-                            DebugInfoItem("Failures", "0"),
-                            DebugInfoItem("Last size", "none"),
-                            DebugInfoItem(
-                                "Note",
-                                "Debug send bridge only; normal chat sending still uses BLE.",
-                                preferFullWidth = true
-                            )
-                        )
-                    ),
-                    DebugInfoSection(
-                        title = "Global send",
-                        items = listOf(
-                            DebugInfoItem("Global send", "disabled"),
-                            DebugInfoItem("Mode", "BLE primary + Wi-Fi Direct debug copy"),
-                            DebugInfoItem("Attempts", "0"),
-                            DebugInfoItem("Success", "0"),
-                            DebugInfoItem("Failures", "0"),
-                            DebugInfoItem("Last msg", "none"),
-                            DebugInfoItem("Last size", "none"),
-                            DebugInfoItem(
-                                "Note",
-                                "Debug only. BLE remains the normal Global Chat path.",
-                                preferFullWidth = true
-                            )
-                        )
-                    ),
-                    DebugInfoSection(
-                        title = "Smoke",
-                        items = listOf(
-                            DebugInfoItem("Smoke", "not ready"),
-                            DebugInfoItem("Bridge", "disabled"),
-                            DebugInfoItem("Adapter", "disabled"),
-                            DebugInfoItem("Sent", "0"),
-                            DebugInfoItem("Failures", "0"),
-                            DebugInfoItem("Last size", "none"),
-                            DebugInfoItem(
-                                "Note",
-                                "Debug-only Wi-Fi Direct smoke test. Normal chat sending still uses BLE.",
-                                preferFullWidth = true
-                            )
-                        )
-                    ),
-                    DebugInfoSection(
-                        title = "Receive bridge",
-                        items = listOf(
-                            DebugInfoItem("Bridge", "disabled"),
-                            DebugInfoItem("Bridged", "0"),
-                            DebugInfoItem("Failures", "0"),
-                            DebugInfoItem("Last size", "none"),
-                            DebugInfoItem(
-                                "Note",
-                                "Debug bridge only; normal send path still uses BLE.",
-                                preferFullWidth = true
-                            )
-                        )
-                    ),
-                    DebugInfoSection(
-                        title = "Identity",
-                        items = listOf(
-                            DebugInfoItem("Handler", "ready"),
-                            DebugInfoItem("Sessions", "1")
-                        )
-                    )
-                )
-            ),
+        val card = requireNotNull(
             buildNearbyDebugCard(
                 showDebugDiagnostics = true,
                 advertiseStatus = BleAdvertiseStatus.ADVERTISING,
@@ -643,6 +506,149 @@ class NearbyDevicesScreenTest {
                 peerSessionDiagnostics = diagnostics
             )
         )
+
+        assertEquals("Debug", card.title)
+        assertEquals(
+            listOf(
+                "Runtime",
+                "Discovery",
+                "Connection/group",
+                "Socket/frame",
+                "Bridges",
+                "Global debug send",
+                "Identity"
+            ),
+            card.sections.map { it.title }
+        )
+        val globalSection = card.sections.first { it.title == "Global debug send" }
+        assertTrue(globalSection.items.contains(DebugInfoItem("Overall", "Not ready", preferFullWidth = true)))
+        assertTrue(globalSection.items.contains(DebugInfoItem("Guide", "For Wi-Fi Direct Global test: connect group, connect socket, enable send bridge on sender, enable receive bridge on receiver, enable Global send.", preferFullWidth = true)))
+        assertTrue(globalSection.items.contains(DebugInfoItem("Note", "Normal chat still uses BLE. Private Chat still uses BLE.", preferFullWidth = true)))
+        val bridgesSection = card.sections.first { it.title == "Bridges" }
+        assertTrue(bridgesSection.items.contains(DebugInfoItem("Receive warn", "Receive bridge disabled.", preferFullWidth = true)))
+    }
+
+    @Test
+    fun nearbyWifiDirectGlobalReadinessIsNotReadyByDefault() {
+        assertEquals(
+            NearbyWifiDirectGlobalDebugReadiness(
+                overallStatus = "Not ready",
+                discoveryStatus = "inactive",
+                connectionStatus = "not ready",
+                socketFrameStatus = "not ready",
+                adapterStatus = "disabled",
+                sendBridgeStatus = "disabled",
+                receiveBridgeStatus = "disabled",
+                globalSendStatus = "disabled",
+                canEnableGlobalDebugSend = false,
+                globalSendBlockedReason = "Connect a Wi-Fi Direct group first.",
+                bridgeMismatchWarning = null,
+                receiveBridgeWarning = "Receive bridge disabled."
+            ),
+            nearbyWifiDirectGlobalDebugReadiness(
+                runtimeStatus = wifiDirectRuntimeStatus(),
+                socketDiagnostics = WifiDirectSocketDiagnostics(),
+                adapterDiagnostics = WifiDirectTransportAdapterDiagnostics(),
+                sendBridgeDiagnostics = WifiDirectSendBridgeDiagnostics(),
+                globalSendDiagnostics = WifiDirectGlobalDebugSendDiagnostics(),
+                receiveBridgeDiagnostics = WifiDirectReceiveBridgeDiagnostics()
+            )
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectGlobalReadinessRequiresReadyAdapterAndSendBridge() {
+        assertEquals(
+            NearbyWifiDirectGlobalDebugReadiness(
+                overallStatus = "Ready for Global debug dual-send",
+                discoveryStatus = "inactive",
+                connectionStatus = "ready",
+                socketFrameStatus = "ready",
+                adapterStatus = "ready",
+                sendBridgeStatus = "enabled",
+                receiveBridgeStatus = "enabled",
+                globalSendStatus = "enabled",
+                canEnableGlobalDebugSend = true,
+                globalSendBlockedReason = null,
+                bridgeMismatchWarning = null,
+                receiveBridgeWarning = null
+            ),
+            nearbyWifiDirectGlobalDebugReadiness(
+                runtimeStatus = wifiDirectRuntimeStatus(
+                    connectionStatus = WifiDirectConnectionStatus(
+                        state = WifiDirectConnectionState.CONNECTED,
+                        groupFormed = WifiDirectGroupFormedState.YES,
+                        role = WifiDirectConnectionRole.CLIENT,
+                        groupOwnerAddress = "192.168.49.1"
+                    )
+                ),
+                socketDiagnostics = WifiDirectSocketDiagnostics(
+                    state = WifiDirectSocketState.CONNECTED,
+                    isConnected = true
+                ),
+                adapterDiagnostics = WifiDirectTransportAdapterDiagnostics(
+                    state = WifiDirectTransportAdapterState.READY
+                ),
+                sendBridgeDiagnostics = WifiDirectSendBridgeDiagnostics(enabled = true),
+                globalSendDiagnostics = WifiDirectGlobalDebugSendDiagnostics(enabled = true),
+                receiveBridgeDiagnostics = WifiDirectReceiveBridgeDiagnostics(enabled = true)
+            )
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectGlobalReadinessWaitsForReceiverBridgeWithoutBlockingSendReadiness() {
+        val readiness = nearbyWifiDirectGlobalDebugReadiness(
+            runtimeStatus = wifiDirectRuntimeStatus(
+                connectionStatus = WifiDirectConnectionStatus(
+                    state = WifiDirectConnectionState.CONNECTED,
+                    groupFormed = WifiDirectGroupFormedState.YES,
+                    role = WifiDirectConnectionRole.CLIENT,
+                    groupOwnerAddress = "192.168.49.1"
+                )
+            ),
+            socketDiagnostics = WifiDirectSocketDiagnostics(
+                state = WifiDirectSocketState.CONNECTED,
+                isConnected = true
+            ),
+            adapterDiagnostics = WifiDirectTransportAdapterDiagnostics(
+                state = WifiDirectTransportAdapterState.READY
+            ),
+            sendBridgeDiagnostics = WifiDirectSendBridgeDiagnostics(enabled = true),
+            globalSendDiagnostics = WifiDirectGlobalDebugSendDiagnostics(enabled = true),
+            receiveBridgeDiagnostics = WifiDirectReceiveBridgeDiagnostics(enabled = false)
+        )
+
+        assertEquals("Waiting for receiver bridge", readiness.overallStatus)
+        assertTrue(readiness.canEnableGlobalDebugSend)
+        assertEquals("Receive bridge disabled.", readiness.receiveBridgeWarning)
+    }
+
+    @Test
+    fun nearbyWifiDirectGlobalReadinessBlocksGlobalSendWhenSendBridgeMissing() {
+        val readiness = nearbyWifiDirectGlobalDebugReadiness(
+            runtimeStatus = wifiDirectRuntimeStatus(
+                connectionStatus = WifiDirectConnectionStatus(
+                    state = WifiDirectConnectionState.CONNECTED,
+                    groupFormed = WifiDirectGroupFormedState.YES,
+                    role = WifiDirectConnectionRole.CLIENT,
+                    groupOwnerAddress = "192.168.49.1"
+                )
+            ),
+            socketDiagnostics = WifiDirectSocketDiagnostics(
+                state = WifiDirectSocketState.CONNECTED,
+                isConnected = true
+            ),
+            adapterDiagnostics = WifiDirectTransportAdapterDiagnostics(
+                state = WifiDirectTransportAdapterState.READY
+            ),
+            sendBridgeDiagnostics = WifiDirectSendBridgeDiagnostics(enabled = false),
+            globalSendDiagnostics = WifiDirectGlobalDebugSendDiagnostics(enabled = false),
+            receiveBridgeDiagnostics = WifiDirectReceiveBridgeDiagnostics(enabled = true)
+        )
+
+        assertFalse(readiness.canEnableGlobalDebugSend)
+        assertEquals("Enable the send bridge first.", readiness.globalSendBlockedReason)
     }
 
     @Test
