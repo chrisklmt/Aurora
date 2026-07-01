@@ -81,6 +81,8 @@ import gr.hua.aurora.protocol.PrivateChatMessageSendResult
 import gr.hua.aurora.protocol.PrivateChatMessagePayload
 import gr.hua.aurora.protocol.PrivateChatMessagePayloadCodec
 import gr.hua.aurora.protocol.PrivateChatMessageSendUseCase
+import gr.hua.aurora.protocol.PreparedPrivateChatTransportFrame
+import gr.hua.aurora.protocol.PrivateChatTransportFrameFactory
 import gr.hua.aurora.protocol.SeenMessageIdCache
 import gr.hua.aurora.state.IncomingMessageIngestionResult.Appended
 import gr.hua.aurora.state.IncomingMessageIngestionResult.Duplicate
@@ -122,12 +124,17 @@ data class AuroraBleRuntimeState(
     val lastConnectOnSendStatus: String?,
     val lastGlobalMeshStatus: String?,
     val submitGlobalMeshMessage: suspend (OutgoingChatMessage, String) -> GlobalMeshDeliveryResult,
-    val submitPrivateChatMessage: suspend (OutgoingChatMessage, String, String) -> PrivateChatMessageSendResult,
+    val submitPrivateChatMessage: suspend (OutgoingChatMessage, String, String) -> PrivateChatTransportSubmission,
     val exchangeIdentityWithPeer: suspend (BleDiscoveredDevice, String?) -> PeerIdentityExchangeSendResult,
     val connectToTransportPeer: (String, String?) -> Unit,
     val disconnectTransportPeer: () -> Unit,
     val clearSessionForPeer: (String) -> Unit,
     val resetLocalIdentityAndSessions: () -> Unit
+)
+
+data class PrivateChatTransportSubmission(
+    val result: PrivateChatMessageSendResult,
+    val preparedTransportFrame: PreparedPrivateChatTransportFrame? = null
 )
 
 internal fun shouldRunAuroraBleRuntime(
@@ -626,8 +633,9 @@ fun rememberAuroraBleRuntimeState(
             lastGlobalMeshStatus = globalMeshStatusText(result)
             result
         }
-    val submitPrivateChatMessage: suspend (OutgoingChatMessage, String, String) -> PrivateChatMessageSendResult =
+    val submitPrivateChatMessage: suspend (OutgoingChatMessage, String, String) -> PrivateChatTransportSubmission =
         { queuedMessage, senderUsername, privateChatId ->
+            var preparedTransportFrame: PreparedPrivateChatTransportFrame? = null
             val result = submitPrivateEncryptedMessage(
                 message = queuedMessage,
                 privateChatId = privateChatId,
@@ -640,12 +648,16 @@ fun rememberAuroraBleRuntimeState(
                 isActiveTransportConnected = bleConnectionStatus == BleConnectionStatus.CONNECTED,
                 localPeerId = localPeerId,
                 reachablePeers = discoveredAuroraPeers,
-                connectToReachablePeer = ::connectToReachablePeerAndAwait
+                connectToReachablePeer = ::connectToReachablePeerAndAwait,
+                onPreparedTransportFrame = { preparedTransportFrame = it }
             )
             if (result == PrivateChatMessageSendResult.SubmittedLocally) {
                 privateMeshSeenMessageIds.markSeen(queuedMessage.messageId)
             }
-            result
+            PrivateChatTransportSubmission(
+                result = result,
+                preparedTransportFrame = preparedTransportFrame
+            )
         }
     val exchangeIdentityWithPeer: suspend (BleDiscoveredDevice, String?) -> PeerIdentityExchangeSendResult =
         { device, privateChatProposalId ->
@@ -1300,7 +1312,8 @@ internal suspend fun submitPrivateEncryptedMessage(
             peerId = runtimeReachablePeerId(it),
             reason = "connect-on-send unavailable"
         )
-    }
+    },
+    onPreparedTransportFrame: ((PreparedPrivateChatTransportFrame) -> Unit)? = null
 ): PrivateChatMessageSendResult {
     val targetPeerId = privateChatTargetPeerId(message)
         ?: return PrivateChatMessageSendResult.ContactUnavailable
@@ -1309,34 +1322,21 @@ internal suspend fun submitPrivateEncryptedMessage(
     val encryptionMaterial = sessionMaterialProvider.encryptionMaterialForTarget(targetPeerId)
         ?: return PrivateChatMessageSendResult.KeysUnavailable
 
-    val encodedPrivatePayload = runCatching {
-        PrivateChatMessagePayloadCodec.encode(
-            PrivateChatMessagePayload(
-                privateChatId = privateChatId,
-                senderUsername = senderUsername.trim(),
-                body = message.userText.trim()
-            )
+    val preparedTransportFrame = runCatching {
+        PrivateChatTransportFrameFactory.build(
+            message = message,
+            privateChatId = privateChatId,
+            senderPeerId = sanitizedSenderPeerId,
+            senderUsername = senderUsername.trim(),
+            encryptionMaterial = encryptionMaterial
         )
     }.getOrElse { error ->
         return PrivateChatMessageSendResult.Failed(
             reason = error.message ?: "Private chat payload is invalid."
         )
     }
-    val resolvedFrame = OutgoingMessageFrameResolver.resolve(
-        draft = OutgoingMessageFrameBuilder.build(message).copy(payload = encodedPrivatePayload),
-        senderId = sanitizedSenderPeerId
-    )
-    val envelope = EncryptedMessageEnvelopeBuilder.build(
-        senderPublicKey = encryptionMaterial.senderPublicKey,
-        keyBytes = encryptionMaterial.keyBytes,
-        plaintext = MessageFrameCodec.encode(resolvedFrame).toByteArray(Charsets.UTF_8),
-        authenticatedData = encryptionMaterial.authenticatedData,
-        relayMetadata = EncryptedMessageRelayMetadata(
-            messageId = resolvedFrame.id,
-            messageType = resolvedFrame.type,
-            ttl = resolvedFrame.ttl
-        )
-    )
+    onPreparedTransportFrame?.invoke(preparedTransportFrame)
+
     val targetSelection = selectRuntimeMeshForwardTargets(
         reachablePeers = reachablePeers,
         activeTransportPeerId = activeTransportPeerId,
@@ -1350,10 +1350,10 @@ internal suspend fun submitPrivateEncryptedMessage(
         connectToReachablePeer = connectToReachablePeer,
         sendToPeer = { transportPeerId, sender ->
             MessageFrameTransportSendUseCase.sendEncryptedEnvelope(
-                envelope = envelope,
+                envelope = preparedTransportFrame.encryptedEnvelope,
                 transportSender = sender,
                 targetPeerId = transportPeerId,
-                sourceCreatedAtMillis = resolvedFrame.createdAtMillis
+                sourceCreatedAtMillis = preparedTransportFrame.frame.createdAtMillis
             )
         }
     )

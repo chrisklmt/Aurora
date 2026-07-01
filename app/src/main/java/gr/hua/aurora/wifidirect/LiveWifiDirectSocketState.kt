@@ -15,12 +15,14 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import gr.hua.aurora.model.OutgoingChatMessage
+import gr.hua.aurora.protocol.PreparedPrivateChatTransportFrame
 
 internal data class RememberedWifiDirectSocketState(
     val diagnostics: WifiDirectSocketDiagnostics,
     val adapterDiagnostics: WifiDirectTransportAdapterDiagnostics,
     val sendBridgeDiagnostics: WifiDirectSendBridgeDiagnostics,
     val globalDebugSendDiagnostics: WifiDirectGlobalDebugSendDiagnostics,
+    val privateDebugSendDiagnostics: WifiDirectPrivateDebugSendDiagnostics,
     val smokeTestDiagnostics: WifiDirectSmokeTestDiagnostics,
     val receiveBridgeDiagnostics: WifiDirectReceiveBridgeDiagnostics,
     val startServer: (String?) -> Unit,
@@ -29,9 +31,12 @@ internal data class RememberedWifiDirectSocketState(
     val sendAdapterFrame: () -> Unit,
     val sendBridgedFrame: () -> Unit,
     val sendGlobalDebugMessage: (OutgoingChatMessage, String) -> Unit,
+    val sendPrivateDebugMessage: (PreparedPrivateChatTransportFrame) -> Unit,
     val sendSmokeTestFrame: (String) -> Unit,
     val setGlobalDebugSendEnabled: (Boolean) -> Unit,
     val disableGlobalDebugSend: () -> Unit,
+    val setPrivateDebugSendEnabled: (Boolean) -> Unit,
+    val disablePrivateDebugSend: () -> Unit,
     val setSendBridgeEnabled: (Boolean) -> Unit,
     val disableSendBridge: () -> Unit,
     val setReceiveBridgeEnabled: (Boolean) -> Unit,
@@ -79,6 +84,13 @@ internal fun rememberWifiDirectSocketState(
             transportAdapterDiagnostics = transportAdapter::currentDiagnostics
         )
     }
+    val privateDebugSender = remember(sendBridge, transportAdapter) {
+        WifiDirectPrivateDebugSendBridge(
+            submitFrame = sendBridge::submit,
+            sendBridgeDiagnostics = sendBridge::currentDiagnostics,
+            transportAdapterDiagnostics = transportAdapter::currentDiagnostics
+        )
+    }
     val smokeTestSender = remember(sendBridge, transportAdapter) {
         WifiDirectSmokeTestSender(
             submitFrame = sendBridge::submit,
@@ -97,6 +109,9 @@ internal fun rememberWifiDirectSocketState(
     }
     var globalDebugSendDiagnostics by remember(globalDebugSender) {
         mutableStateOf(globalDebugSender.currentDiagnostics())
+    }
+    var privateDebugSendDiagnostics by remember(privateDebugSender) {
+        mutableStateOf(privateDebugSender.currentDiagnostics())
     }
     var smokeTestDiagnostics by remember(smokeTestSender) {
         mutableStateOf(smokeTestSender.currentDiagnostics())
@@ -140,6 +155,11 @@ internal fun rememberWifiDirectSocketState(
             )
         }
     }
+    val sendPrivateDebugMessage = remember(privateDebugSender) {
+        { preparedTransportFrame: PreparedPrivateChatTransportFrame ->
+            privateDebugSender.submitPrivateMessage(preparedTransportFrame)
+        }
+    }
     val sendSmokeTestFrame = remember(smokeTestSender) {
         { senderId: String ->
             smokeTestSender.sendPublicSmokeTest(senderId)
@@ -153,6 +173,16 @@ internal fun rememberWifiDirectSocketState(
     val disableGlobalDebugSend = remember(globalDebugSender, setGlobalDebugSendEnabled) {
         {
             setGlobalDebugSendEnabled(false)
+        }
+    }
+    val setPrivateDebugSendEnabled = remember(privateDebugSender) {
+        { enabled: Boolean ->
+            privateDebugSender.setEnabled(enabled)
+        }
+    }
+    val disablePrivateDebugSend = remember(privateDebugSender, setPrivateDebugSendEnabled) {
+        {
+            setPrivateDebugSendEnabled(false)
         }
     }
     val setSendBridgeEnabled = remember(sendBridge) {
@@ -189,6 +219,7 @@ internal fun rememberWifiDirectSocketState(
         mainHandler,
         sendBridge,
         globalDebugSender,
+        privateDebugSender,
         smokeTestSender,
         receiveBridge
     ) {
@@ -198,6 +229,7 @@ internal fun rememberWifiDirectSocketState(
                     diagnostics = diagnosticsUpdate
                     adapterDiagnostics = transportAdapter.currentDiagnostics()
                     globalDebugSendDiagnostics = globalDebugSender.currentDiagnostics()
+                    privateDebugSendDiagnostics = privateDebugSender.currentDiagnostics()
                     smokeTestDiagnostics = smokeTestSender.currentDiagnostics()
                 }
             }
@@ -209,6 +241,7 @@ internal fun rememberWifiDirectSocketState(
                 mainHandler.post {
                     adapterDiagnostics = diagnosticsUpdate
                     globalDebugSendDiagnostics = globalDebugSender.currentDiagnostics()
+                    privateDebugSendDiagnostics = privateDebugSender.currentDiagnostics()
                     smokeTestDiagnostics = smokeTestSender.currentDiagnostics()
                 }
             }
@@ -226,6 +259,7 @@ internal fun rememberWifiDirectSocketState(
                 mainHandler.post {
                     sendBridgeDiagnostics = diagnosticsUpdate
                     globalDebugSendDiagnostics = globalDebugSender.currentDiagnostics()
+                    privateDebugSendDiagnostics = privateDebugSender.currentDiagnostics()
                     smokeTestDiagnostics = smokeTestSender.currentDiagnostics()
                 }
             }
@@ -236,6 +270,15 @@ internal fun rememberWifiDirectSocketState(
             ) {
                 mainHandler.post {
                     globalDebugSendDiagnostics = diagnosticsUpdate
+                }
+            }
+        }
+        val privateDebugSendListener = object : WifiDirectPrivateDebugSendBridge.Listener {
+            override fun onPrivateDebugSendDiagnosticsChanged(
+                diagnosticsUpdate: WifiDirectPrivateDebugSendDiagnostics
+            ) {
+                mainHandler.post {
+                    privateDebugSendDiagnostics = diagnosticsUpdate
                 }
             }
         }
@@ -262,6 +305,7 @@ internal fun rememberWifiDirectSocketState(
         transportAdapter.addListener(adapterListener)
         sendBridge.addListener(sendBridgeListener)
         globalDebugSender.addListener(globalDebugSendListener)
+        privateDebugSender.addListener(privateDebugSendListener)
         smokeTestSender.addListener(smokeTestListener)
         receiveBridge?.addListener(receiveBridgeListener)
         onDispose {
@@ -269,6 +313,7 @@ internal fun rememberWifiDirectSocketState(
             transportAdapter.removeListener(adapterListener)
             sendBridge.removeListener(sendBridgeListener)
             globalDebugSender.removeListener(globalDebugSendListener)
+            privateDebugSender.removeListener(privateDebugSendListener)
             smokeTestSender.removeListener(smokeTestListener)
             receiveBridge?.removeListener(receiveBridgeListener)
             transportAdapter.dispose()
@@ -306,6 +351,7 @@ internal fun rememberWifiDirectSocketState(
         adapterDiagnostics = adapterDiagnostics,
         sendBridgeDiagnostics = sendBridgeDiagnostics,
         globalDebugSendDiagnostics = globalDebugSendDiagnostics,
+        privateDebugSendDiagnostics = privateDebugSendDiagnostics,
         smokeTestDiagnostics = smokeTestDiagnostics,
         receiveBridgeDiagnostics = receiveBridgeDiagnostics,
         startServer = startServer,
@@ -314,9 +360,12 @@ internal fun rememberWifiDirectSocketState(
         sendAdapterFrame = sendAdapterFrame,
         sendBridgedFrame = sendBridgedFrame,
         sendGlobalDebugMessage = sendGlobalDebugMessage,
+        sendPrivateDebugMessage = sendPrivateDebugMessage,
         sendSmokeTestFrame = sendSmokeTestFrame,
         setGlobalDebugSendEnabled = setGlobalDebugSendEnabled,
         disableGlobalDebugSend = disableGlobalDebugSend,
+        setPrivateDebugSendEnabled = setPrivateDebugSendEnabled,
+        disablePrivateDebugSend = disablePrivateDebugSend,
         setSendBridgeEnabled = setSendBridgeEnabled,
         disableSendBridge = disableSendBridge,
         setReceiveBridgeEnabled = setReceiveBridgeEnabled,

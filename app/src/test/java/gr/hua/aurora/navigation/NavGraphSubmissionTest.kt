@@ -5,7 +5,10 @@ import gr.hua.aurora.data.LocalProfileSettingsStore
 import gr.hua.aurora.model.MessageStatus
 import gr.hua.aurora.model.OutgoingChatMessage
 import gr.hua.aurora.protocol.GlobalMeshDeliveryResult
+import gr.hua.aurora.protocol.OutgoingMessageSendEncryptionMaterial
+import gr.hua.aurora.protocol.PrivateChatTransportFrameFactory
 import gr.hua.aurora.protocol.PrivateChatMessageSendResult
+import gr.hua.aurora.state.PrivateChatTransportSubmission
 import gr.hua.aurora.state.AuroraStateHolder
 import gr.hua.aurora.state.SampleAuroraState
 import kotlinx.coroutines.runBlocking
@@ -14,6 +17,10 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.nio.charset.StandardCharsets.UTF_8
+import java.security.KeyPairGenerator
+import java.security.interfaces.ECPublicKey
+import java.security.spec.ECGenParameterSpec
 
 class NavGraphSubmissionTest {
     @Test
@@ -166,7 +173,9 @@ class NavGraphSubmissionTest {
             currentUsername = { "Chris" },
             resolvePrivateChatId = { null },
             submitTransport = { _, _, _ ->
-                PrivateChatMessageSendResult.SubmittedLocally
+                PrivateChatTransportSubmission(
+                    result = PrivateChatMessageSendResult.SubmittedLocally
+                )
             }
         )
 
@@ -186,7 +195,9 @@ class NavGraphSubmissionTest {
             resolvePrivateChatId = { currentPrivateChatId },
             submitTransport = { _, _, privateChatId ->
                 submittedChatIds += privateChatId
-                PrivateChatMessageSendResult.SubmittedLocally
+                PrivateChatTransportSubmission(
+                    result = PrivateChatMessageSendResult.SubmittedLocally
+                )
             }
         )
 
@@ -199,7 +210,9 @@ class NavGraphSubmissionTest {
             resolvePrivateChatId = { currentPrivateChatId },
             submitTransport = { _, _, privateChatId ->
                 submittedChatIds += privateChatId
-                PrivateChatMessageSendResult.SubmittedLocally
+                PrivateChatTransportSubmission(
+                    result = PrivateChatMessageSendResult.SubmittedLocally
+                )
             }
         )
 
@@ -227,6 +240,88 @@ class NavGraphSubmissionTest {
         )
     }
 
+    @Test
+    fun privateSubmitAlsoInvokesWifiDirectDebugTransportWhenPreparedFrameIsAvailable() = runBlocking {
+        val queuedMessage = sampleOutgoingMessage(threadId = "private:alex")
+        val debugMessageIds = mutableListOf<String>()
+        val debugTypes = mutableListOf<gr.hua.aurora.protocol.MessageFrameType>()
+
+        val result = submitPrivateQueuedMessage(
+            queuedMessage = queuedMessage,
+            peerId = "alex",
+            currentUsername = { "Chris" },
+            resolvePrivateChatId = { "chat-alex" },
+            submitTransport = { _, _, _ ->
+                PrivateChatTransportSubmission(
+                    result = PrivateChatMessageSendResult.SubmittedLocally,
+                    preparedTransportFrame = samplePreparedPrivateFrame(queuedMessage)
+                )
+            },
+            submitWifiDirectDebugTransport = { preparedTransportFrame ->
+                debugMessageIds += preparedTransportFrame.frame.id
+                debugTypes += preparedTransportFrame.frame.type
+            }
+        )
+
+        assertEquals(PrivateChatMessageSendResult.SubmittedLocally, result)
+        assertEquals(listOf(queuedMessage.messageId), debugMessageIds)
+        assertEquals(
+            listOf(gr.hua.aurora.protocol.MessageFrameType.PRIVATE_TEXT),
+            debugTypes
+        )
+    }
+
+    @Test
+    fun privateSubmitDoesNotLetWifiDirectDebugFailureOverrideBleResult() = runBlocking {
+        val queuedMessage = sampleOutgoingMessage(threadId = "private:alex")
+
+        val result = submitPrivateQueuedMessage(
+            queuedMessage = queuedMessage,
+            peerId = "alex",
+            currentUsername = { "Chris" },
+            resolvePrivateChatId = { "chat-alex" },
+            submitTransport = { _, _, _ ->
+                PrivateChatTransportSubmission(
+                    result = PrivateChatMessageSendResult.SubmittedLocally,
+                    preparedTransportFrame = samplePreparedPrivateFrame(queuedMessage)
+                )
+            },
+            submitWifiDirectDebugTransport = {
+                error("wifi direct bridge unavailable")
+            }
+        )
+
+        assertEquals(PrivateChatMessageSendResult.SubmittedLocally, result)
+    }
+
+    @Test
+    fun privateSubmitKeepsBleFailureEvenWhenWifiDirectDebugCopySucceeds() = runBlocking {
+        val queuedMessage = sampleOutgoingMessage(threadId = "private:alex")
+        var wifiDirectInvoked = false
+
+        val result = submitPrivateQueuedMessage(
+            queuedMessage = queuedMessage,
+            peerId = "alex",
+            currentUsername = { "Chris" },
+            resolvePrivateChatId = { "chat-alex" },
+            submitTransport = { _, _, _ ->
+                PrivateChatTransportSubmission(
+                    result = PrivateChatMessageSendResult.Failed("ble sender unavailable"),
+                    preparedTransportFrame = samplePreparedPrivateFrame(queuedMessage)
+                )
+            },
+            submitWifiDirectDebugTransport = {
+                wifiDirectInvoked = true
+            }
+        )
+
+        assertTrue(wifiDirectInvoked)
+        assertEquals(
+            PrivateChatMessageSendResult.Failed("ble sender unavailable"),
+            result
+        )
+    }
+
     private fun sampleOutgoingMessage(
         threadId: String
     ): OutgoingChatMessage {
@@ -237,6 +332,29 @@ class NavGraphSubmissionTest {
             createdAtMillis = 1_000L,
             status = MessageStatus.FAILED
         )
+    }
+
+    private fun samplePreparedPrivateFrame(
+        message: OutgoingChatMessage
+    ): gr.hua.aurora.protocol.PreparedPrivateChatTransportFrame {
+        return PrivateChatTransportFrameFactory.build(
+            message = message.copy(userText = "hello private"),
+            privateChatId = "chat-alex",
+            senderPeerId = "sender-canonical",
+            senderUsername = "Chris",
+            encryptionMaterial = OutgoingMessageSendEncryptionMaterial(
+                senderPublicKey = senderPublicKeyBytes(),
+                keyBytes = ByteArray(32) { index -> (index + 71).toByte() },
+                authenticatedData = "nav-private-debug".toByteArray(UTF_8)
+            )
+        )
+    }
+
+    private fun senderPublicKeyBytes(): ByteArray {
+        val generator = KeyPairGenerator.getInstance("EC")
+        generator.initialize(ECGenParameterSpec("secp256r1"))
+        val publicKey = generator.generateKeyPair().public as ECPublicKey
+        return gr.hua.aurora.crypto.Sec1PublicKeyEncoding.encodeUncompressed(publicKey)
     }
 
     private fun createHolder(): AuroraStateHolder {

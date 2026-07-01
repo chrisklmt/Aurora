@@ -6,9 +6,18 @@ import gr.hua.aurora.ble.transport.BleTransportReceiveResult
 import gr.hua.aurora.data.LocalProfileSettings
 import gr.hua.aurora.data.LocalProfileSettingsStore
 import gr.hua.aurora.model.MessageStatus
+import gr.hua.aurora.model.OutgoingChatMessage
+import gr.hua.aurora.protocol.EncryptedMessageEnvelopeCodec
+import gr.hua.aurora.protocol.LocalPeerSessionIdentityMaterial
 import gr.hua.aurora.protocol.MessageFrame
 import gr.hua.aurora.protocol.MessageFrameCodec
 import gr.hua.aurora.protocol.MessageFrameType
+import gr.hua.aurora.protocol.OutgoingMessageSendEncryptionMaterial
+import gr.hua.aurora.protocol.PeerSessionEstablisher
+import gr.hua.aurora.protocol.PeerSessionEstablishmentResult
+import gr.hua.aurora.protocol.PeerSessionPeerId
+import gr.hua.aurora.protocol.PeerSessionRegistry
+import gr.hua.aurora.protocol.PrivateChatTransportFrameFactory
 import gr.hua.aurora.state.AuroraStateHolder
 import gr.hua.aurora.state.SampleAuroraState
 import gr.hua.aurora.state.createAuroraBleTransportFrameReceiver
@@ -17,6 +26,11 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.charset.StandardCharsets.UTF_8
+import java.security.KeyPair
+import java.security.KeyPairGenerator
+import java.security.interfaces.ECPrivateKey
+import java.security.interfaces.ECPublicKey
+import java.security.spec.ECGenParameterSpec
 
 class WifiDirectReceiveBridgeTest {
     @Test
@@ -155,6 +169,57 @@ class WifiDirectReceiveBridgeTest {
     }
 
     @Test
+    fun receiveBridgeDisabledPreventsWifiDirectPrivateFrameFromAffectingPrivateUi() {
+        val fixture = createPrivateIncomingFixture(messageId = "wifi-direct-private-disabled")
+        val bridge = WifiDirectReceiveBridge(
+            createAuroraBleTransportFrameReceiver(
+                stateHolder = fixture.holder,
+                sessionMaterialProvider = fixture.registry
+            )::receive
+        )
+
+        fixture.transportFrames.forEach { frame ->
+            bridge.onTransportFrameReceived(
+                WifiDirectTransportFrame.fromPayload(frame.toByteArray())
+            )
+        }
+
+        assertTrue(
+            fixture.holder.privateMessagesForPeerId(fixture.remotePeerId).isEmpty()
+        )
+        assertEquals(0L, bridge.currentDiagnostics().framesBridged)
+    }
+
+    @Test
+    fun enabledReceiveBridgePassesValidPrivateFrameThroughExistingReceivePipeline() {
+        val fixture = createPrivateIncomingFixture(messageId = "wifi-direct-private-enabled")
+        val bridge = WifiDirectReceiveBridge(
+            createAuroraBleTransportFrameReceiver(
+                stateHolder = fixture.holder,
+                sessionMaterialProvider = fixture.registry
+            )::receive
+        )
+
+        bridge.setEnabled(true)
+        fixture.transportFrames.forEach { frame ->
+            bridge.onTransportFrameReceived(
+                WifiDirectTransportFrame.fromPayload(frame.toByteArray())
+            )
+        }
+
+        val receivedMessage = fixture.holder.privateMessagesForPeerId(fixture.remotePeerId)
+            .single { it.id == "wifi-direct-private-enabled" }
+        assertEquals("hello private", receivedMessage.text)
+        assertEquals(fixture.remotePeerId, receivedMessage.senderId)
+        assertEquals(MessageStatus.RECEIVED, receivedMessage.status)
+        assertEquals(
+            fixture.transportFrames.size.toLong(),
+            bridge.currentDiagnostics().framesBridged
+        )
+        assertNull(bridge.currentDiagnostics().lastBridgeError)
+    }
+
+    @Test
     fun enabledReceiveBridgeFailsCleanlyForInvalidAuroraTransportPayload() {
         var processedCount = 0
         val bridge = WifiDirectReceiveBridge { _ ->
@@ -270,6 +335,75 @@ class WifiDirectReceiveBridgeTest {
         )
     }
 
+    private fun createPrivateIncomingFixture(
+        messageId: String
+    ): PrivateIncomingFixture {
+        val holder = createHolder()
+        val local = generateEcKeyPair()
+        val remote = generateEcKeyPair()
+        val localIdentity = local.identity()
+        val remoteIdentity = remote.identity()
+        val localPeerId = PeerSessionPeerId.deriveFromPublicKey(local.publicKeyBytes())
+        val remotePeerId = PeerSessionPeerId.deriveFromPublicKey(remote.publicKeyBytes())
+        val registry = PeerSessionRegistry()
+        val localEstablishment = PeerSessionEstablisher.establishAndStore(
+            localIdentity = localIdentity,
+            remotePeerId = remotePeerId,
+            remotePeerPublicKeyBytes = remote.publicKeyBytes(),
+            registry = registry
+        )
+        assertTrue(localEstablishment is PeerSessionEstablishmentResult.Established)
+        val remoteEstablishment = PeerSessionEstablisher.establish(
+            localIdentity = remoteIdentity,
+            remotePeerId = localPeerId,
+            remotePeerPublicKeyBytes = local.publicKeyBytes()
+        )
+        assertTrue(remoteEstablishment is PeerSessionEstablishmentResult.Established)
+        val remoteOutgoingMaterial =
+            (remoteEstablishment as PeerSessionEstablishmentResult.Established).session.outgoingMaterial
+
+        holder.addOrUpdateContact(
+            canonicalPeerId = remotePeerId,
+            displayName = "Alex",
+            hasSession = true
+        )
+        holder.recordReceivedPrivateChatProposal(
+            peerId = remotePeerId,
+            remoteProposalId = "remote-proposal-1"
+        )
+        val privateChatId = requireNotNull(
+            holder.privateChatIdentityForPeerId(remotePeerId)?.privateChatId
+        )
+        val preparedFrame = PrivateChatTransportFrameFactory.build(
+            message = OutgoingChatMessage(
+                messageId = messageId,
+                threadId = "private:$localPeerId",
+                userText = "hello private",
+                createdAtMillis = 1_717_000_020L,
+                status = MessageStatus.QUEUED
+            ),
+            privateChatId = privateChatId,
+            senderPeerId = remotePeerId,
+            senderUsername = "Remote Alex",
+            encryptionMaterial = remoteOutgoingMaterial
+        )
+        val transportFrames = OutgoingBleTransportSendPlanBuilder.build(
+            messageId = preparedFrame.frame.id,
+            targetPeerId = preparedFrame.targetPeerId,
+            encryptedEnvelopeBytes = EncryptedMessageEnvelopeCodec.encode(
+                preparedFrame.encryptedEnvelope
+            ).toByteArray(UTF_8),
+            sourceCreatedAtMillis = preparedFrame.frame.createdAtMillis
+        ).framesInSendOrder()
+
+        return PrivateIncomingFixture(
+            holder = holder,
+            registry = registry,
+            remotePeerId = remotePeerId,
+            transportFrames = transportFrames
+        )
+    }
+
     private fun createHolder(): AuroraStateHolder {
         return AuroraStateHolder(
             initialState = SampleAuroraState.create(
@@ -295,5 +429,37 @@ class WifiDirectReceiveBridgeTest {
         override fun saveUseCustomUsernameInGlobalChat(enabled: Boolean) = Unit
 
         override fun clearProfile() = Unit
+    }
+
+    private data class PrivateIncomingFixture(
+        val holder: AuroraStateHolder,
+        val registry: PeerSessionRegistry,
+        val remotePeerId: String,
+        val transportFrames: List<BleGattTransportFrame>
+    )
+
+    private fun generateEcKeyPair(): KeyPair {
+        val generator = KeyPairGenerator.getInstance("EC")
+        generator.initialize(ECGenParameterSpec("secp256r1"))
+        return generator.generateKeyPair()
+    }
+
+    private fun KeyPair.identity(): LocalPeerSessionIdentityMaterial {
+        return LocalPeerSessionIdentityMaterial(
+            publicKeyBytes = publicKeyBytes(),
+            privateKey = privateKey()
+        )
+    }
+
+    private fun KeyPair.privateKey(): ECPrivateKey {
+        return private as ECPrivateKey
+    }
+
+    private fun KeyPair.publicKey(): ECPublicKey {
+        return public as ECPublicKey
+    }
+
+    private fun KeyPair.publicKeyBytes(): ByteArray {
+        return gr.hua.aurora.crypto.Sec1PublicKeyEncoding.encodeUncompressed(publicKey())
     }
 }

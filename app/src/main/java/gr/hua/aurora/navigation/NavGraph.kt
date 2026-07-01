@@ -12,6 +12,7 @@ import gr.hua.aurora.protocol.hasSessionForPeer
 import gr.hua.aurora.state.AuroraAvailabilityPreference
 import gr.hua.aurora.state.AuroraBleRuntimeState
 import gr.hua.aurora.state.AuroraStateHolder
+import gr.hua.aurora.state.PrivateChatTransportSubmission
 import gr.hua.aurora.protocol.PrivateChatMessageSendResult
 import gr.hua.aurora.ui.screens.nearbyContactPeerId
 import gr.hua.aurora.ui.screens.ContactsScreen
@@ -40,6 +41,7 @@ fun NavGraph(
     )
     val onResetLocalData: () -> Unit = {
         wifiDirectSocketState.disableGlobalDebugSend()
+        wifiDirectSocketState.disablePrivateDebugSend()
         wifiDirectSocketState.disableSendBridge()
         wifiDirectSocketState.disableReceiveBridge()
         bleRuntimeState.resetLocalIdentityAndSessions()
@@ -178,7 +180,9 @@ fun NavGraph(
                 wifiDirectRuntimeStatus = bleRuntimeState.wifiDirectRuntimeStatus,
                 wifiDirectAdapterDiagnostics = wifiDirectSocketState.adapterDiagnostics,
                 wifiDirectSendBridgeDiagnostics = wifiDirectSocketState.sendBridgeDiagnostics,
+                wifiDirectPrivateDebugSendDiagnostics = wifiDirectSocketState.privateDebugSendDiagnostics,
                 wifiDirectReceiveBridgeDiagnostics = wifiDirectSocketState.receiveBridgeDiagnostics,
+                onSetPrivateWifiDirectDebugSendEnabled = wifiDirectSocketState.setPrivateDebugSendEnabled,
                 onBack = onNavigateBackOrGlobal,
                 onSendMessage = { text ->
                     val queuedMessage = stateHolder.sendPrivateChatMessage(peerId, text)
@@ -191,7 +195,13 @@ fun NavGraph(
                                 resolvePrivateChatId = { targetPeerId ->
                                     stateHolder.privateChatIdentityForPeerId(targetPeerId)?.privateChatId
                                 },
-                                submitTransport = bleRuntimeState.submitPrivateChatMessage
+                                submitTransport = bleRuntimeState.submitPrivateChatMessage,
+                                submitWifiDirectDebugTransport =
+                                if (wifiDirectSocketState.privateDebugSendDiagnostics.enabled) {
+                                    wifiDirectSocketState.sendPrivateDebugMessage
+                                } else {
+                                    null
+                                }
                             )
                             stateHolder.handlePrivateChatDeliveryResult(
                                 peerId = peerId,
@@ -212,7 +222,13 @@ fun NavGraph(
                                 resolvePrivateChatId = { targetPeerId ->
                                     stateHolder.privateChatIdentityForPeerId(targetPeerId)?.privateChatId
                                 },
-                                submitTransport = bleRuntimeState.submitPrivateChatMessage
+                                submitTransport = bleRuntimeState.submitPrivateChatMessage,
+                                submitWifiDirectDebugTransport =
+                                if (wifiDirectSocketState.privateDebugSendDiagnostics.enabled) {
+                                    wifiDirectSocketState.sendPrivateDebugMessage
+                                } else {
+                                    null
+                                }
                             )
                             stateHolder.handlePrivateChatDeliveryResult(
                                 peerId = peerId,
@@ -336,22 +352,29 @@ internal suspend fun submitPrivateQueuedMessage(
     peerId: String,
     currentUsername: () -> String,
     resolvePrivateChatId: (String) -> String?,
-    submitTransport: suspend (OutgoingChatMessage, String, String) -> PrivateChatMessageSendResult
+    submitTransport: suspend (OutgoingChatMessage, String, String) -> PrivateChatTransportSubmission,
+    submitWifiDirectDebugTransport: ((gr.hua.aurora.protocol.PreparedPrivateChatTransportFrame) -> Unit)? = null
 ): PrivateChatMessageSendResult {
     val privateChatId = resolvePrivateChatId(peerId)
         ?.trim()
         ?.takeIf { it.isNotEmpty() }
         ?: return PrivateChatMessageSendResult.KeysUnavailable
 
-    return runCatching {
+    val submission = runCatching {
         submitTransport(
             queuedMessage,
             currentUsername().trim(),
             privateChatId
         )
     }.getOrElse { error ->
-        PrivateChatMessageSendResult.Failed(
+        return PrivateChatMessageSendResult.Failed(
             reason = error.message ?: "Private chat transport submission failed."
         )
     }
+    runCatching {
+        submission.preparedTransportFrame?.let { preparedTransportFrame ->
+            submitWifiDirectDebugTransport?.invoke(preparedTransportFrame)
+        }
+    }
+    return submission.result
 }

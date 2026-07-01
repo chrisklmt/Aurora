@@ -3,9 +3,11 @@ package gr.hua.aurora.ui.screens
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -22,6 +24,7 @@ import gr.hua.aurora.ui.components.DebugInfoItem
 import gr.hua.aurora.ui.components.DebugInfoSection
 import gr.hua.aurora.ui.components.toMessageListItem
 import gr.hua.aurora.wifidirect.WifiDirectReceiveBridgeDiagnostics
+import gr.hua.aurora.wifidirect.WifiDirectPrivateDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
 import gr.hua.aurora.wifidirect.WifiDirectSendBridgeDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics
@@ -54,7 +57,9 @@ internal fun PrivateChatScreen(
     wifiDirectRuntimeStatus: WifiDirectRuntimeStatus,
     wifiDirectAdapterDiagnostics: WifiDirectTransportAdapterDiagnostics,
     wifiDirectSendBridgeDiagnostics: WifiDirectSendBridgeDiagnostics,
+    wifiDirectPrivateDebugSendDiagnostics: WifiDirectPrivateDebugSendDiagnostics,
     wifiDirectReceiveBridgeDiagnostics: WifiDirectReceiveBridgeDiagnostics,
+    onSetPrivateWifiDirectDebugSendEnabled: (Boolean) -> Unit,
     onBack: () -> Unit,
     onSendMessage: (String) -> Unit,
     onRetryMessage: (String) -> Unit,
@@ -83,6 +88,7 @@ internal fun PrivateChatScreen(
         wifiDirectRuntimeStatus = wifiDirectRuntimeStatus,
         wifiDirectAdapterDiagnostics = wifiDirectAdapterDiagnostics,
         wifiDirectSendBridgeDiagnostics = wifiDirectSendBridgeDiagnostics,
+        wifiDirectPrivateDebugSendDiagnostics = wifiDirectPrivateDebugSendDiagnostics,
         wifiDirectReceiveBridgeDiagnostics = wifiDirectReceiveBridgeDiagnostics,
         isComposerEnabled = content.isComposerEnabled
     )
@@ -106,6 +112,11 @@ internal fun PrivateChatScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                    PrivateChatWifiDirectDebugControls(
+                        showDebugDiagnostics = showDebugDiagnostics,
+                        privateDebugSendEnabled = wifiDirectPrivateDebugSendDiagnostics.enabled,
+                        onSetEnabled = onSetPrivateWifiDirectDebugSendEnabled
+                    )
                     debugCard?.let { card ->
                         DebugInfoCard(card = card)
                     }
@@ -139,6 +150,11 @@ internal fun PrivateChatScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                PrivateChatWifiDirectDebugControls(
+                    showDebugDiagnostics = showDebugDiagnostics,
+                    privateDebugSendEnabled = wifiDirectPrivateDebugSendDiagnostics.enabled,
+                    onSetEnabled = onSetPrivateWifiDirectDebugSendEnabled
+                )
                 debugCard?.let { card ->
                     DebugInfoCard(card = card)
                 }
@@ -235,6 +251,7 @@ internal fun buildPrivateChatDebugCard(
     wifiDirectRuntimeStatus: WifiDirectRuntimeStatus,
     wifiDirectAdapterDiagnostics: WifiDirectTransportAdapterDiagnostics,
     wifiDirectSendBridgeDiagnostics: WifiDirectSendBridgeDiagnostics,
+    wifiDirectPrivateDebugSendDiagnostics: WifiDirectPrivateDebugSendDiagnostics,
     wifiDirectReceiveBridgeDiagnostics: WifiDirectReceiveBridgeDiagnostics,
     isComposerEnabled: Boolean
 ): DebugInfoCardModel? {
@@ -331,6 +348,7 @@ internal fun buildPrivateChatDebugCard(
                     runtimeStatus = wifiDirectRuntimeStatus,
                     adapterDiagnostics = wifiDirectAdapterDiagnostics,
                     sendBridgeDiagnostics = wifiDirectSendBridgeDiagnostics,
+                    privateDebugSendDiagnostics = wifiDirectPrivateDebugSendDiagnostics,
                     receiveBridgeDiagnostics = wifiDirectReceiveBridgeDiagnostics
                 )
             )
@@ -367,6 +385,39 @@ internal fun buildPrivateChatDebugCard(
         title = "Debug",
         sections = sections
     )
+}
+
+@Composable
+private fun PrivateChatWifiDirectDebugControls(
+    showDebugDiagnostics: Boolean,
+    privateDebugSendEnabled: Boolean,
+    onSetEnabled: (Boolean) -> Unit
+) {
+    if (!showDebugDiagnostics) {
+        return
+    }
+
+    Row {
+        TextButton(
+            onClick = {
+                onSetEnabled(!privateDebugSendEnabled)
+            }
+        ) {
+            Text(
+                text = privateChatWifiDirectDebugToggleLabel(privateDebugSendEnabled)
+            )
+        }
+    }
+}
+
+internal fun privateChatWifiDirectDebugToggleLabel(
+    privateDebugSendEnabled: Boolean
+): String {
+    return if (privateDebugSendEnabled) {
+        "Disable Private Wi-Fi Direct send"
+    } else {
+        "Enable Private Wi-Fi Direct send"
+    }
 }
 
 internal fun privateChatDebugKeyStatusText(hasRuntimeSession: Boolean): String {

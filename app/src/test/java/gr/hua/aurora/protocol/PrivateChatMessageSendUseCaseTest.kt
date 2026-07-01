@@ -60,6 +60,43 @@ class PrivateChatMessageSendUseCaseTest {
     }
 
     @Test
+    fun privateSendInvokesDebugCopyWithSamePreparedPrivateFrameWhenEnabled() {
+        val material = testEncryptionMaterial()
+        val sender = RecordingTransportSender(BleTransportSendResult.QueuedLocally)
+        val message = OutgoingChatMessage(
+            messageId = "private-send-debug-1",
+            threadId = "private:alex",
+            userText = "hello private",
+            createdAtMillis = 1_715_260_001L,
+            status = MessageStatus.QUEUED
+        )
+        val debugCopies = mutableListOf<PreparedPrivateChatTransportFrame>()
+
+        val result = runSuspending {
+            PrivateChatMessageSendUseCase.send(
+                message = message,
+                privateChatId = "chat-alex",
+                senderPeerId = "sender-canonical",
+                senderUsername = "Alice",
+                transportSender = sender,
+                sessionMaterialProvider = FakeOutgoingSessionMaterialProvider(
+                    materialByPeerId = mapOf("alex" to material)
+                ),
+                activeConnectedPeerId = "alex",
+                isActiveTransportConnected = true,
+                submitDebugCopy = debugCopies::add
+            )
+        }
+
+        assertEquals(PrivateChatMessageSendResult.SubmittedLocally, result)
+        assertEquals(1, debugCopies.size)
+        assertEquals(message.messageId, debugCopies.single().frame.id)
+        assertEquals(MessageFrameType.PRIVATE_TEXT, debugCopies.single().frame.type)
+        assertEquals("alex", debugCopies.single().targetPeerId)
+        assertEquals(1, sender.sendCallCount)
+    }
+
+    @Test
     fun privateSendReturnsKeysUnavailableWhenSessionIsMissing() {
         val sender = RecordingTransportSender(BleTransportSendResult.QueuedLocally)
         val message = OutgoingChatMessage(
@@ -98,6 +135,7 @@ class PrivateChatMessageSendUseCaseTest {
             createdAtMillis = 1_715_260_003L,
             status = MessageStatus.QUEUED
         )
+        val debugCopies = mutableListOf<PreparedPrivateChatTransportFrame>()
 
         val result = runSuspending {
             PrivateChatMessageSendUseCase.send(
@@ -110,12 +148,15 @@ class PrivateChatMessageSendUseCaseTest {
                     materialByPeerId = mapOf("alex" to material)
                 ),
                 activeConnectedPeerId = "bea",
-                isActiveTransportConnected = true
+                isActiveTransportConnected = true,
+                submitDebugCopy = debugCopies::add
             )
         }
 
         assertEquals(PrivateChatMessageSendResult.ContactNotReachable, result)
         assertNull(sender.capturedPlan)
+        assertEquals(1, debugCopies.size)
+        assertEquals(message.messageId, debugCopies.single().frame.id)
     }
 
     @Test
@@ -175,6 +216,73 @@ class PrivateChatMessageSendUseCaseTest {
 
         assertTrue(result is PrivateChatMessageSendResult.Failed)
         assertEquals("writer unavailable", (result as PrivateChatMessageSendResult.Failed).reason)
+    }
+
+    @Test
+    fun privateSendKeepsBleSuccessWhenDebugCopyFails() {
+        val material = testEncryptionMaterial()
+        val sender = RecordingTransportSender(BleTransportSendResult.QueuedLocally)
+
+        val result = runSuspending {
+            PrivateChatMessageSendUseCase.send(
+                message = OutgoingChatMessage(
+                    messageId = "private-send-debug-fail",
+                    threadId = "private:alex",
+                    userText = "hello private",
+                    createdAtMillis = 1_715_260_005L,
+                    status = MessageStatus.QUEUED
+                ),
+                privateChatId = "chat-alex",
+                senderPeerId = "sender-canonical",
+                senderUsername = "Alice",
+                transportSender = sender,
+                sessionMaterialProvider = FakeOutgoingSessionMaterialProvider(
+                    materialByPeerId = mapOf("alex" to material)
+                ),
+                activeConnectedPeerId = "alex",
+                isActiveTransportConnected = true,
+                submitDebugCopy = {
+                    error("wifi direct bridge unavailable")
+                }
+            )
+        }
+
+        assertEquals(PrivateChatMessageSendResult.SubmittedLocally, result)
+    }
+
+    @Test
+    fun privateSendKeepsBleFailureEvenWhenDebugCopySucceeds() {
+        val material = testEncryptionMaterial()
+        val sender = RecordingTransportSender(BleTransportSendResult.Failed("writer unavailable"))
+        var debugCopyCount = 0
+
+        val result = runSuspending {
+            PrivateChatMessageSendUseCase.send(
+                message = OutgoingChatMessage(
+                    messageId = "private-send-ble-fail",
+                    threadId = "private:alex",
+                    userText = "hello private",
+                    createdAtMillis = 1_715_260_005L,
+                    status = MessageStatus.QUEUED
+                ),
+                privateChatId = "chat-alex",
+                senderPeerId = "sender-canonical",
+                senderUsername = "Alice",
+                transportSender = sender,
+                sessionMaterialProvider = FakeOutgoingSessionMaterialProvider(
+                    materialByPeerId = mapOf("alex" to material)
+                ),
+                activeConnectedPeerId = "alex",
+                isActiveTransportConnected = true,
+                submitDebugCopy = {
+                    debugCopyCount += 1
+                }
+            )
+        }
+
+        assertTrue(result is PrivateChatMessageSendResult.Failed)
+        assertEquals("writer unavailable", (result as PrivateChatMessageSendResult.Failed).reason)
+        assertEquals(1, debugCopyCount)
     }
 
     @Test

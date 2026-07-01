@@ -30,7 +30,8 @@ object PrivateChatMessageSendUseCase {
         transportSender: BleTransportSender?,
         sessionMaterialProvider: OutgoingSessionMaterialProvider,
         activeConnectedPeerId: String?,
-        isActiveTransportConnected: Boolean
+        isActiveTransportConnected: Boolean,
+        submitDebugCopy: ((PreparedPrivateChatTransportFrame) -> Unit)? = null
     ): PrivateChatMessageSendResult {
         val draft = runCatching {
             OutgoingMessageFrameBuilder.build(message)
@@ -47,15 +48,6 @@ object PrivateChatMessageSendUseCase {
             ?: return PrivateChatMessageSendResult.KeysUnavailable
         val encryptionMaterial = sessionMaterialProvider.encryptionMaterialForTarget(targetPeerId)
             ?: return PrivateChatMessageSendResult.KeysUnavailable
-        val connectedPeerId = activeConnectedPeerId?.trim()?.takeIf { it.isNotEmpty() }
-        if (!isActiveTransportConnected || connectedPeerId != targetPeerId) {
-            return PrivateChatMessageSendResult.ContactNotReachable
-        }
-
-        val sender = transportSender ?: return PrivateChatMessageSendResult.ContactNotReachable
-        if (sender is NoOpBleTransportSender) {
-            return PrivateChatMessageSendResult.ContactNotReachable
-        }
 
         val preparedTransportFrame = runCatching {
             PrivateChatTransportFrameFactory.build(
@@ -71,21 +63,37 @@ object PrivateChatMessageSendUseCase {
             )
         }
 
-        val sendResult = MessageFrameTransportSendUseCase.sendEncryptedEnvelope(
-            envelope = preparedTransportFrame.encryptedEnvelope,
-            transportSender = sender,
-            targetPeerId = preparedTransportFrame.targetPeerId,
-            sourceCreatedAtMillis = preparedTransportFrame.frame.createdAtMillis
-        )
-        return when (sendResult) {
-            BleTransportSendResult.QueuedLocally ->
-                PrivateChatMessageSendResult.SubmittedLocally
-            BleTransportSendResult.NotAvailable ->
-                PrivateChatMessageSendResult.ContactNotReachable
-            is BleTransportSendResult.Failed ->
-                PrivateChatMessageSendResult.Failed(
-                    reason = sendResult.reason
+        val connectedPeerId = activeConnectedPeerId?.trim()?.takeIf { it.isNotEmpty() }
+        val sender = transportSender
+        val bleResult = if (
+            !isActiveTransportConnected ||
+            connectedPeerId != targetPeerId ||
+            sender == null ||
+            sender is NoOpBleTransportSender
+        ) {
+            PrivateChatMessageSendResult.ContactNotReachable
+        } else {
+            when (
+                val sendResult = MessageFrameTransportSendUseCase.sendEncryptedEnvelope(
+                    envelope = preparedTransportFrame.encryptedEnvelope,
+                    transportSender = sender,
+                    targetPeerId = preparedTransportFrame.targetPeerId,
+                    sourceCreatedAtMillis = preparedTransportFrame.frame.createdAtMillis
                 )
+            ) {
+                BleTransportSendResult.QueuedLocally ->
+                    PrivateChatMessageSendResult.SubmittedLocally
+                BleTransportSendResult.NotAvailable ->
+                    PrivateChatMessageSendResult.ContactNotReachable
+                is BleTransportSendResult.Failed ->
+                    PrivateChatMessageSendResult.Failed(
+                        reason = sendResult.reason
+                    )
+            }
         }
+        runCatching {
+            submitDebugCopy?.invoke(preparedTransportFrame)
+        }
+        return bleResult
     }
 }

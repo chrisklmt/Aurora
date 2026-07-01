@@ -10,6 +10,7 @@ import gr.hua.aurora.ui.components.DebugInfoCardModel
 import gr.hua.aurora.ui.components.DebugInfoItem
 import gr.hua.aurora.ui.components.DebugInfoSection
 import gr.hua.aurora.wifidirect.WifiDirectPermissionStatus
+import gr.hua.aurora.wifidirect.WifiDirectPrivateDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectReceiveBridgeDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
 import gr.hua.aurora.wifidirect.WifiDirectSendBridgeDiagnostics
@@ -188,6 +189,16 @@ class PrivateChatScreenTest {
                 state = WifiDirectTransportAdapterState.READY
             ),
             wifiDirectSendBridgeDiagnostics = WifiDirectSendBridgeDiagnostics(enabled = true),
+            wifiDirectPrivateDebugSendDiagnostics = WifiDirectPrivateDebugSendDiagnostics(
+                enabled = true,
+                privateSubmissionAttempts = 2,
+                privateSubmissionSuccesses = 1,
+                privateSubmitFailures = 1,
+                lastPrivateMessageId = "msg-1",
+                lastPrivateFrameSize = 512,
+                lastPrivateSendResult = "submitted locally",
+                lastPrivateSendError = "Receiver bridge disabled on peer."
+            ),
             wifiDirectReceiveBridgeDiagnostics = WifiDirectReceiveBridgeDiagnostics(enabled = true),
             isComposerEnabled = true
         )
@@ -220,22 +231,30 @@ class PrivateChatScreenTest {
                     DebugInfoSection(
                         title = "Wi-Fi Direct private",
                         items = listOf(
-                            DebugInfoItem("Overall", "not wired yet", preferFullWidth = true),
-                            DebugInfoItem("Path", "BLE only"),
+                            DebugInfoItem("Overall", "ready", preferFullWidth = true),
+                            DebugInfoItem("Path", "BLE primary + Wi-Fi Direct debug copy"),
+                            DebugInfoItem("Private send", "enabled"),
+                            DebugInfoItem("Mode", "BLE primary + Wi-Fi Direct debug copy"),
                             DebugInfoItem("Adapter", "ready"),
                             DebugInfoItem("Send bridge", "enabled"),
                             DebugInfoItem("Receive bridge", "enabled"),
                             DebugInfoItem("Contact", "present"),
                             DebugInfoItem("Chat id", "ready"),
                             DebugInfoItem("Session", "ready"),
+                            DebugInfoItem("Submissions", "2"),
+                            DebugInfoItem("Successes", "1"),
+                            DebugInfoItem("Failures", "1"),
+                            DebugInfoItem("Last msg", "msg-1"),
+                            DebugInfoItem("Last size", "512 B"),
+                            DebugInfoItem("Last result", "submitted locally"),
                             DebugInfoItem(
-                                "Blocked",
-                                "Private Wi-Fi Direct routing not enabled.",
+                                "Last error",
+                                "Receiver bridge disabled on peer.",
                                 preferFullWidth = true
                             ),
                             DebugInfoItem(
                                 "Note",
-                                "Private Chat still uses BLE. Wi-Fi Direct private routing not enabled.",
+                                "Debug only. BLE remains the normal Private Chat path.",
                                 preferFullWidth = true
                             )
                         )
@@ -278,6 +297,7 @@ class PrivateChatScreenTest {
                 wifiDirectRuntimeStatus = wifiDirectRuntimeStatus(),
                 wifiDirectAdapterDiagnostics = WifiDirectTransportAdapterDiagnostics(),
                 wifiDirectSendBridgeDiagnostics = WifiDirectSendBridgeDiagnostics(),
+                wifiDirectPrivateDebugSendDiagnostics = WifiDirectPrivateDebugSendDiagnostics(),
                 wifiDirectReceiveBridgeDiagnostics = WifiDirectReceiveBridgeDiagnostics(),
                 isComposerEnabled = false
             )
@@ -293,14 +313,19 @@ class PrivateChatScreenTest {
             runtimeStatus = wifiDirectRuntimeStatus(),
             adapterDiagnostics = WifiDirectTransportAdapterDiagnostics(),
             sendBridgeDiagnostics = WifiDirectSendBridgeDiagnostics(),
+            privateDebugSendDiagnostics = WifiDirectPrivateDebugSendDiagnostics(),
             receiveBridgeDiagnostics = WifiDirectReceiveBridgeDiagnostics()
         )
 
-        assertEquals("not ready", diagnostics.readiness.overallStatus)
+        assertEquals("disabled", diagnostics.readiness.overallStatus)
         assertEquals("BLE only", diagnostics.readiness.pathStatus)
         assertFalse(diagnostics.readiness.canAttemptWhenWired)
         assertFalse(diagnostics.readiness.isWired)
-        assertEquals("Wi-Fi Direct adapter not ready.", diagnostics.readiness.blockedReason)
+        assertEquals(
+            "Enable Private Wi-Fi Direct debug send to add a debug copy.",
+            diagnostics.readiness.blockedReason
+        )
+        assertEquals("disabled", diagnostics.privateDebugSendStatus)
         assertFalse(diagnostics.guard.persistsRawSessionSecrets)
         assertFalse(diagnostics.guard.exposesPlaintextToRelays)
     }
@@ -316,6 +341,7 @@ class PrivateChatScreenTest {
                 state = WifiDirectTransportAdapterState.NOT_READY
             ),
             sendBridgeDiagnostics = WifiDirectSendBridgeDiagnostics(enabled = true),
+            privateDebugSendDiagnostics = WifiDirectPrivateDebugSendDiagnostics(enabled = true),
             receiveBridgeDiagnostics = WifiDirectReceiveBridgeDiagnostics(enabled = true)
         )
 
@@ -334,6 +360,7 @@ class PrivateChatScreenTest {
                 state = WifiDirectTransportAdapterState.READY
             ),
             sendBridgeDiagnostics = WifiDirectSendBridgeDiagnostics(enabled = false),
+            privateDebugSendDiagnostics = WifiDirectPrivateDebugSendDiagnostics(enabled = true),
             receiveBridgeDiagnostics = WifiDirectReceiveBridgeDiagnostics(enabled = true)
         )
 
@@ -345,7 +372,7 @@ class PrivateChatScreenTest {
     }
 
     @Test
-    fun privateChatWifiDirectDiagnosticsRequireReceiveBridge() {
+    fun privateChatWifiDirectDiagnosticsKeepReceiveBridgeVisibleWithoutBlockingDebugCopy() {
         val diagnostics = privateChatWifiDirectDebugDiagnostics(
             contact = readyContact(),
             privateChatIdentity = readyIdentity("peer-123"),
@@ -355,14 +382,14 @@ class PrivateChatScreenTest {
                 state = WifiDirectTransportAdapterState.READY
             ),
             sendBridgeDiagnostics = WifiDirectSendBridgeDiagnostics(enabled = true),
+            privateDebugSendDiagnostics = WifiDirectPrivateDebugSendDiagnostics(enabled = true),
             receiveBridgeDiagnostics = WifiDirectReceiveBridgeDiagnostics(enabled = false)
         )
 
-        assertEquals(
-            "Enable the Wi-Fi Direct receive bridge on the receiver.",
-            diagnostics.readiness.blockedReason
-        )
-        assertFalse(diagnostics.readiness.canAttemptWhenWired)
+        assertEquals("disabled", diagnostics.receiveBridgeStatus)
+        assertEquals("ready", diagnostics.readiness.overallStatus)
+        assertTrue(diagnostics.readiness.canAttemptWhenWired)
+        assertNull(diagnostics.readiness.blockedReason)
     }
 
     @Test
@@ -381,6 +408,7 @@ class PrivateChatScreenTest {
                 state = WifiDirectTransportAdapterState.READY
             ),
             sendBridgeDiagnostics = WifiDirectSendBridgeDiagnostics(enabled = true),
+            privateDebugSendDiagnostics = WifiDirectPrivateDebugSendDiagnostics(enabled = true),
             receiveBridgeDiagnostics = WifiDirectReceiveBridgeDiagnostics(enabled = true)
         )
 
@@ -399,6 +427,7 @@ class PrivateChatScreenTest {
                 state = WifiDirectTransportAdapterState.READY
             ),
             sendBridgeDiagnostics = WifiDirectSendBridgeDiagnostics(enabled = true),
+            privateDebugSendDiagnostics = WifiDirectPrivateDebugSendDiagnostics(enabled = true),
             receiveBridgeDiagnostics = WifiDirectReceiveBridgeDiagnostics(enabled = true)
         )
 
@@ -415,14 +444,28 @@ class PrivateChatScreenTest {
             runtimeStatus = wifiDirectRuntimeStatus(),
             adapterDiagnostics = WifiDirectTransportAdapterDiagnostics(),
             sendBridgeDiagnostics = WifiDirectSendBridgeDiagnostics(),
+            privateDebugSendDiagnostics = WifiDirectPrivateDebugSendDiagnostics(),
             receiveBridgeDiagnostics = WifiDirectReceiveBridgeDiagnostics()
         )
 
         assertEquals("disabled", diagnostics.adapterStatus)
         assertEquals("disabled", diagnostics.sendBridgeStatus)
         assertEquals("disabled", diagnostics.receiveBridgeStatus)
-        assertEquals("not ready", diagnostics.readiness.overallStatus)
+        assertEquals("disabled", diagnostics.privateDebugSendStatus)
+        assertEquals("disabled", diagnostics.readiness.overallStatus)
         assertFalse(diagnostics.readiness.canAttemptWhenWired)
+    }
+
+    @Test
+    fun privateChatWifiDirectDebugToggleLabelMatchesCurrentState() {
+        assertEquals(
+            "Enable Private Wi-Fi Direct send",
+            privateChatWifiDirectDebugToggleLabel(privateDebugSendEnabled = false)
+        )
+        assertEquals(
+            "Disable Private Wi-Fi Direct send",
+            privateChatWifiDirectDebugToggleLabel(privateDebugSendEnabled = true)
+        )
     }
 
     @Test
