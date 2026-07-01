@@ -11,12 +11,15 @@ import java.nio.charset.StandardCharsets.UTF_8
 private const val wifiDirectGlobalDebugSendTtl = 10
 
 private const val wifiDirectGlobalDebugSendNote =
-    "Experimental debug only. Normal chat still uses BLE unless Wi-Fi Direct global send is enabled. Private Chat still uses BLE."
+    "Debug only. BLE remains the normal Global Chat path."
 
 internal data class WifiDirectGlobalDebugSendDiagnostics(
     val enabled: Boolean = false,
-    val globalFramesSubmitted: Long = 0L,
+    val bleRemainsPrimary: Boolean = true,
+    val globalSubmissionAttempts: Long = 0L,
+    val globalSubmissionSuccesses: Long = 0L,
     val globalSubmitFailures: Long = 0L,
+    val lastGlobalMessageId: String? = null,
     val lastGlobalFrameSize: Int? = null,
     val lastGlobalSendResult: String? = null,
     val lastGlobalSendError: String? = null,
@@ -38,8 +41,10 @@ internal class WifiDirectGlobalDebugSendBridge(
     private val stateLock = Any()
 
     private var enabled = false
-    private var globalFramesSubmitted = 0L
+    private var globalSubmissionAttempts = 0L
+    private var globalSubmissionSuccesses = 0L
     private var globalSubmitFailures = 0L
+    private var lastGlobalMessageId: String? = null
     private var lastGlobalFrameSize: Int? = null
     private var lastGlobalSendResult: String? = null
     private var lastGlobalSendError: String? = null
@@ -83,6 +88,7 @@ internal class WifiDirectGlobalDebugSendBridge(
         if (sanitizedSenderId.isEmpty()) {
             val error = IllegalArgumentException("Wi-Fi Direct Global send sender id unavailable.")
             emitFailure(
+                messageId = message.messageId,
                 frameSize = null,
                 resultLabel = "failed",
                 reason = error.message ?: "Wi-Fi Direct Global send sender id unavailable."
@@ -96,6 +102,7 @@ internal class WifiDirectGlobalDebugSendBridge(
                 "Wi-Fi Direct Global send only supports the global thread."
             )
             emitFailure(
+                messageId = message.messageId,
                 frameSize = null,
                 resultLabel = "failed",
                 reason = error.message ?: "Wi-Fi Direct Global send only supports the global thread."
@@ -103,11 +110,13 @@ internal class WifiDirectGlobalDebugSendBridge(
             onResult(Result.failure(error))
             return
         }
+        recordSubmissionAttempt(message.messageId)
 
         val readiness = readinessSnapshot()
         if (!readiness.enabled) {
             val error = IllegalStateException("Wi-Fi Direct Global send disabled.")
             emitFailure(
+                messageId = message.messageId,
                 frameSize = null,
                 resultLabel = "disabled",
                 reason = error.message ?: "Wi-Fi Direct Global send disabled."
@@ -120,6 +129,7 @@ internal class WifiDirectGlobalDebugSendBridge(
                 "Wi-Fi Direct Global send requires the send bridge to be enabled."
             )
             emitFailure(
+                messageId = message.messageId,
                 frameSize = null,
                 resultLabel = "blocked",
                 reason = error.message
@@ -133,6 +143,7 @@ internal class WifiDirectGlobalDebugSendBridge(
                 "Wi-Fi Direct Global send requires a ready transport adapter."
             )
             emitFailure(
+                messageId = message.messageId,
                 frameSize = null,
                 resultLabel = "blocked",
                 reason = error.message
@@ -149,6 +160,7 @@ internal class WifiDirectGlobalDebugSendBridge(
             )
         }.getOrElse { error ->
             emitFailure(
+                messageId = message.messageId,
                 frameSize = null,
                 resultLabel = "failed",
                 reason = safeErrorDetail(error)
@@ -166,6 +178,7 @@ internal class WifiDirectGlobalDebugSendBridge(
             )
         }.getOrElse { error ->
             emitFailure(
+                messageId = frame.id,
                 frameSize = encodedFrameBytes.size,
                 resultLabel = "failed",
                 reason = safeErrorDetail(error)
@@ -180,8 +193,8 @@ internal class WifiDirectGlobalDebugSendBridge(
         submitTransportFrameAtIndex(
             frames = transportFrames,
             frameIndex = 0,
+            messageId = frame.id,
             encodedFrameSize = encodedFrameBytes.size,
-            totalFrames = transportFrames.size,
             onResult = onResult
         )
     }
@@ -189,14 +202,15 @@ internal class WifiDirectGlobalDebugSendBridge(
     private fun submitTransportFrameAtIndex(
         frames: List<WifiDirectTransportFrame>,
         frameIndex: Int,
+        messageId: String,
         encodedFrameSize: Int,
-        totalFrames: Int,
         onResult: (Result<Unit>) -> Unit
     ) {
         if (frameIndex >= frames.size) {
             emit(
                 synchronized(stateLock) {
-                    globalFramesSubmitted += totalFrames.toLong()
+                    globalSubmissionSuccesses += 1L
+                    lastGlobalMessageId = messageId
                     lastGlobalFrameSize = encodedFrameSize
                     lastGlobalSendResult = "submitted locally"
                     lastGlobalSendError = null
@@ -212,12 +226,13 @@ internal class WifiDirectGlobalDebugSendBridge(
                 submitTransportFrameAtIndex(
                     frames = frames,
                     frameIndex = frameIndex + 1,
+                    messageId = messageId,
                     encodedFrameSize = encodedFrameSize,
-                    totalFrames = totalFrames,
                     onResult = onResult
                 )
             }.onFailure { error ->
                 emitFailure(
+                    messageId = messageId,
                     frameSize = encodedFrameSize,
                     resultLabel = "failed",
                     reason = safeErrorDetail(error)
@@ -227,7 +242,17 @@ internal class WifiDirectGlobalDebugSendBridge(
         }
     }
 
+    private fun recordSubmissionAttempt(
+        messageId: String
+    ) {
+        synchronized(stateLock) {
+            globalSubmissionAttempts += 1L
+            lastGlobalMessageId = messageId
+        }
+    }
+
     private fun emitFailure(
+        messageId: String,
         frameSize: Int?,
         resultLabel: String,
         reason: String
@@ -235,6 +260,7 @@ internal class WifiDirectGlobalDebugSendBridge(
         emit(
             synchronized(stateLock) {
                 globalSubmitFailures += 1L
+                lastGlobalMessageId = messageId
                 lastGlobalFrameSize = frameSize
                 lastGlobalSendResult = resultLabel
                 lastGlobalSendError = reason
@@ -254,8 +280,11 @@ internal class WifiDirectGlobalDebugSendBridge(
     private fun currentDiagnosticsLocked(): WifiDirectGlobalDebugSendDiagnostics {
         return WifiDirectGlobalDebugSendDiagnostics(
             enabled = enabled,
-            globalFramesSubmitted = globalFramesSubmitted,
+            bleRemainsPrimary = true,
+            globalSubmissionAttempts = globalSubmissionAttempts,
+            globalSubmissionSuccesses = globalSubmissionSuccesses,
             globalSubmitFailures = globalSubmitFailures,
+            lastGlobalMessageId = lastGlobalMessageId,
             lastGlobalFrameSize = lastGlobalFrameSize,
             lastGlobalSendResult = lastGlobalSendResult,
             lastGlobalSendError = lastGlobalSendError
@@ -275,6 +304,16 @@ internal class WifiDirectGlobalDebugSendBridge(
     private fun safeErrorDetail(error: Throwable): String {
         return error.message?.trim()?.takeIf { it.isNotEmpty() }
             ?: error::class.java.simpleName
+    }
+}
+
+internal fun wifiDirectGlobalDebugSendModeSummary(
+    diagnostics: WifiDirectGlobalDebugSendDiagnostics
+): String {
+    return if (diagnostics.bleRemainsPrimary) {
+        "BLE primary + Wi-Fi Direct debug copy"
+    } else {
+        "Wi-Fi Direct debug only"
     }
 }
 

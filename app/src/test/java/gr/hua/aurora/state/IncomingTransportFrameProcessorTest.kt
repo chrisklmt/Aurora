@@ -2,6 +2,7 @@ package gr.hua.aurora.state
 
 import gr.hua.aurora.ble.transport.BleGattTransportFrame
 import gr.hua.aurora.ble.transport.BleGattTransportFrameChunker
+import gr.hua.aurora.ble.transport.OutgoingBleTransportSendPlanBuilder
 import gr.hua.aurora.crypto.Sec1PublicKeyEncoding
 import gr.hua.aurora.data.LocalProfileSettings
 import gr.hua.aurora.data.LocalProfileSettingsStore
@@ -16,9 +17,12 @@ import gr.hua.aurora.protocol.IncomingTransportReceiveResult
 import gr.hua.aurora.protocol.MessageFrame
 import gr.hua.aurora.protocol.MessageFrameCodec
 import gr.hua.aurora.protocol.MessageFrameType
+import gr.hua.aurora.protocol.NoOpIncomingSessionMaterialProvider
 import gr.hua.aurora.protocol.PeerIdentityExchangeHandlingResult
 import gr.hua.aurora.protocol.PrivateChatMessagePayload
 import gr.hua.aurora.protocol.PrivateChatMessagePayloadCodec
+import gr.hua.aurora.wifidirect.WifiDirectReceiveBridge
+import gr.hua.aurora.wifidirect.WifiDirectTransportFrame
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -129,6 +133,119 @@ class IncomingTransportFrameProcessorTest {
         assertTrue(ingestionResult is IncomingMessageIngestionResult.Duplicate)
         assertEquals(frame.id, (ingestionResult as IncomingMessageIngestionResult.Duplicate).messageId)
         assertEquals(sizeAfterFirst, holder.uiState.globalMessages.size)
+    }
+
+    @Test
+    fun globalMessageReceivedViaBleThenWifiDirectIsDisplayedOnce() {
+        val holder = createHolder()
+        val frame = publicGlobalFrame(
+            id = "processor-public-order-1",
+            senderId = "peer-order"
+        )
+        val transportFrames = publicTransportFramesFor(frame)
+        val receiveBridge = WifiDirectReceiveBridge(
+            createAuroraBleTransportFrameReceiver(holder)::receive
+        )
+        receiveBridge.setEnabled(true)
+
+        val bleResult = IncomingTransportFrameProcessor.process(
+            frames = transportFrames,
+            sessionMaterialProvider = NoOpIncomingSessionMaterialProvider,
+            stateHolder = holder
+        )
+        transportFrames.forEach { transportFrame ->
+            receiveBridge.onTransportFrameReceived(
+                WifiDirectTransportFrame.fromPayload(transportFrame.toByteArray())
+            )
+        }
+
+        assertTrue(bleResult is IncomingTransportFrameProcessingResult.Received)
+        assertEquals(1, holder.uiState.globalMessages.count { it.id == frame.id })
+    }
+
+    @Test
+    fun globalMessageReceivedViaWifiDirectThenBleIsDisplayedOnce() {
+        val holder = createHolder()
+        val frame = publicGlobalFrame(
+            id = "processor-public-order-2",
+            senderId = "peer-order"
+        )
+        val transportFrames = publicTransportFramesFor(frame)
+        val receiveBridge = WifiDirectReceiveBridge(
+            createAuroraBleTransportFrameReceiver(holder)::receive
+        )
+        receiveBridge.setEnabled(true)
+
+        transportFrames.forEach { transportFrame ->
+            receiveBridge.onTransportFrameReceived(
+                WifiDirectTransportFrame.fromPayload(transportFrame.toByteArray())
+            )
+        }
+        val bleResult = IncomingTransportFrameProcessor.process(
+            frames = transportFrames,
+            sessionMaterialProvider = NoOpIncomingSessionMaterialProvider,
+            stateHolder = holder
+        )
+
+        assertTrue(bleResult is IncomingTransportFrameProcessingResult.Received)
+        val ingestionResult =
+            (bleResult as IncomingTransportFrameProcessingResult.Received).ingestionResult
+        assertTrue(ingestionResult is IncomingMessageIngestionResult.Duplicate)
+        assertEquals(1, holder.uiState.globalMessages.count { it.id == frame.id })
+    }
+
+    @Test
+    fun returnedSelfCopyOverWifiDirectIsIgnored() {
+        val holder = createHolder()
+        val queuedMessage = requireNotNull(holder.sendGlobalPreviewMessage("hello self"))
+        val receiveBridge = WifiDirectReceiveBridge(
+            createAuroraBleTransportFrameReceiver(holder)::receive
+        )
+        receiveBridge.setEnabled(true)
+        val selfCopyFrame = publicGlobalFrame(
+            id = queuedMessage.messageId,
+            senderId = "self-peer"
+        ).copy(payload = "hello self")
+
+        publicTransportFramesFor(selfCopyFrame).forEach { transportFrame ->
+            receiveBridge.onTransportFrameReceived(
+                WifiDirectTransportFrame.fromPayload(transportFrame.toByteArray())
+            )
+        }
+
+        assertEquals(1, holder.uiState.globalMessages.count { it.id == queuedMessage.messageId })
+        assertEquals(
+            true,
+            holder.uiState.globalMessages.single { it.id == queuedMessage.messageId }.isOutgoing
+        )
+    }
+
+    @Test
+    fun sameTextWithDifferentMessageIdsIsStillAccepted() {
+        val holder = createHolder()
+        val firstFrame = publicGlobalFrame(
+            id = "processor-public-text-1",
+            senderId = "peer-text"
+        ).copy(payload = "same text")
+        val secondFrame = publicGlobalFrame(
+            id = "processor-public-text-2",
+            senderId = "peer-text"
+        ).copy(payload = "same text")
+
+        IncomingTransportFrameProcessor.process(
+            frames = publicTransportFramesFor(firstFrame),
+            sessionMaterialProvider = NoOpIncomingSessionMaterialProvider,
+            stateHolder = holder
+        )
+        IncomingTransportFrameProcessor.process(
+            frames = publicTransportFramesFor(secondFrame),
+            sessionMaterialProvider = NoOpIncomingSessionMaterialProvider,
+            stateHolder = holder
+        )
+
+        assertEquals(2, holder.uiState.globalMessages.count { it.text == "same text" })
+        assertTrue(holder.uiState.globalMessages.any { it.id == firstFrame.id })
+        assertTrue(holder.uiState.globalMessages.any { it.id == secondFrame.id })
     }
 
     @Test
@@ -426,6 +543,30 @@ class IncomingTransportFrameProcessorTest {
         return BleGattTransportFrameChunker.chunk(
             encodedEnvelopeBytes = EncryptedMessageEnvelopeCodec.encode(envelope).toByteArray(UTF_8),
             groupId = groupId
+        )
+    }
+
+    private fun publicTransportFramesFor(
+        frame: MessageFrame
+    ): List<BleGattTransportFrame> {
+        return OutgoingBleTransportSendPlanBuilder.build(
+            messageId = frame.id,
+            targetPeerId = null,
+            encryptedEnvelopeBytes = MessageFrameCodec.encode(frame).toByteArray(UTF_8),
+            sourceCreatedAtMillis = frame.createdAtMillis
+        ).framesInSendOrder()
+    }
+
+    private fun publicGlobalFrame(
+        id: String,
+        senderId: String
+    ): MessageFrame {
+        return MessageFrame(
+            id = id,
+            type = MessageFrameType.GLOBAL_TEXT,
+            senderId = senderId,
+            createdAtMillis = 1_715_500_177L,
+            payload = "public payload"
         )
     }
 

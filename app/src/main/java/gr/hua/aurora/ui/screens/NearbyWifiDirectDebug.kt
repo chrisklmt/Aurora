@@ -51,6 +51,7 @@ import gr.hua.aurora.wifidirect.wifiDirectTransportSummary
 import gr.hua.aurora.wifidirect.wifiDirectTransportAdapterByteSummary
 import gr.hua.aurora.wifidirect.wifiDirectTransportAdapterStateSummary
 import gr.hua.aurora.wifidirect.wifiDirectReceiveBridgeStateSummary
+import gr.hua.aurora.wifidirect.wifiDirectGlobalDebugSendModeSummary
 import gr.hua.aurora.wifidirect.wifiDirectGlobalDebugSendStateSummary
 import gr.hua.aurora.wifidirect.wifiDirectSendBridgeStateSummary
 import gr.hua.aurora.wifidirect.wifiDirectSmokeTestStateSummary
@@ -406,14 +407,32 @@ internal fun buildNearbyWifiDirectGlobalSendDebugSection(
         )
         add(
             DebugInfoItem(
-                "Submitted",
-                diagnostics.globalFramesSubmitted.toString()
+                "Mode",
+                wifiDirectGlobalDebugSendModeSummary(diagnostics)
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Attempts",
+                diagnostics.globalSubmissionAttempts.toString()
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Success",
+                diagnostics.globalSubmissionSuccesses.toString()
             )
         )
         add(
             DebugInfoItem(
                 "Failures",
                 diagnostics.globalSubmitFailures.toString()
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Last msg",
+                diagnostics.lastGlobalMessageId ?: "none"
             )
         )
         diagnostics.lastGlobalSendResult?.takeIf { it.isNotBlank() }?.let { resultText ->

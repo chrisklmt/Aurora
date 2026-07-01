@@ -21,7 +21,9 @@ class WifiDirectGlobalDebugSendBridgeTest {
         )
 
         assertEquals(false, sender.currentDiagnostics().enabled)
-        assertEquals(0L, sender.currentDiagnostics().globalFramesSubmitted)
+        assertEquals(true, sender.currentDiagnostics().bleRemainsPrimary)
+        assertEquals(0L, sender.currentDiagnostics().globalSubmissionAttempts)
+        assertEquals(0L, sender.currentDiagnostics().globalSubmissionSuccesses)
         assertEquals(0L, sender.currentDiagnostics().globalSubmitFailures)
     }
 
@@ -54,7 +56,10 @@ class WifiDirectGlobalDebugSendBridgeTest {
             failure?.message
         )
         assertEquals(emptyList<WifiDirectTransportFrame>(), submittedFrames)
+        assertEquals(1L, sender.currentDiagnostics().globalSubmissionAttempts)
+        assertEquals(0L, sender.currentDiagnostics().globalSubmissionSuccesses)
         assertEquals(1L, sender.currentDiagnostics().globalSubmitFailures)
+        assertEquals("global-msg-1", sender.currentDiagnostics().lastGlobalMessageId)
         assertEquals("blocked", sender.currentDiagnostics().lastGlobalSendResult)
     }
 
@@ -96,7 +101,10 @@ class WifiDirectGlobalDebugSendBridgeTest {
         assertEquals(MessageFrameType.GLOBAL_TEXT, receivedMessage.frame.type)
         assertEquals("debug-user", receivedMessage.frame.senderId)
         assertEquals("hello over wifi direct", receivedMessage.frame.payload)
-        assertEquals(submittedFrames.size.toLong(), sender.currentDiagnostics().globalFramesSubmitted)
+        assertEquals(1L, sender.currentDiagnostics().globalSubmissionAttempts)
+        assertEquals(1L, sender.currentDiagnostics().globalSubmissionSuccesses)
+        assertEquals(0L, sender.currentDiagnostics().globalSubmitFailures)
+        assertEquals("global-123", sender.currentDiagnostics().lastGlobalMessageId)
         assertEquals("submitted locally", sender.currentDiagnostics().lastGlobalSendResult)
     }
 

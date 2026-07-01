@@ -580,12 +580,15 @@ class NearbyDevicesScreenTest {
                         title = "Global send",
                         items = listOf(
                             DebugInfoItem("Global send", "disabled"),
-                            DebugInfoItem("Submitted", "0"),
+                            DebugInfoItem("Mode", "BLE primary + Wi-Fi Direct debug copy"),
+                            DebugInfoItem("Attempts", "0"),
+                            DebugInfoItem("Success", "0"),
                             DebugInfoItem("Failures", "0"),
+                            DebugInfoItem("Last msg", "none"),
                             DebugInfoItem("Last size", "none"),
                             DebugInfoItem(
                                 "Note",
-                                "Experimental debug only. Normal chat still uses BLE unless Wi-Fi Direct global send is enabled. Private Chat still uses BLE.",
+                                "Debug only. BLE remains the normal Global Chat path.",
                                 preferFullWidth = true
                             )
                         )
@@ -717,8 +720,11 @@ class NearbyDevicesScreenTest {
                 title = "Global send",
                 items = listOf(
                     DebugInfoItem("Global send", "enabled"),
-                    DebugInfoItem("Submitted", "3"),
+                    DebugInfoItem("Mode", "BLE primary + Wi-Fi Direct debug copy"),
+                    DebugInfoItem("Attempts", "4"),
+                    DebugInfoItem("Success", "3"),
                     DebugInfoItem("Failures", "1"),
+                    DebugInfoItem("Last msg", "global-msg-77"),
                     DebugInfoItem("Last result", "failed"),
                     DebugInfoItem("Last size", "96 B"),
                     DebugInfoItem(
@@ -728,7 +734,7 @@ class NearbyDevicesScreenTest {
                     ),
                     DebugInfoItem(
                         "Note",
-                        "Experimental debug only. Normal chat still uses BLE unless Wi-Fi Direct global send is enabled. Private Chat still uses BLE.",
+                        "Debug only. BLE remains the normal Global Chat path.",
                         preferFullWidth = true
                     )
                 )
@@ -736,8 +742,10 @@ class NearbyDevicesScreenTest {
             buildNearbyWifiDirectGlobalSendDebugSection(
                 diagnostics = WifiDirectGlobalDebugSendDiagnostics(
                     enabled = true,
-                    globalFramesSubmitted = 3,
+                    globalSubmissionAttempts = 4,
+                    globalSubmissionSuccesses = 3,
                     globalSubmitFailures = 1,
+                    lastGlobalMessageId = "global-msg-77",
                     lastGlobalFrameSize = 96,
                     lastGlobalSendResult = "failed",
                     lastGlobalSendError =

@@ -1,11 +1,22 @@
 package gr.hua.aurora.wifidirect
 
 import gr.hua.aurora.ble.transport.BleGattTransportFrame
+import gr.hua.aurora.ble.transport.OutgoingBleTransportSendPlanBuilder
 import gr.hua.aurora.ble.transport.BleTransportReceiveResult
+import gr.hua.aurora.data.LocalProfileSettings
+import gr.hua.aurora.data.LocalProfileSettingsStore
+import gr.hua.aurora.model.MessageStatus
+import gr.hua.aurora.protocol.MessageFrame
+import gr.hua.aurora.protocol.MessageFrameCodec
+import gr.hua.aurora.protocol.MessageFrameType
+import gr.hua.aurora.state.AuroraStateHolder
+import gr.hua.aurora.state.SampleAuroraState
+import gr.hua.aurora.state.createAuroraBleTransportFrameReceiver
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.nio.charset.StandardCharsets.UTF_8
 
 class WifiDirectReceiveBridgeTest {
     @Test
@@ -93,6 +104,54 @@ class WifiDirectReceiveBridgeTest {
         assertEquals(smokeFrames.size.toLong(), bridge.currentDiagnostics().framesBridged)
         assertEquals(0L, bridge.currentDiagnostics().bridgeFailures)
         assertTrue(receivedFrames.all { frame -> frame.bodyToByteArray().isNotEmpty() })
+    }
+
+    @Test
+    fun receiveBridgeDisabledPreventsWifiDirectGlobalFrameFromAffectingGlobalUi() {
+        val holder = createHolder()
+        val bridge = WifiDirectReceiveBridge(
+            createAuroraBleTransportFrameReceiver(holder)::receive
+        )
+        val publicFrame = globalMessageFrame(
+            id = "wifi-direct-disabled-1",
+            senderId = "peer-disabled"
+        )
+
+        publicTransportFramesFor(publicFrame).forEach { frame ->
+            bridge.onTransportFrameReceived(
+                WifiDirectTransportFrame.fromPayload(frame.toByteArray())
+            )
+        }
+
+        assertTrue(holder.uiState.globalMessages.none { it.id == publicFrame.id })
+        assertEquals(0L, bridge.currentDiagnostics().framesBridged)
+    }
+
+    @Test
+    fun enabledReceiveBridgePassesValidGlobalFrameThroughExistingReceivePipeline() {
+        val holder = createHolder()
+        val bridge = WifiDirectReceiveBridge(
+            createAuroraBleTransportFrameReceiver(holder)::receive
+        )
+        val publicFrame = globalMessageFrame(
+            id = "wifi-direct-global-1",
+            senderId = "peer-global"
+        )
+        val transportFrames = publicTransportFramesFor(publicFrame)
+
+        bridge.setEnabled(true)
+        transportFrames.forEach { frame ->
+            bridge.onTransportFrameReceived(
+                WifiDirectTransportFrame.fromPayload(frame.toByteArray())
+            )
+        }
+
+        val receivedMessage = holder.uiState.globalMessages.single { it.id == publicFrame.id }
+        assertEquals(publicFrame.payload, receivedMessage.text)
+        assertEquals(publicFrame.senderId, receivedMessage.senderId)
+        assertEquals(MessageStatus.RECEIVED, receivedMessage.status)
+        assertEquals(transportFrames.size.toLong(), bridge.currentDiagnostics().framesBridged)
+        assertNull(bridge.currentDiagnostics().lastBridgeError)
     }
 
     @Test
@@ -185,5 +244,56 @@ class WifiDirectReceiveBridgeTest {
         sender.sendPublicSmokeTest("debug-user")
 
         return submittedFrames.toList()
+    }
+
+    private fun publicTransportFramesFor(
+        frame: MessageFrame
+    ): List<BleGattTransportFrame> {
+        return OutgoingBleTransportSendPlanBuilder.build(
+            messageId = frame.id,
+            targetPeerId = null,
+            encryptedEnvelopeBytes = MessageFrameCodec.encode(frame).toByteArray(UTF_8),
+            sourceCreatedAtMillis = frame.createdAtMillis
+        ).framesInSendOrder()
+    }
+
+    private fun globalMessageFrame(
+        id: String,
+        senderId: String
+    ): MessageFrame {
+        return MessageFrame(
+            id = id,
+            type = MessageFrameType.GLOBAL_TEXT,
+            senderId = senderId,
+            createdAtMillis = 1_717_000_010L,
+            payload = "hello over wifi direct"
+        )
+    }
+
+    private fun createHolder(): AuroraStateHolder {
+        return AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+    }
+
+    private class FakeProfileStore : LocalProfileSettingsStore {
+        override fun loadProfileSettings(): LocalProfileSettings {
+            return LocalProfileSettings(
+                generatedUsername = "PIAIUFN1",
+                customUsername = null,
+                useCustomUsernameInGlobalChat = true
+            )
+        }
+
+        override fun saveGeneratedUsername(username: String) = Unit
+
+        override fun saveCustomUsername(username: String?) = Unit
+
+        override fun saveUseCustomUsernameInGlobalChat(enabled: Boolean) = Unit
+
+        override fun clearProfile() = Unit
     }
 }
