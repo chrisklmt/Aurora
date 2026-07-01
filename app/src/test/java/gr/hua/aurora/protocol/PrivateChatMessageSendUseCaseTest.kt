@@ -56,6 +56,7 @@ class PrivateChatMessageSendUseCaseTest {
         assertEquals("hello private", decodedPayload.body)
         assertEquals("chat-alex", decodedPayload.privateChatId)
         assertEquals("alex", requireNotNull(sender.capturedPlan).targetPeerId)
+        assertEquals(1, sender.sendCallCount)
     }
 
     @Test
@@ -232,11 +233,13 @@ class PrivateChatMessageSendUseCaseTest {
         private val result: BleTransportSendResult
     ) : BleTransportSender {
         var capturedPlan: OutgoingBleTransportSendPlan? = null
+        var sendCallCount: Int = 0
 
         override fun send(
             plan: OutgoingBleTransportSendPlan,
             listener: BleTransportSender.Listener
         ) {
+            sendCallCount += 1
             capturedPlan = plan
             listener.onSendResult(result)
         }

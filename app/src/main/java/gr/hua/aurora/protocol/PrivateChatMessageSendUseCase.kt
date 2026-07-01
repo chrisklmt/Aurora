@@ -57,28 +57,25 @@ object PrivateChatMessageSendUseCase {
             return PrivateChatMessageSendResult.ContactNotReachable
         }
 
-        val encodedPrivatePayload = runCatching {
-            PrivateChatMessagePayloadCodec.encode(
-                PrivateChatMessagePayload(
-                    privateChatId = privateChatId,
-                    senderUsername = senderUsername.trim(),
-                    body = draft.payload
-                )
+        val preparedTransportFrame = runCatching {
+            PrivateChatTransportFrameFactory.build(
+                message = message,
+                privateChatId = privateChatId,
+                senderPeerId = sanitizedSenderPeerId,
+                senderUsername = senderUsername,
+                encryptionMaterial = encryptionMaterial
             )
         }.getOrElse { error ->
             return PrivateChatMessageSendResult.Failed(
                 reason = error.message ?: "Private chat payload is invalid."
             )
         }
-        val resolvedFrame = OutgoingMessageFrameResolver.resolve(
-            draft = draft.copy(payload = encodedPrivatePayload),
-            senderId = sanitizedSenderPeerId
-        )
-        val sendResult = MessageFrameTransportSendUseCase.send(
-            frame = resolvedFrame,
-            encryptionMaterial = encryptionMaterial,
+
+        val sendResult = MessageFrameTransportSendUseCase.sendEncryptedEnvelope(
+            envelope = preparedTransportFrame.encryptedEnvelope,
             transportSender = sender,
-            targetPeerId = targetPeerId
+            targetPeerId = preparedTransportFrame.targetPeerId,
+            sourceCreatedAtMillis = preparedTransportFrame.frame.createdAtMillis
         )
         return when (sendResult) {
             BleTransportSendResult.QueuedLocally ->
