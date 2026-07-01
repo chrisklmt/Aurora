@@ -175,6 +175,10 @@ fun NavGraph(
                 peerSessionDiagnostics = bleRuntimeState.peerSessionDiagnostics,
                 activeTransportPeerId = bleRuntimeState.activeTransportPeerId,
                 lastIdentityExchangeStatus = bleRuntimeState.lastIdentityExchangeStatus,
+                wifiDirectRuntimeStatus = bleRuntimeState.wifiDirectRuntimeStatus,
+                wifiDirectAdapterDiagnostics = wifiDirectSocketState.adapterDiagnostics,
+                wifiDirectSendBridgeDiagnostics = wifiDirectSocketState.sendBridgeDiagnostics,
+                wifiDirectReceiveBridgeDiagnostics = wifiDirectSocketState.receiveBridgeDiagnostics,
                 onBack = onNavigateBackOrGlobal,
                 onSendMessage = { text ->
                     val queuedMessage = stateHolder.sendPrivateChatMessage(peerId, text)

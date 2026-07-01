@@ -119,6 +119,7 @@ class PrivateChatMessageSendUseCaseTest {
 
     @Test
     fun privateSendReturnsContactUnavailableForNonPrivateThread() {
+        val sender = RecordingTransportSender(BleTransportSendResult.QueuedLocally)
         val result = runSuspending {
             PrivateChatMessageSendUseCase.send(
                 message = OutgoingChatMessage(
@@ -131,7 +132,7 @@ class PrivateChatMessageSendUseCaseTest {
                 privateChatId = "chat-global",
                 senderPeerId = "sender-canonical",
                 senderUsername = "Alice",
-                transportSender = null,
+                transportSender = sender,
                 sessionMaterialProvider = FakeOutgoingSessionMaterialProvider(),
                 activeConnectedPeerId = null,
                 isActiveTransportConnected = false
@@ -139,6 +140,7 @@ class PrivateChatMessageSendUseCaseTest {
         }
 
         assertEquals(PrivateChatMessageSendResult.ContactUnavailable, result)
+        assertNull(sender.capturedPlan)
     }
 
     @Test

@@ -21,6 +21,10 @@ import gr.hua.aurora.ui.components.DebugInfoCardModel
 import gr.hua.aurora.ui.components.DebugInfoItem
 import gr.hua.aurora.ui.components.DebugInfoSection
 import gr.hua.aurora.ui.components.toMessageListItem
+import gr.hua.aurora.wifidirect.WifiDirectReceiveBridgeDiagnostics
+import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
+import gr.hua.aurora.wifidirect.WifiDirectSendBridgeDiagnostics
+import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics
 
 internal data class PrivateChatScreenContent(
     val title: String,
@@ -34,7 +38,7 @@ internal data class PrivateChatScreenContent(
 )
 
 @Composable
-fun PrivateChatScreen(
+internal fun PrivateChatScreen(
     requestedPeerId: String,
     contact: AuroraContact?,
     privateChatIdentity: PrivateChatIdentity?,
@@ -47,6 +51,10 @@ fun PrivateChatScreen(
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
     activeTransportPeerId: String?,
     lastIdentityExchangeStatus: String?,
+    wifiDirectRuntimeStatus: WifiDirectRuntimeStatus,
+    wifiDirectAdapterDiagnostics: WifiDirectTransportAdapterDiagnostics,
+    wifiDirectSendBridgeDiagnostics: WifiDirectSendBridgeDiagnostics,
+    wifiDirectReceiveBridgeDiagnostics: WifiDirectReceiveBridgeDiagnostics,
     onBack: () -> Unit,
     onSendMessage: (String) -> Unit,
     onRetryMessage: (String) -> Unit,
@@ -72,6 +80,10 @@ fun PrivateChatScreen(
         peerSessionDiagnostics = peerSessionDiagnostics,
         activeTransportPeerId = activeTransportPeerId,
         lastIdentityExchangeStatus = lastIdentityExchangeStatus,
+        wifiDirectRuntimeStatus = wifiDirectRuntimeStatus,
+        wifiDirectAdapterDiagnostics = wifiDirectAdapterDiagnostics,
+        wifiDirectSendBridgeDiagnostics = wifiDirectSendBridgeDiagnostics,
+        wifiDirectReceiveBridgeDiagnostics = wifiDirectReceiveBridgeDiagnostics,
         isComposerEnabled = content.isComposerEnabled
     )
     val bodyTopContent: (@Composable ColumnScope.() -> Unit)? = when {
@@ -220,6 +232,10 @@ internal fun buildPrivateChatDebugCard(
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
     activeTransportPeerId: String?,
     lastIdentityExchangeStatus: String?,
+    wifiDirectRuntimeStatus: WifiDirectRuntimeStatus,
+    wifiDirectAdapterDiagnostics: WifiDirectTransportAdapterDiagnostics,
+    wifiDirectSendBridgeDiagnostics: WifiDirectSendBridgeDiagnostics,
+    wifiDirectReceiveBridgeDiagnostics: WifiDirectReceiveBridgeDiagnostics,
     isComposerEnabled: Boolean
 ): DebugInfoCardModel? {
     if (!showDebugDiagnostics) {
@@ -303,6 +319,19 @@ internal fun buildPrivateChatDebugCard(
                         "Keys",
                         privateChatDebugKeyStatusText(hasRuntimeSession)
                     )
+                )
+            )
+        )
+        add(
+            buildPrivateChatWifiDirectDebugSection(
+                diagnostics = privateChatWifiDirectDebugDiagnostics(
+                    contact = contact,
+                    privateChatIdentity = privateChatIdentity,
+                    hasRuntimeSession = hasRuntimeSession,
+                    runtimeStatus = wifiDirectRuntimeStatus,
+                    adapterDiagnostics = wifiDirectAdapterDiagnostics,
+                    sendBridgeDiagnostics = wifiDirectSendBridgeDiagnostics,
+                    receiveBridgeDiagnostics = wifiDirectReceiveBridgeDiagnostics
                 )
             )
         )
