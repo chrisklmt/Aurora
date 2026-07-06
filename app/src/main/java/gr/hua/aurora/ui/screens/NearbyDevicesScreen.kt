@@ -57,6 +57,7 @@ import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
 import gr.hua.aurora.protocol.PeerSessionPeerId
 import gr.hua.aurora.protocol.hasSessionForPeer
 import gr.hua.aurora.state.AuroraAvailabilityPreference
+import gr.hua.aurora.ui.debug.wifidirect.NearbyWifiDirectDebugControls
 import gr.hua.aurora.ui.components.AuroraAvailabilityIndicator
 import gr.hua.aurora.ui.components.AuroraTopBarAction
 import gr.hua.aurora.ui.components.DebugInfoCard

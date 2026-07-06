@@ -1,4 +1,4 @@
-package gr.hua.aurora.ui.screens
+package gr.hua.aurora.ui.debug.wifidirect
 
 import android.util.Log
 import androidx.compose.foundation.layout.Arrangement

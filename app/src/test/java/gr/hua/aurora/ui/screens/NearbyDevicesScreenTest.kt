@@ -12,6 +12,7 @@ import gr.hua.aurora.model.AuroraContact
 import gr.hua.aurora.model.PrivateChatIdentity
 import gr.hua.aurora.protocol.PeerIdentityExchangeSendResult
 import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
+import gr.hua.aurora.ui.debug.wifidirect.*
 import gr.hua.aurora.ui.components.DebugInfoCardModel
 import gr.hua.aurora.ui.components.DebugInfoItem
 import gr.hua.aurora.ui.components.DebugInfoSection

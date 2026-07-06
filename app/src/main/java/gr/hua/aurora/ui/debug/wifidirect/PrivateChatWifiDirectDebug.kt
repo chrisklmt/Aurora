@@ -1,10 +1,11 @@
-package gr.hua.aurora.ui.screens
+package gr.hua.aurora.ui.debug.wifidirect
 
 import gr.hua.aurora.model.AuroraContact
 import gr.hua.aurora.model.PrivateChatIdentity
 import gr.hua.aurora.ui.components.DebugInfoCardModel
 import gr.hua.aurora.ui.components.DebugInfoItem
 import gr.hua.aurora.ui.components.DebugInfoSection
+import gr.hua.aurora.ui.screens.privateChatDebugIdentifierValue
 import gr.hua.aurora.wifidirect.WifiDirectPrivateDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectReceiveBridgeDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus

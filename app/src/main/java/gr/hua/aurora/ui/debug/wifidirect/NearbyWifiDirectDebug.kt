@@ -1,4 +1,4 @@
-package gr.hua.aurora.ui.screens
+package gr.hua.aurora.ui.debug.wifidirect
 
 import gr.hua.aurora.ui.components.DebugInfoItem
 import gr.hua.aurora.ui.components.DebugInfoSection

@@ -20,6 +20,11 @@ import gr.hua.aurora.model.ChatMessage
 import gr.hua.aurora.model.PrivateChatIdentity
 import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
 import gr.hua.aurora.protocol.PrivateChatMessageSendResult
+import gr.hua.aurora.ui.debug.wifidirect.WifiDirectPrivateDebugDiagnostics
+import gr.hua.aurora.ui.debug.wifidirect.buildPrivateChatWifiDirectDebugSection
+import gr.hua.aurora.ui.debug.wifidirect.buildPrivateChatWifiDirectDetailsSection
+import gr.hua.aurora.ui.debug.wifidirect.privateChatDebugDetailsToggleLabel
+import gr.hua.aurora.ui.debug.wifidirect.privateChatWifiDirectDebugDiagnostics
 import gr.hua.aurora.ui.components.AuroraTopBarAction
 import gr.hua.aurora.ui.components.ChatScaffold
 import gr.hua.aurora.ui.components.DebugInfoCard
