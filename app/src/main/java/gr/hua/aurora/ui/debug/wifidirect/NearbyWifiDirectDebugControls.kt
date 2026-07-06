@@ -29,19 +29,11 @@ import gr.hua.aurora.wifidirect.WifiDirectSocketCommandAvailability
 import gr.hua.aurora.wifidirect.WifiDirectSocketDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectSocketState
 import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics
-import gr.hua.aurora.wifidirect.WifiDirectSendBridgeDiagnostics
-import gr.hua.aurora.wifidirect.WifiDirectSmokeTestDiagnostics
-import gr.hua.aurora.wifidirect.WifiDirectPrivateDebugSendDiagnostics
-import gr.hua.aurora.wifidirect.WifiDirectReceiveBridgeDiagnostics
-import gr.hua.aurora.wifidirect.WifiDirectGlobalDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterState
 import gr.hua.aurora.wifidirect.wifiDirectSocketCommandResultSummary
 import gr.hua.aurora.wifidirect.wifiDirectSocketCommandSummary
 import gr.hua.aurora.wifidirect.WifiDirectSocketCommand
 import gr.hua.aurora.wifidirect.wifiDirectDiscoveryBlockedReason
-import gr.hua.aurora.wifidirect.wifiDirectGlobalDebugSendStateSummary
-import gr.hua.aurora.wifidirect.wifiDirectReceiveBridgeStateSummary
-import gr.hua.aurora.wifidirect.wifiDirectSendBridgeStateSummary
 import gr.hua.aurora.wifidirect.wifiDirectSocketCommandAvailability
 import gr.hua.aurora.wifidirect.logWifiDirectSocketCommandGuard
 import gr.hua.aurora.wifidirect.wifiDirectSocketCommandGuardSnapshot
@@ -50,6 +42,14 @@ import gr.hua.aurora.wifidirect.wifiDirectEffectiveFrameTransportState
 import gr.hua.aurora.wifidirect.wifiDirectConnectRequestDebugText
 import gr.hua.aurora.wifidirect.wifiDirectRolePreferenceSummary
 import gr.hua.aurora.wifidirect.wifiDirectSocketFrameReadinessReason
+import gr.hua.aurora.wifidirect.debug.WifiDirectGlobalDebugSendDiagnostics
+import gr.hua.aurora.wifidirect.debug.WifiDirectPrivateDebugSendDiagnostics
+import gr.hua.aurora.wifidirect.debug.WifiDirectReceiveBridgeDiagnostics
+import gr.hua.aurora.wifidirect.debug.WifiDirectSendBridgeDiagnostics
+import gr.hua.aurora.wifidirect.debug.WifiDirectSmokeTestDiagnostics
+import gr.hua.aurora.wifidirect.debug.wifiDirectGlobalDebugSendStateSummary
+import gr.hua.aurora.wifidirect.debug.wifiDirectReceiveBridgeStateSummary
+import gr.hua.aurora.wifidirect.debug.wifiDirectSendBridgeStateSummary
 
 private const val nearbyWifiDirectDebugControlsLogTag = "NearbyWifiDirectDebugControls"
 

@@ -4,15 +4,10 @@ import gr.hua.aurora.ui.components.DebugInfoItem
 import gr.hua.aurora.ui.components.DebugInfoSection
 import gr.hua.aurora.ui.components.DebugInfoCardModel
 import gr.hua.aurora.wifidirect.WifiDirectEnabledState
-import gr.hua.aurora.wifidirect.WifiDirectPrivateDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectPeer
 import gr.hua.aurora.wifidirect.WifiDirectRolePreference
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
 import gr.hua.aurora.wifidirect.WifiDirectSocketDiagnostics
-import gr.hua.aurora.wifidirect.WifiDirectReceiveBridgeDiagnostics
-import gr.hua.aurora.wifidirect.WifiDirectGlobalDebugSendDiagnostics
-import gr.hua.aurora.wifidirect.WifiDirectSendBridgeDiagnostics
-import gr.hua.aurora.wifidirect.WifiDirectSmokeTestDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics
 import gr.hua.aurora.wifidirect.wifiDirectFrameByteSummary
 import gr.hua.aurora.wifidirect.wifiDirectFrameCountSummary
@@ -41,12 +36,17 @@ import gr.hua.aurora.wifidirect.wifiDirectSupportSummary
 import gr.hua.aurora.wifidirect.wifiDirectTransportSummary
 import gr.hua.aurora.wifidirect.wifiDirectTransportAdapterByteSummary
 import gr.hua.aurora.wifidirect.wifiDirectTransportAdapterStateSummary
-import gr.hua.aurora.wifidirect.wifiDirectReceiveBridgeStateSummary
-import gr.hua.aurora.wifidirect.wifiDirectGlobalDebugSendModeSummary
-import gr.hua.aurora.wifidirect.wifiDirectGlobalDebugSendStateSummary
-import gr.hua.aurora.wifidirect.wifiDirectSendBridgeStateSummary
-import gr.hua.aurora.wifidirect.wifiDirectSmokeTestStateSummary
 import gr.hua.aurora.wifidirect.wifiDirectEffectiveFrameTransportState
+import gr.hua.aurora.wifidirect.debug.WifiDirectGlobalDebugSendDiagnostics
+import gr.hua.aurora.wifidirect.debug.WifiDirectPrivateDebugSendDiagnostics
+import gr.hua.aurora.wifidirect.debug.WifiDirectReceiveBridgeDiagnostics
+import gr.hua.aurora.wifidirect.debug.WifiDirectSendBridgeDiagnostics
+import gr.hua.aurora.wifidirect.debug.WifiDirectSmokeTestDiagnostics
+import gr.hua.aurora.wifidirect.debug.wifiDirectGlobalDebugSendModeSummary
+import gr.hua.aurora.wifidirect.debug.wifiDirectGlobalDebugSendStateSummary
+import gr.hua.aurora.wifidirect.debug.wifiDirectReceiveBridgeStateSummary
+import gr.hua.aurora.wifidirect.debug.wifiDirectSendBridgeStateSummary
+import gr.hua.aurora.wifidirect.debug.wifiDirectSmokeTestStateSummary
 
 private val nearbyWifiDirectManualTestSteps = listOf(
     "Enable Debug Mode.",

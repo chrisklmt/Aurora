@@ -1,9 +1,12 @@
-package gr.hua.aurora.wifidirect
+package gr.hua.aurora.wifidirect.debug
 
 import gr.hua.aurora.ble.transport.OutgoingBleTransportSendPlanBuilder
 import gr.hua.aurora.protocol.EncryptedMessageEnvelopeCodec
 import gr.hua.aurora.protocol.MessageFrameType
 import gr.hua.aurora.protocol.PreparedPrivateChatTransportFrame
+import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics
+import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterState
+import gr.hua.aurora.wifidirect.WifiDirectTransportFrame
 import java.nio.charset.StandardCharsets.UTF_8
 
 private const val wifiDirectPrivateDebugSendNote =

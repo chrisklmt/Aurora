@@ -32,12 +32,12 @@ import gr.hua.aurora.ui.components.DebugInfoCardModel
 import gr.hua.aurora.ui.components.DebugInfoItem
 import gr.hua.aurora.ui.components.DebugInfoSection
 import gr.hua.aurora.ui.components.toMessageListItem
-import gr.hua.aurora.wifidirect.WifiDirectReceiveBridgeDiagnostics
-import gr.hua.aurora.wifidirect.WifiDirectPrivateDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
-import gr.hua.aurora.wifidirect.WifiDirectSendBridgeDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectSocketDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics
+import gr.hua.aurora.wifidirect.debug.WifiDirectPrivateDebugSendDiagnostics
+import gr.hua.aurora.wifidirect.debug.WifiDirectReceiveBridgeDiagnostics
+import gr.hua.aurora.wifidirect.debug.WifiDirectSendBridgeDiagnostics
 
 internal data class PrivateChatScreenContent(
     val title: String,

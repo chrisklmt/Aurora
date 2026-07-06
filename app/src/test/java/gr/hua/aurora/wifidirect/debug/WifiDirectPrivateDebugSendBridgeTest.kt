@@ -1,4 +1,4 @@
-package gr.hua.aurora.wifidirect
+package gr.hua.aurora.wifidirect.debug
 
 import gr.hua.aurora.ble.transport.BleGattTransportFrame
 import gr.hua.aurora.model.MessageStatus
@@ -11,6 +11,7 @@ import gr.hua.aurora.protocol.OutgoingMessageSendEncryptionMaterial
 import gr.hua.aurora.protocol.PreparedPrivateChatTransportFrame
 import gr.hua.aurora.protocol.PrivateChatMessagePayloadCodec
 import gr.hua.aurora.protocol.PrivateChatTransportFrameFactory
+import gr.hua.aurora.wifidirect.*
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

@@ -21,8 +21,8 @@ import gr.hua.aurora.protocol.NoOpIncomingSessionMaterialProvider
 import gr.hua.aurora.protocol.PeerIdentityExchangeHandlingResult
 import gr.hua.aurora.protocol.PrivateChatMessagePayload
 import gr.hua.aurora.protocol.PrivateChatMessagePayloadCodec
-import gr.hua.aurora.wifidirect.WifiDirectReceiveBridge
 import gr.hua.aurora.wifidirect.WifiDirectTransportFrame
+import gr.hua.aurora.wifidirect.debug.WifiDirectReceiveBridge
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue

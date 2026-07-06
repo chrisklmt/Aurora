@@ -1,4 +1,4 @@
-package gr.hua.aurora.wifidirect
+package gr.hua.aurora.wifidirect.debug
 
 import gr.hua.aurora.ble.transport.BleGattTransportFrame
 import gr.hua.aurora.ble.transport.OutgoingBleTransportSendPlanBuilder
@@ -21,6 +21,7 @@ import gr.hua.aurora.protocol.PrivateChatTransportFrameFactory
 import gr.hua.aurora.state.AuroraStateHolder
 import gr.hua.aurora.state.SampleAuroraState
 import gr.hua.aurora.state.createAuroraBleTransportFrameReceiver
+import gr.hua.aurora.wifidirect.*
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue

@@ -17,6 +17,16 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import gr.hua.aurora.model.OutgoingChatMessage
 import gr.hua.aurora.protocol.PreparedPrivateChatTransportFrame
+import gr.hua.aurora.wifidirect.debug.WifiDirectGlobalDebugSendBridge
+import gr.hua.aurora.wifidirect.debug.WifiDirectGlobalDebugSendDiagnostics
+import gr.hua.aurora.wifidirect.debug.WifiDirectPrivateDebugSendBridge
+import gr.hua.aurora.wifidirect.debug.WifiDirectPrivateDebugSendDiagnostics
+import gr.hua.aurora.wifidirect.debug.WifiDirectReceiveBridge
+import gr.hua.aurora.wifidirect.debug.WifiDirectReceiveBridgeDiagnostics
+import gr.hua.aurora.wifidirect.debug.WifiDirectSendBridge
+import gr.hua.aurora.wifidirect.debug.WifiDirectSendBridgeDiagnostics
+import gr.hua.aurora.wifidirect.debug.WifiDirectSmokeTestDiagnostics
+import gr.hua.aurora.wifidirect.debug.WifiDirectSmokeTestSender
 
 internal data class RememberedWifiDirectSocketState(
     val diagnostics: WifiDirectSocketDiagnostics,
