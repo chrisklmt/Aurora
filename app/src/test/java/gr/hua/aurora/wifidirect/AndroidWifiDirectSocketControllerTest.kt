@@ -33,6 +33,16 @@ class AndroidWifiDirectSocketControllerTest {
         try {
             controller.startServer(hostHint = "192.168.49.1")
 
+            assertEquals(
+                WifiDirectSocketCommand.START_SERVER,
+                controller.currentDiagnostics().lastCommand
+            )
+            assertEquals(
+                WifiDirectSocketCommandResult.STARTING,
+                controller.currentDiagnostics().lastCommandResult
+            )
+            assertEquals(1, controller.currentDiagnostics().serverStartAttempts)
+
             awaitCondition {
                 controller.currentDiagnostics().state == WifiDirectSocketState.SERVER_LISTENING
             }
@@ -41,6 +51,9 @@ class AndroidWifiDirectSocketControllerTest {
             assertEquals(WifiDirectSocketRole.SERVER, diagnostics.role)
             assertEquals("192.168.49.1", diagnostics.endpoint?.host)
             assertTrue((diagnostics.endpoint?.port ?: 0) > 0)
+            assertEquals(WifiDirectSocketCommand.START_SERVER, diagnostics.lastCommand)
+            assertEquals(WifiDirectSocketCommandResult.LISTENING, diagnostics.lastCommandResult)
+            assertEquals(1, diagnostics.serverStartAttempts)
         } finally {
             controller.dispose()
         }
@@ -60,6 +73,19 @@ class AndroidWifiDirectSocketControllerTest {
 
             try {
                 client.connectClient("127.0.0.1")
+
+                assertEquals(
+                    WifiDirectSocketCommand.CONNECT_CLIENT,
+                    client.currentDiagnostics().lastCommand
+                )
+                assertEquals(
+                    WifiDirectSocketCommandResult.CONNECTING,
+                    client.currentDiagnostics().lastCommandResult
+                )
+                assertEquals(
+                    1,
+                    client.currentDiagnostics().clientConnectAttempts
+                )
 
                 awaitCondition {
                     client.currentDiagnostics().state in setOf(
@@ -82,6 +108,18 @@ class AndroidWifiDirectSocketControllerTest {
                 assertEquals(
                     WifiDirectSocketRole.CLIENT,
                     client.currentDiagnostics().role
+                )
+                assertEquals(
+                    WifiDirectSocketCommand.CONNECT_CLIENT,
+                    client.currentDiagnostics().lastCommand
+                )
+                assertEquals(
+                    WifiDirectSocketCommandResult.CONNECTED,
+                    client.currentDiagnostics().lastCommandResult
+                )
+                assertEquals(
+                    1,
+                    client.currentDiagnostics().clientConnectAttempts
                 )
                 assertEquals(
                     "ping",
@@ -115,6 +153,18 @@ class AndroidWifiDirectSocketControllerTest {
                     4,
                     client.currentDiagnostics().frameDiagnostics.lastFrameSize
                 )
+                assertEquals(
+                    4,
+                    client.currentDiagnostics().lastOutboundFrameSize
+                )
+                assertEquals(
+                    4,
+                    client.currentDiagnostics().lastInboundFrameSize
+                )
+                assertTrue(client.currentDiagnostics().isReadLoopActive)
+                assertTrue(server.currentDiagnostics().isReadLoopActive)
+                assertTrue(server.isTransportFrameReady())
+                assertTrue(client.isTransportFrameReady())
             } finally {
                 client.dispose()
             }
@@ -220,6 +270,24 @@ class AndroidWifiDirectSocketControllerTest {
     }
 
     @Test
+    fun emptyClientHostMapsToBlockedDiagnostic() {
+        val controller = AndroidWifiDirectSocketController(requestedPort = 8988)
+
+        try {
+            controller.connectClient("   ")
+
+            val diagnostics = controller.currentDiagnostics()
+            assertEquals(WifiDirectSocketState.IDLE, diagnostics.state)
+            assertEquals(WifiDirectSocketCommand.CONNECT_CLIENT, diagnostics.lastCommand)
+            assertEquals(WifiDirectSocketCommandResult.BLOCKED, diagnostics.lastCommandResult)
+            assertEquals("Group owner address unavailable.", diagnostics.lastCommandError)
+            assertEquals(1, diagnostics.clientConnectAttempts)
+        } finally {
+            controller.dispose()
+        }
+    }
+
+    @Test
     fun closeReleasesListeningSocketSoPortCanBeReused() {
         val port = availableLocalPort()
         val firstController = AndroidWifiDirectSocketController(requestedPort = port)
@@ -247,6 +315,29 @@ class AndroidWifiDirectSocketControllerTest {
             }
         } finally {
             firstController.dispose()
+        }
+    }
+
+    @Test
+    fun repeatedStartServerWhileListeningIsBlockedWithoutResettingState() {
+        val controller = AndroidWifiDirectSocketController(requestedPort = 0)
+
+        try {
+            controller.startServer(hostHint = "192.168.49.1")
+            awaitCondition {
+                controller.currentDiagnostics().state == WifiDirectSocketState.SERVER_LISTENING
+            }
+
+            controller.startServer(hostHint = "192.168.49.1")
+
+            val diagnostics = controller.currentDiagnostics()
+            assertEquals(WifiDirectSocketState.SERVER_LISTENING, diagnostics.state)
+            assertEquals(WifiDirectSocketCommand.START_SERVER, diagnostics.lastCommand)
+            assertEquals(WifiDirectSocketCommandResult.BLOCKED, diagnostics.lastCommandResult)
+            assertEquals("Socket server already listening.", diagnostics.lastCommandError)
+            assertEquals(2, diagnostics.serverStartAttempts)
+        } finally {
+            controller.dispose()
         }
     }
 
@@ -279,6 +370,49 @@ class AndroidWifiDirectSocketControllerTest {
                     WifiDirectFrameTransportState.IDLE,
                     client.currentDiagnostics().frameDiagnostics.state
                 )
+                assertEquals(
+                    WifiDirectSocketCommand.CLOSE_SOCKET,
+                    client.currentDiagnostics().lastCommand
+                )
+                assertEquals(
+                    WifiDirectSocketCommandResult.CLOSED,
+                    client.currentDiagnostics().lastCommandResult
+                )
+            } finally {
+                client.dispose()
+            }
+        } finally {
+            server.dispose()
+        }
+    }
+
+    @Test
+    fun repeatedConnectClientWhileConnectedIsBlockedWithoutResettingState() {
+        val server = AndroidWifiDirectSocketController(requestedPort = 0)
+
+        try {
+            server.startServer(hostHint = "192.168.49.1")
+            awaitCondition {
+                server.currentDiagnostics().state == WifiDirectSocketState.SERVER_LISTENING
+            }
+            val listeningPort = requireNotNull(server.currentDiagnostics().endpoint?.port)
+            val client = AndroidWifiDirectSocketController(requestedPort = listeningPort)
+
+            try {
+                client.connectClient("127.0.0.1")
+                awaitCondition {
+                    client.currentDiagnostics().state == WifiDirectSocketState.CONNECTED &&
+                        server.currentDiagnostics().state == WifiDirectSocketState.CONNECTED
+                }
+
+                client.connectClient("127.0.0.1")
+
+                val diagnostics = client.currentDiagnostics()
+                assertEquals(WifiDirectSocketState.CONNECTED, diagnostics.state)
+                assertEquals(WifiDirectSocketCommand.CONNECT_CLIENT, diagnostics.lastCommand)
+                assertEquals(WifiDirectSocketCommandResult.BLOCKED, diagnostics.lastCommandResult)
+                assertEquals("Socket already connected.", diagnostics.lastCommandError)
+                assertEquals(2, diagnostics.clientConnectAttempts)
             } finally {
                 client.dispose()
             }

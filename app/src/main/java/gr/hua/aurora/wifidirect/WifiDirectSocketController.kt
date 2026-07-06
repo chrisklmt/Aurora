@@ -24,6 +24,25 @@ internal enum class WifiDirectSocketRole {
     UNKNOWN
 }
 
+internal enum class WifiDirectSocketCommand {
+    NONE,
+    START_SERVER,
+    CONNECT_CLIENT,
+    CLOSE_SOCKET
+}
+
+internal enum class WifiDirectSocketCommandResult {
+    NONE,
+    STARTING,
+    LISTENING,
+    CONNECTING,
+    CONNECTED,
+    CLOSING,
+    CLOSED,
+    BLOCKED,
+    FAILED
+}
+
 internal data class WifiDirectSocketEndpoint(
     val host: String? = null,
     val port: Int? = null
@@ -36,11 +55,22 @@ internal data class WifiDirectSocketDiagnostics(
         port = wifiDirectDebugSocketPort
     ),
     val isConnected: Boolean = false,
+    val isReadLoopActive: Boolean = false,
     val lastSentMessage: String? = null,
     val lastReceivedMessage: String? = null,
+    val lastOutboundFrameSize: Int? = null,
+    val lastInboundFrameSize: Int? = null,
     val lastError: String? = null,
     val bytesSent: Long = 0L,
     val bytesReceived: Long = 0L,
+    val lastCommand: WifiDirectSocketCommand = WifiDirectSocketCommand.NONE,
+    val lastCommandResult: WifiDirectSocketCommandResult = WifiDirectSocketCommandResult.NONE,
+    val lastCommandError: String? = null,
+    val lastCommandSequence: Long = 0L,
+    val lastCommandHost: String? = null,
+    val serverStartAttempts: Int = 0,
+    val clientConnectAttempts: Int = 0,
+    val closeAttempts: Int = 0,
     val note: String = wifiDirectSocketFoundationNote,
     val frameDiagnostics: WifiDirectFrameDiagnostics = WifiDirectFrameDiagnostics()
 )
@@ -59,6 +89,43 @@ internal interface WifiDirectSocketController {
     fun addListener(listener: Listener)
     fun removeListener(listener: Listener)
     fun dispose()
+}
+
+internal fun wifiDirectEffectiveFrameTransportState(
+    diagnostics: WifiDirectSocketDiagnostics
+): WifiDirectFrameTransportState {
+    return when {
+        diagnostics.frameDiagnostics.state == WifiDirectFrameTransportState.FAILED ->
+            WifiDirectFrameTransportState.FAILED
+        diagnostics.frameDiagnostics.state == WifiDirectFrameTransportState.READY ->
+            WifiDirectFrameTransportState.READY
+        diagnostics.isConnected -> WifiDirectFrameTransportState.READY
+        else -> WifiDirectFrameTransportState.IDLE
+    }
+}
+
+internal fun wifiDirectSocketFrameReadinessReason(
+    diagnostics: WifiDirectSocketDiagnostics
+): String? {
+    return when {
+        diagnostics.frameDiagnostics.state == WifiDirectFrameTransportState.FAILED -> {
+            diagnostics.frameDiagnostics.lastError
+                ?: diagnostics.lastError
+                ?: "Wi-Fi Direct frame transport failed."
+        }
+        diagnostics.frameDiagnostics.state == WifiDirectFrameTransportState.READY -> null
+        diagnostics.isConnected -> null
+        diagnostics.state == WifiDirectSocketState.STARTING_SERVER ->
+            "Socket server starting."
+        diagnostics.state == WifiDirectSocketState.SERVER_LISTENING ->
+            "Waiting for a socket client."
+        diagnostics.state == WifiDirectSocketState.CONNECTING ->
+            "Connecting socket client."
+        diagnostics.state == WifiDirectSocketState.CLOSING ->
+            "Socket closing."
+        diagnostics.lastError?.isNotBlank() == true -> diagnostics.lastError
+        else -> "Wi-Fi Direct debug socket not connected."
+    }
 }
 
 internal fun wifiDirectSocketStateSummary(
@@ -121,4 +188,31 @@ internal fun wifiDirectSocketByteSummary(
     diagnostics: WifiDirectSocketDiagnostics
 ): String {
     return "${diagnostics.bytesSent}/${diagnostics.bytesReceived}"
+}
+
+internal fun wifiDirectSocketCommandSummary(
+    diagnostics: WifiDirectSocketDiagnostics
+): String {
+    return when (diagnostics.lastCommand) {
+        WifiDirectSocketCommand.NONE -> "none"
+        WifiDirectSocketCommand.START_SERVER -> "startServer"
+        WifiDirectSocketCommand.CONNECT_CLIENT -> "connectClient"
+        WifiDirectSocketCommand.CLOSE_SOCKET -> "closeSocket"
+    }
+}
+
+internal fun wifiDirectSocketCommandResultSummary(
+    diagnostics: WifiDirectSocketDiagnostics
+): String {
+    return when (diagnostics.lastCommandResult) {
+        WifiDirectSocketCommandResult.NONE -> "none"
+        WifiDirectSocketCommandResult.STARTING -> "Starting socket server..."
+        WifiDirectSocketCommandResult.LISTENING -> "Socket server listening."
+        WifiDirectSocketCommandResult.CONNECTING -> "Connecting socket client..."
+        WifiDirectSocketCommandResult.CONNECTED -> "Socket connected."
+        WifiDirectSocketCommandResult.CLOSING -> "Closing socket..."
+        WifiDirectSocketCommandResult.CLOSED -> "Socket closed."
+        WifiDirectSocketCommandResult.BLOCKED -> "Socket action blocked."
+        WifiDirectSocketCommandResult.FAILED -> "Socket action failed."
+    }
 }

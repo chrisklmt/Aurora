@@ -30,6 +30,7 @@ import gr.hua.aurora.wifidirect.WifiDirectSocketEndpoint
 import gr.hua.aurora.wifidirect.WifiDirectSocketRole
 import gr.hua.aurora.wifidirect.WifiDirectSocketState
 import gr.hua.aurora.wifidirect.WifiDirectReceiveBridgeDiagnostics
+import gr.hua.aurora.wifidirect.WifiDirectRolePreference
 import gr.hua.aurora.wifidirect.WifiDirectSendBridgeDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectSmokeTestDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics
@@ -478,8 +479,6 @@ class NearbyDevicesScreenTest {
                 advertiseStatus = BleAdvertiseStatus.ADVERTISING,
                 gattServerStatus = BleGattServerStatus.HOSTING,
                 scanStatus = BleScanStatus.SCANNING,
-                wifiDirectRuntimeStatus = wifiDirectRuntimeStatus(),
-                wifiDirectSocketDiagnostics = WifiDirectSocketDiagnostics(),
                 identityHandlerStatus = "Identity handler ready.",
                 peerSessionDiagnostics = PeerSessionRegistryDiagnostics(
                     establishedPeerIds = emptyList(),
@@ -501,8 +500,6 @@ class NearbyDevicesScreenTest {
                 advertiseStatus = BleAdvertiseStatus.ADVERTISING,
                 gattServerStatus = BleGattServerStatus.HOSTING,
                 scanStatus = BleScanStatus.SCANNING,
-                wifiDirectRuntimeStatus = wifiDirectRuntimeStatus(),
-                wifiDirectSocketDiagnostics = WifiDirectSocketDiagnostics(),
                 identityHandlerStatus = "Identity handler ready. Local agreement private key loaded.",
                 peerSessionDiagnostics = diagnostics
             )
@@ -512,46 +509,178 @@ class NearbyDevicesScreenTest {
         assertEquals(
             listOf(
                 "Runtime",
+                "Identity"
+            ),
+            card.sections.map { it.title }
+        )
+        assertEquals(
+            listOf(
+                DebugInfoItem("Mode", "Full mesh"),
+                DebugInfoItem("Scan", "Scanning")
+            ),
+            card.sections.first { it.title == "Runtime" }.items
+        )
+        assertEquals(
+            listOf(
+                DebugInfoItem("Handler", "ready"),
+                DebugInfoItem("Sessions", "1")
+            ),
+            card.sections.first { it.title == "Identity" }.items
+        )
+    }
+
+    @Test
+    fun nearbyAdvancedSectionToggleLabelMatchesExpandedState() {
+        assertEquals(
+            "Show Wi-Fi Direct details",
+            nearbyAdvancedSectionToggleLabel(
+                title = "Wi-Fi Direct details",
+                expanded = false
+            )
+        )
+        assertEquals(
+            "Hide socket diagnostics",
+            nearbyAdvancedSectionToggleLabel(
+                title = "socket diagnostics",
+                expanded = true
+            )
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectCompactSummaryKeepsPrimaryStateShort() {
+        val summary = nearbyWifiDirectCompactSummary(
+            runtimeStatus = wifiDirectRuntimeStatus(
+                discoveryState = WifiDirectDiscoveryState.ACTIVE,
+                connectionStatus = WifiDirectConnectionStatus(
+                    state = WifiDirectConnectionState.CONNECTED,
+                    groupFormed = WifiDirectGroupFormedState.YES,
+                    role = WifiDirectConnectionRole.GROUP_OWNER
+                )
+            ),
+            socketDiagnostics = WifiDirectSocketDiagnostics(
+                state = WifiDirectSocketState.CONNECTED,
+                role = WifiDirectSocketRole.SERVER,
+                isConnected = true
+            ),
+            adapterDiagnostics = WifiDirectTransportAdapterDiagnostics(
+                state = WifiDirectTransportAdapterState.READY
+            ),
+            sendBridgeDiagnostics = WifiDirectSendBridgeDiagnostics(enabled = true),
+            globalSendDiagnostics = WifiDirectGlobalDebugSendDiagnostics(enabled = true),
+            privateDebugSendDiagnostics = WifiDirectPrivateDebugSendDiagnostics(),
+            receiveBridgeDiagnostics = WifiDirectReceiveBridgeDiagnostics(enabled = true)
+        )
+
+        assertEquals("Ready", summary.status)
+        assertEquals("ready", summary.discovery)
+        assertEquals("connected", summary.group)
+        assertEquals("group owner", summary.role)
+        assertEquals("ready", summary.socket)
+        assertEquals("ready", summary.adapter)
+        assertEquals("enabled", summary.sendBridge)
+        assertEquals("enabled", summary.receiveBridge)
+        assertEquals("enabled", summary.globalDebugSend)
+    }
+
+    @Test
+    fun nearbyWifiDirectAdvancedCardsKeepRawDiagnosticsCollapsedIntoSeparateBuilders() {
+        val runtimeStatus = wifiDirectRuntimeStatus(
+            discoveryState = WifiDirectDiscoveryState.ACTIVE,
+            connectionStatus = WifiDirectConnectionStatus(
+                state = WifiDirectConnectionState.CONNECTED,
+                groupFormed = WifiDirectGroupFormedState.YES,
+                role = WifiDirectConnectionRole.CLIENT,
+                groupOwnerAddress = "192.168.49.1"
+            )
+        )
+
+        assertEquals(
+            listOf("Discovery", "Connection/group"),
+            buildNearbyWifiDirectDetailsAdvancedCard(runtimeStatus).sections.map { it.title }
+        )
+        assertEquals(
+            listOf("Socket", "Frame", "Adapter"),
+            buildNearbyWifiDirectSocketDiagnosticsCard(
+                socketDiagnostics = WifiDirectSocketDiagnostics(),
+                adapterDiagnostics = WifiDirectTransportAdapterDiagnostics()
+            ).sections.map { it.title }
+        )
+        assertEquals(
+            listOf("Send bridge", "Receive bridge", "Smoke"),
+            buildNearbyWifiDirectBridgeDiagnosticsCard(
+                sendBridgeDiagnostics = WifiDirectSendBridgeDiagnostics(),
+                smokeTestDiagnostics = WifiDirectSmokeTestDiagnostics(),
+                receiveBridgeDiagnostics = WifiDirectReceiveBridgeDiagnostics()
+            ).sections.map { it.title }
+        )
+        assertEquals(
+            listOf("Global send"),
+            buildNearbyWifiDirectGlobalDiagnosticsCard(
+                diagnostics = WifiDirectGlobalDebugSendDiagnostics()
+            ).sections.map { it.title }
+        )
+        assertEquals(
+            listOf("Manual test"),
+            buildNearbyWifiDirectManualGuideCard().sections.map { it.title }
+        )
+    }
+
+    @Test
+    fun nearbyRolePreferenceHelpCardKeepsGuidanceAvailableWithoutAlwaysShowingIt() {
+        val card = buildNearbyWifiDirectRolePreferenceHelpCard(
+            requestedPreference = WifiDirectRolePreference.PREFER_GROUP_OWNER,
+            runtimeStatus = wifiDirectRuntimeStatus(
+                connectionStatus = WifiDirectConnectionStatus(
+                    state = WifiDirectConnectionState.CONNECTED,
+                    groupFormed = WifiDirectGroupFormedState.YES,
+                    role = WifiDirectConnectionRole.CLIENT
+                )
+            )
+        )
+
+        assertEquals("Role preference help", card.title)
+        assertEquals("Role preference", card.sections.single().title)
+        assertTrue(
+            card.sections.single().items.any {
+                it.value == "Role preference applies only when this device starts the Connect action."
+            }
+        )
+        assertTrue(
+            card.sections.single().items.any {
+                it.value == "Requested role preference: Prefer this device as group owner"
+            }
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectDetailsCardKeepsChecklistAndRawDiagnosticsBelowControls() {
+        val card = buildNearbyWifiDirectDetailsCard(
+            runtimeStatus = wifiDirectRuntimeStatus(),
+            socketDiagnostics = WifiDirectSocketDiagnostics(),
+            adapterDiagnostics = WifiDirectTransportAdapterDiagnostics(),
+            sendBridgeDiagnostics = WifiDirectSendBridgeDiagnostics(),
+            globalSendDiagnostics = WifiDirectGlobalDebugSendDiagnostics(),
+            smokeTestDiagnostics = WifiDirectSmokeTestDiagnostics(),
+            receiveBridgeDiagnostics = WifiDirectReceiveBridgeDiagnostics()
+        )
+
+        assertEquals("Wi-Fi Direct details", card.title)
+        assertEquals(
+            listOf(
                 "Discovery",
                 "Connection/group",
                 "Socket/frame",
                 "Bridges",
                 "Global debug send",
-                "Manual test readiness",
-                "Manual test",
-                "Identity"
+                "Manual test"
             ),
             card.sections.map { it.title }
         )
-        val globalSection = card.sections.first { it.title == "Global debug send" }
-        assertTrue(globalSection.items.contains(DebugInfoItem("Overall", "Not ready", preferFullWidth = true)))
-        assertTrue(globalSection.items.contains(DebugInfoItem("Guide", "For Wi-Fi Direct Global test: connect group, connect socket, enable send bridge on sender, enable receive bridge on receiver, enable Global send.", preferFullWidth = true)))
-        assertTrue(globalSection.items.contains(DebugInfoItem("Note", "Normal chat still uses BLE. Private Chat still uses BLE.", preferFullWidth = true)))
-        val readinessSection = card.sections.first { it.title == "Manual test readiness" }
-        assertTrue(readinessSection.items.contains(DebugInfoItem("Overall", "Not ready", preferFullWidth = true)))
-        assertTrue(readinessSection.items.contains(DebugInfoItem("Global send", "disabled")))
-        assertTrue(readinessSection.items.contains(DebugInfoItem("Private send", "disabled")))
-        val manualTestSection = card.sections.first { it.title == "Manual test" }
-        assertTrue(
-            manualTestSection.items.contains(
-                DebugInfoItem(
-                    "Step 9",
-                    "For Global: enable Global Wi-Fi Direct debug send, then send Global Chat message.",
-                    preferFullWidth = true
-                )
-            )
+        assertEquals(
+            1,
+            card.sections.count { it.title == "Manual test" }
         )
-        assertTrue(
-            manualTestSection.items.contains(
-                DebugInfoItem(
-                    "Step 10",
-                    "For Private: open Private Chat, enable Private Wi-Fi Direct debug send, then send Private Chat message.",
-                    preferFullWidth = true
-                )
-            )
-        )
-        val bridgesSection = card.sections.first { it.title == "Bridges" }
-        assertTrue(bridgesSection.items.contains(DebugInfoItem("Receive warn", "Receive bridge disabled.", preferFullWidth = true)))
     }
 
     @Test
@@ -600,6 +729,125 @@ class NearbyDevicesScreenTest {
         assertTrue(section.items.any { it.value.contains("Global Wi-Fi Direct debug send") })
         assertTrue(section.items.any { it.value.contains("Private Wi-Fi Direct debug send") })
         assertTrue(section.items.any { it.value.contains("no Delivered/ACK", ignoreCase = true) })
+    }
+
+    @Test
+    fun nearbyWifiDirectPermissionBlockerExplainsMissingNearbyDevicesPermission() {
+        assertEquals(
+            NearbyWifiDirectPermissionBlocker(
+                title = "Wi-Fi Direct permission required",
+                message = "Grant Nearby devices permission to start Wi-Fi Direct discovery.",
+                missingPermissionName = "NEARBY_WIFI_DEVICES",
+                settingsInstruction =
+                    "Open Android Settings > Apps > Aurora > Permissions > Nearby devices > Allow."
+            ),
+            nearbyWifiDirectPermissionBlocker(
+                wifiDirectRuntimeStatus(
+                    missingPermissions = setOf("android.permission.NEARBY_WIFI_DEVICES")
+                )
+            )
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectDisabledBlockerExplainsWifiOffState() {
+        assertEquals(
+            NearbyWifiDirectDisabledBlocker(
+                title = "Wi-Fi Direct is disabled",
+                message = "Turn on Wi-Fi to use Wi-Fi Direct discovery.",
+                settingsActionLabel = "Open Wi-Fi settings",
+                refreshActionLabel = "Refresh status",
+                nextStep = "Turn on Wi-Fi, then return to Aurora."
+            ),
+            nearbyWifiDirectDisabledBlocker(
+                wifiDirectRuntimeStatus(
+                    isWifiEnabled = false
+                )
+            )
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectPermissionBlockerStaysNullWhenPermissionGrantedButWifiDisabled() {
+        assertNull(
+            nearbyWifiDirectPermissionBlocker(
+                wifiDirectRuntimeStatus(
+                    isWifiEnabled = false
+                )
+            )
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectManualNextStepPrioritizesMissingNearbyDevicesPermission() {
+        assertEquals(
+            NearbyWifiDirectManualNextStep(
+                title = "Grant Nearby devices permission to start Wi-Fi Direct discovery.",
+                detail = "Missing: NEARBY_WIFI_DEVICES"
+            ),
+            nearbyWifiDirectManualNextStep(
+                runtimeStatus = wifiDirectRuntimeStatus(
+                    missingPermissions = setOf("android.permission.NEARBY_WIFI_DEVICES")
+                ),
+                socketDiagnostics = WifiDirectSocketDiagnostics(),
+                adapterDiagnostics = WifiDirectTransportAdapterDiagnostics(),
+                sendBridgeDiagnostics = WifiDirectSendBridgeDiagnostics(),
+                globalSendDiagnostics = WifiDirectGlobalDebugSendDiagnostics(),
+                privateDebugSendDiagnostics = WifiDirectPrivateDebugSendDiagnostics(),
+                receiveBridgeDiagnostics = WifiDirectReceiveBridgeDiagnostics()
+            )
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectManualNextStepGuidesWifiEnableWhenDisabled() {
+        assertEquals(
+            NearbyWifiDirectManualNextStep(
+                title = "Turn on Wi-Fi, then return to Aurora."
+            ),
+            nearbyWifiDirectManualNextStep(
+                runtimeStatus = wifiDirectRuntimeStatus(
+                    isWifiEnabled = false
+                ),
+                socketDiagnostics = WifiDirectSocketDiagnostics(),
+                adapterDiagnostics = WifiDirectTransportAdapterDiagnostics(),
+                sendBridgeDiagnostics = WifiDirectSendBridgeDiagnostics(),
+                globalSendDiagnostics = WifiDirectGlobalDebugSendDiagnostics(),
+                privateDebugSendDiagnostics = WifiDirectPrivateDebugSendDiagnostics(),
+                receiveBridgeDiagnostics = WifiDirectReceiveBridgeDiagnostics()
+            )
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectManualNextStepPointsToPrivateDebugToggleWhenOnlyThatIsMissing() {
+        assertEquals(
+            NearbyWifiDirectManualNextStep(
+                title = "Enable Private Wi-Fi Direct debug send in Private Chat for the Private test."
+            ),
+            nearbyWifiDirectManualNextStep(
+                runtimeStatus = wifiDirectRuntimeStatus(
+                    discoveryState = WifiDirectDiscoveryState.ACTIVE,
+                    connectionStatus = WifiDirectConnectionStatus(
+                        state = WifiDirectConnectionState.CONNECTED,
+                        groupFormed = WifiDirectGroupFormedState.YES,
+                        role = WifiDirectConnectionRole.CLIENT,
+                        groupOwnerAddress = "192.168.49.1"
+                    )
+                ),
+                socketDiagnostics = WifiDirectSocketDiagnostics(
+                    state = WifiDirectSocketState.CONNECTED,
+                    isConnected = true
+                ),
+                adapterDiagnostics = WifiDirectTransportAdapterDiagnostics(
+                    state = WifiDirectTransportAdapterState.READY
+                ),
+                sendBridgeDiagnostics = WifiDirectSendBridgeDiagnostics(enabled = true),
+                globalSendDiagnostics = WifiDirectGlobalDebugSendDiagnostics(enabled = true),
+                privateDebugSendDiagnostics = WifiDirectPrivateDebugSendDiagnostics(enabled = false),
+                receiveBridgeDiagnostics = WifiDirectReceiveBridgeDiagnostics(enabled = true)
+            )
+        )
     }
 
     @Test
@@ -733,7 +981,21 @@ class NearbyDevicesScreenTest {
                 items = listOf(
                     DebugInfoItem("Bridge", "enabled"),
                     DebugInfoItem("Bridged", "2"),
+                    DebugInfoItem("Transport", "15"),
+                    DebugInfoItem("Duplicates", "1"),
                     DebugInfoItem("Failures", "1"),
+                    DebugInfoItem(
+                        "Action",
+                        "Enable receive bridge",
+                        preferFullWidth = true
+                    ),
+                    DebugInfoItem("Toggle", "enabled"),
+                    DebugInfoItem(
+                        "Blocked",
+                        "Cannot enable receive bridge: adapter not ready (Waiting for receive adapter.).",
+                        preferFullWidth = true
+                    ),
+                    DebugInfoItem("Last result", "processed", preferFullWidth = true),
                     DebugInfoItem("Last size", "18 B"),
                     DebugInfoItem(
                         "Last error",
@@ -750,9 +1012,16 @@ class NearbyDevicesScreenTest {
             buildNearbyWifiDirectReceiveBridgeDebugSection(
                 diagnostics = WifiDirectReceiveBridgeDiagnostics(
                     enabled = true,
+                    transportFramesObserved = 15,
                     framesBridged = 2,
+                    duplicateFramesDropped = 1,
                     bridgeFailures = 1,
-                    lastBridgedFrameSize = 18,
+                    lastTransportFrameSize = 18,
+                    lastToggleAction = "Enable receive bridge",
+                    lastToggleResult = "enabled",
+                    lastToggleBlockedReason =
+                    "Cannot enable receive bridge: adapter not ready (Waiting for receive adapter.).",
+                    lastBridgeResult = "processed",
                     lastBridgeError = "Invalid Aurora transport frame payload."
                 )
             )
@@ -925,6 +1194,11 @@ class NearbyDevicesScreenTest {
                     DebugInfoItem("Role", "unknown"),
                     DebugInfoItem("Peers", "2"),
                     DebugInfoItem(
+                        "Peer type",
+                        "Generic Wi-Fi Direct peers",
+                        preferFullWidth = true
+                    ),
+                    DebugInfoItem(
                         "Devices",
                         "Aurora Alpha (AA:BB:CC:DD:EE:01), unnamed (AA:BB:CC:DD:EE:02)",
                         preferFullWidth = true
@@ -954,7 +1228,7 @@ class NearbyDevicesScreenTest {
         assertEquals(
             NearbyWifiDirectDebugControlsState(
                 canStartDiscovery = true,
-                canStopDiscovery = true,
+                canStopDiscovery = false,
                 canDisconnect = false,
                 disconnectLabel = "Disconnect Wi-Fi Direct",
                 startDisabledReason = null
@@ -986,7 +1260,7 @@ class NearbyDevicesScreenTest {
         assertEquals(
             NearbyWifiDirectDebugControlsState(
                 canStartDiscovery = false,
-                canStopDiscovery = true,
+                canStopDiscovery = false,
                 canDisconnect = false,
                 disconnectLabel = "Disconnect Wi-Fi Direct",
                 startDisabledReason = "Missing Nearby Wi-Fi permission."
@@ -994,6 +1268,24 @@ class NearbyDevicesScreenTest {
             nearbyWifiDirectDebugControlsState(
                 wifiDirectRuntimeStatus(
                     missingPermissions = setOf("android.permission.NEARBY_WIFI_DEVICES")
+                )
+            )
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectDebugControlsDisableStartWhenWifiDirectIsDisabled() {
+        assertEquals(
+            NearbyWifiDirectDebugControlsState(
+                canStartDiscovery = false,
+                canStopDiscovery = false,
+                canDisconnect = false,
+                disconnectLabel = "Disconnect Wi-Fi Direct",
+                startDisabledReason = "Wi-Fi Direct is disabled."
+            ),
+            nearbyWifiDirectDebugControlsState(
+                wifiDirectRuntimeStatus(
+                    isWifiEnabled = false
                 )
             )
         )
@@ -1021,6 +1313,11 @@ class NearbyDevicesScreenTest {
                     DebugInfoItem("Role", "group owner"),
                     DebugInfoItem("Owner", "192.168.49.1", preferFullWidth = true),
                     DebugInfoItem("Peers", "1"),
+                    DebugInfoItem(
+                        "Peer type",
+                        "Generic Wi-Fi Direct peers",
+                        preferFullWidth = true
+                    ),
                     DebugInfoItem(
                         "Devices",
                         "Aurora Alpha (AA:BB:CC:DD:EE:01)",
@@ -1062,6 +1359,9 @@ class NearbyDevicesScreenTest {
                     DebugInfoItem("Sent", "ping"),
                     DebugInfoItem("Received", "pong"),
                     DebugInfoItem("Bytes", "8/8"),
+                    DebugInfoItem("Action", "none"),
+                    DebugInfoItem("Result", "none"),
+                    DebugInfoItem("Attempts", "S0 C0 X0"),
                     DebugInfoItem(
                         "Note",
                         "Wi-Fi Direct chat transport not wired yet.",
@@ -1085,6 +1385,618 @@ class NearbyDevicesScreenTest {
                 )
             )
         )
+    }
+
+    @Test
+    fun nearbyWifiDirectSocketActionTextShowsImmediateDebugFeedback() {
+        val diagnostics = WifiDirectSocketDiagnostics(
+            lastCommand = gr.hua.aurora.wifidirect.WifiDirectSocketCommand.START_SERVER,
+            lastCommandResult = gr.hua.aurora.wifidirect.WifiDirectSocketCommandResult.STARTING,
+            lastCommandSequence = 1,
+            serverStartAttempts = 1,
+            clientConnectAttempts = 0,
+            closeAttempts = 0
+        )
+        val controlsState = NearbyWifiDirectSocketControlsState(
+            canStartServer = true,
+            canConnectClient = false,
+            canSendFrame = false,
+            canSendAdapterFrame = false,
+            canCloseSocket = false,
+            connectHost = "192.168.49.1"
+        )
+
+        assertEquals(
+            "Socket action: #1 startServer | Starting socket server...",
+            nearbyWifiDirectSocketActionResultText(diagnostics)
+        )
+        assertEquals(
+            "Attempts: server 1 | client 0 | close 0",
+            nearbyWifiDirectSocketAttemptSummaryText(diagnostics)
+        )
+        assertEquals(
+            "Client host: 192.168.49.1",
+            nearbyWifiDirectSocketHostText(controlsState)
+        )
+    }
+
+    @Test
+    fun nearbyHandleConnectSocketClientTapInvokesCallbackWithGroupOwnerIp() {
+        val runtimeStatus = wifiDirectRuntimeStatus(
+            connectionStatus = WifiDirectConnectionStatus(
+                state = WifiDirectConnectionState.CONNECTED,
+                groupFormed = WifiDirectGroupFormedState.YES,
+                role = WifiDirectConnectionRole.CLIENT,
+                groupOwnerAddress = "192.168.49.1"
+            )
+        )
+        val controlsState = NearbyWifiDirectSocketControlsState(
+            canStartServer = false,
+            canConnectClient = true,
+            canSendFrame = false,
+            canSendAdapterFrame = false,
+            canCloseSocket = false,
+            connectHost = "192.168.49.1",
+            startServerBlockedReason = "Start server only on group owner."
+        )
+        var invokedHost: String? = null
+
+        val accepted = nearbyHandleConnectSocketClientTap(
+            runtimeStatus = runtimeStatus,
+            controlsState = controlsState,
+            onConnectSocketClient = { host ->
+                invokedHost = host
+            }
+        )
+
+        assertTrue(accepted)
+        assertEquals("192.168.49.1", invokedHost)
+    }
+
+    @Test
+    fun nearbyHandleStartSocketServerTapInvokesCallback() {
+        val runtimeStatus = wifiDirectRuntimeStatus(
+            connectionStatus = WifiDirectConnectionStatus(
+                state = WifiDirectConnectionState.CONNECTED,
+                groupFormed = WifiDirectGroupFormedState.YES,
+                role = WifiDirectConnectionRole.GROUP_OWNER,
+                groupOwnerAddress = "192.168.49.1"
+            )
+        )
+        val controlsState = NearbyWifiDirectSocketControlsState(
+            canStartServer = true,
+            canConnectClient = false,
+            canSendFrame = false,
+            canSendAdapterFrame = false,
+            canCloseSocket = false,
+            connectClientBlockedReason = "Connect client only on Wi-Fi Direct client."
+        )
+        var invokedHostHint: String? = null
+
+        val accepted = nearbyHandleStartSocketServerTap(
+            runtimeStatus = runtimeStatus,
+            controlsState = controlsState,
+            onStartSocketServer = { hostHint ->
+                invokedHostHint = hostHint
+            }
+        )
+
+        assertTrue(accepted)
+        assertEquals("192.168.49.1", invokedHostHint)
+    }
+
+    @Test
+    fun nearbyHandleConnectSocketClientTapDoesNotInvokeCallbackWhenBlocked() {
+        val runtimeStatus = wifiDirectRuntimeStatus(
+            connectionStatus = WifiDirectConnectionStatus(
+                state = WifiDirectConnectionState.CONNECTED,
+                groupFormed = WifiDirectGroupFormedState.YES,
+                role = WifiDirectConnectionRole.CLIENT,
+                groupOwnerAddress = null
+            )
+        )
+        val controlsState = NearbyWifiDirectSocketControlsState(
+            canStartServer = false,
+            canConnectClient = false,
+            canSendFrame = false,
+            canSendAdapterFrame = false,
+            canCloseSocket = false,
+            startServerBlockedReason = "Start server only on group owner.",
+            connectClientBlockedReason = "Group owner address missing.",
+            helpText = "Group owner address missing."
+        )
+        var invocationCount = 0
+
+        val accepted = nearbyHandleConnectSocketClientTap(
+            runtimeStatus = runtimeStatus,
+            controlsState = controlsState,
+            onConnectSocketClient = {
+                invocationCount += 1
+            }
+        )
+
+        assertFalse(accepted)
+        assertEquals(0, invocationCount)
+    }
+
+    @Test
+    fun groupOwnerWithConnectedSocketCanEnableReceiveBridge() {
+        val toggleState = nearbyWifiDirectReceiveBridgeToggleState(
+            runtimeStatus = wifiDirectRuntimeStatus(
+                connectionStatus = WifiDirectConnectionStatus(
+                    state = WifiDirectConnectionState.CONNECTED,
+                    groupFormed = WifiDirectGroupFormedState.YES,
+                    role = WifiDirectConnectionRole.GROUP_OWNER,
+                    groupOwnerAddress = "192.168.49.1"
+                )
+            ),
+            socketDiagnostics = WifiDirectSocketDiagnostics(
+                state = WifiDirectSocketState.CONNECTED,
+                role = WifiDirectSocketRole.SERVER,
+                isConnected = true
+            ),
+            adapterDiagnostics = WifiDirectTransportAdapterDiagnostics(
+                state = WifiDirectTransportAdapterState.READY
+            ),
+            receiveBridgeDiagnostics = WifiDirectReceiveBridgeDiagnostics()
+        )
+
+        assertTrue(toggleState.showControls)
+        assertTrue(toggleState.frameReady)
+        assertTrue(toggleState.adapterReady)
+        assertTrue(toggleState.effectiveReady)
+        assertTrue(toggleState.canToggle)
+        assertNull(toggleState.blockedReason)
+    }
+
+    @Test
+    fun clientWithConnectedSocketCanEnableReceiveBridge() {
+        val toggleState = nearbyWifiDirectReceiveBridgeToggleState(
+            runtimeStatus = wifiDirectRuntimeStatus(
+                connectionStatus = WifiDirectConnectionStatus(
+                    state = WifiDirectConnectionState.CONNECTED,
+                    groupFormed = WifiDirectGroupFormedState.YES,
+                    role = WifiDirectConnectionRole.CLIENT,
+                    groupOwnerAddress = "192.168.49.1"
+                )
+            ),
+            socketDiagnostics = WifiDirectSocketDiagnostics(
+                state = WifiDirectSocketState.CONNECTED,
+                role = WifiDirectSocketRole.CLIENT,
+                isConnected = true
+            ),
+            adapterDiagnostics = WifiDirectTransportAdapterDiagnostics(
+                state = WifiDirectTransportAdapterState.READY
+            ),
+            receiveBridgeDiagnostics = WifiDirectReceiveBridgeDiagnostics()
+        )
+
+        assertTrue(toggleState.showControls)
+        assertTrue(toggleState.canToggle)
+        assertTrue(toggleState.effectiveReady)
+    }
+
+    @Test
+    fun receiveBridgeToggleShowsVisibleAdapterBlockedReason() {
+        val toggleState = nearbyWifiDirectReceiveBridgeToggleState(
+            runtimeStatus = wifiDirectRuntimeStatus(
+                connectionStatus = WifiDirectConnectionStatus(
+                    state = WifiDirectConnectionState.CONNECTED,
+                    groupFormed = WifiDirectGroupFormedState.YES,
+                    role = WifiDirectConnectionRole.GROUP_OWNER,
+                    groupOwnerAddress = "192.168.49.1"
+                )
+            ),
+            socketDiagnostics = WifiDirectSocketDiagnostics(
+                state = WifiDirectSocketState.CONNECTED,
+                role = WifiDirectSocketRole.SERVER,
+                isConnected = true
+            ),
+            adapterDiagnostics = WifiDirectTransportAdapterDiagnostics(
+                state = WifiDirectTransportAdapterState.NOT_READY,
+                notReadyReason = "Waiting for receive adapter."
+            ),
+            receiveBridgeDiagnostics = WifiDirectReceiveBridgeDiagnostics()
+        )
+
+        assertTrue(toggleState.showControls)
+        assertFalse(toggleState.canToggle)
+        assertEquals(
+            "Cannot enable receive bridge: adapter not ready (Waiting for receive adapter.).",
+            toggleState.blockedReason
+        )
+    }
+
+    @Test
+    fun receiveBridgeToggleTapInvokesCallbackWhenEffectiveReadinessIsTrue() {
+        var enabledValue: Boolean? = null
+
+        val accepted = nearbyHandleReceiveBridgeToggleTap(
+            toggleState = NearbyWifiDirectReceiveBridgeToggleState(
+                showControls = true,
+                canToggle = true,
+                blockedReason = null,
+                socketConnected = true,
+                frameReady = true,
+                adapterReady = true,
+                effectiveReady = true
+            ),
+            runtimeStatus = wifiDirectRuntimeStatus(
+                connectionStatus = WifiDirectConnectionStatus(
+                    state = WifiDirectConnectionState.CONNECTED,
+                    groupFormed = WifiDirectGroupFormedState.YES,
+                    role = WifiDirectConnectionRole.CLIENT,
+                    groupOwnerAddress = "192.168.49.1"
+                )
+            ),
+            socketDiagnostics = WifiDirectSocketDiagnostics(
+                state = WifiDirectSocketState.CONNECTED,
+                role = WifiDirectSocketRole.CLIENT,
+                isConnected = true,
+                isReadLoopActive = true
+            ),
+            sendBridgeEnabled = false,
+            globalSendEnabled = false,
+            receiveBridgeEnabled = false,
+            onReportReceiveBridgeToggleBlocked = { error("toggle should not be blocked") },
+            onSetReceiveBridgeEnabled = { enabled ->
+                enabledValue = enabled
+            }
+        )
+
+        assertTrue(accepted)
+        assertEquals(true, enabledValue)
+    }
+
+    @Test
+    fun receiveBridgeToggleTapDoesNotRequireSendBridgeOrGlobalSendAndBlocksCleanly() {
+        var invocationCount = 0
+        var blockedReason: String? = null
+
+        val accepted = nearbyHandleReceiveBridgeToggleTap(
+            toggleState = NearbyWifiDirectReceiveBridgeToggleState(
+                showControls = true,
+                canToggle = false,
+                blockedReason = "Cannot enable receive bridge: adapter not ready (Waiting for receive adapter.).",
+                socketConnected = true,
+                frameReady = true,
+                adapterReady = false,
+                effectiveReady = false
+            ),
+            runtimeStatus = wifiDirectRuntimeStatus(
+                connectionStatus = WifiDirectConnectionStatus(
+                    state = WifiDirectConnectionState.CONNECTED,
+                    groupFormed = WifiDirectGroupFormedState.YES,
+                    role = WifiDirectConnectionRole.CLIENT,
+                    groupOwnerAddress = "192.168.49.1"
+                )
+            ),
+            socketDiagnostics = WifiDirectSocketDiagnostics(
+                state = WifiDirectSocketState.CONNECTED,
+                role = WifiDirectSocketRole.CLIENT,
+                isConnected = true,
+                isReadLoopActive = true
+            ),
+            sendBridgeEnabled = false,
+            globalSendEnabled = false,
+            receiveBridgeEnabled = false,
+            onReportReceiveBridgeToggleBlocked = { reason ->
+                blockedReason = reason
+            },
+            onSetReceiveBridgeEnabled = {
+                invocationCount += 1
+            }
+        )
+
+        assertFalse(accepted)
+        assertEquals(0, invocationCount)
+        assertEquals(
+            "Cannot enable receive bridge: adapter not ready (Waiting for receive adapter.).",
+            blockedReason
+        )
+    }
+
+    @Test
+    fun resetWifiDirectGroupClosesSocketDisablesBridgesAndRequestsCleanup() {
+        var closeSocketCalls = 0
+        var sendBridgeEnabled: Boolean? = null
+        var receiveBridgeEnabled: Boolean? = null
+        var resetDiagnosticsCalls = 0
+        var stopDiscoveryCalls = 0
+        var disconnectCalls = 0
+        var refreshCalls = 0
+
+        val result = nearbyHandleResetWifiDirectGroupTap(
+            runtimeStatus = wifiDirectRuntimeStatus(
+                discoveryState = WifiDirectDiscoveryState.ACTIVE,
+                connectionStatus = WifiDirectConnectionStatus(
+                    state = WifiDirectConnectionState.CONNECTED,
+                    groupFormed = WifiDirectGroupFormedState.YES,
+                    role = WifiDirectConnectionRole.GROUP_OWNER,
+                    groupOwnerAddress = "192.168.49.1"
+                )
+            ),
+            socketDiagnostics = WifiDirectSocketDiagnostics(
+                state = WifiDirectSocketState.CONNECTED,
+                role = WifiDirectSocketRole.SERVER,
+                isConnected = true
+            ),
+            onCloseSocket = { closeSocketCalls += 1 },
+            onSetSendBridgeEnabled = { enabled -> sendBridgeEnabled = enabled },
+            onSetReceiveBridgeEnabled = { enabled -> receiveBridgeEnabled = enabled },
+            onResetDiagnostics = { resetDiagnosticsCalls += 1 },
+            onStopDiscovery = { stopDiscoveryCalls += 1 },
+            onDisconnect = { disconnectCalls += 1 },
+            onRefreshStatus = { refreshCalls += 1 }
+        )
+
+        assertEquals("Wi-Fi Direct group reset requested.", result)
+        assertEquals(1, closeSocketCalls)
+        assertEquals(false, sendBridgeEnabled)
+        assertEquals(false, receiveBridgeEnabled)
+        assertEquals(1, resetDiagnosticsCalls)
+        assertEquals(1, stopDiscoveryCalls)
+        assertEquals(1, disconnectCalls)
+        assertEquals(1, refreshCalls)
+    }
+
+    @Test
+    fun wifiDirectRolePreferenceHelpLinesExplainStickyGroupOwnerSelection() {
+        assertEquals(
+            listOf(
+                "Role preference applies only when this device starts the Connect action.",
+                "The other device's preference is not used unless that device initiates Connect.",
+                "Android may still choose the final group owner.",
+                "If Android keeps choosing the same host, continue testing with that device as group owner.",
+                "Uninstalling the app may not reset Android Wi-Fi Direct group-owner selection.",
+                "Use Reset Wi-Fi Direct group, then reconnect."
+            ),
+            nearbyWifiDirectRolePreferenceHelpLines()
+        )
+        assertEquals("Automatic", gr.hua.aurora.wifidirect.wifiDirectRolePreferenceSummary(WifiDirectRolePreference.AUTOMATIC))
+    }
+
+    @Test
+    fun wifiDirectRolePreferenceOutcomeLinesShowRequestedAndActualRole() {
+        assertEquals(
+            listOf(
+                "Requested role preference: Prefer this device as group owner",
+                "Actual role: client. Android selected final role."
+            ),
+            nearbyWifiDirectRolePreferenceOutcomeLines(
+                requestedPreference = WifiDirectRolePreference.PREFER_GROUP_OWNER,
+                runtimeStatus = wifiDirectRuntimeStatus(
+                    connectionStatus = WifiDirectConnectionStatus(
+                        state = WifiDirectConnectionState.CONNECTED,
+                        groupFormed = WifiDirectGroupFormedState.YES,
+                        role = WifiDirectConnectionRole.CLIENT
+                    )
+                )
+            )
+        )
+    }
+
+    @Test
+    fun wifiDirectRolePreferenceOutcomeLinesStayEmptyWithoutRequest() {
+        assertTrue(
+            nearbyWifiDirectRolePreferenceOutcomeLines(
+                requestedPreference = null,
+                runtimeStatus = wifiDirectRuntimeStatus()
+            ).isEmpty()
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectManualNextStepUsesGroupOwnerSocketStepAfterConnection() {
+        val nextStep = nearbyWifiDirectManualNextStep(
+            runtimeStatus = wifiDirectRuntimeStatus(
+                peers = listOf(
+                    WifiDirectPeer(
+                        deviceName = "Aurora Alpha",
+                        deviceAddress = "AA:BB:CC:DD:EE:01"
+                    )
+                ),
+                discoveryState = WifiDirectDiscoveryState.INACTIVE,
+                connectionStatus = WifiDirectConnectionStatus(
+                    state = WifiDirectConnectionState.CONNECTED,
+                    groupFormed = WifiDirectGroupFormedState.YES,
+                    role = WifiDirectConnectionRole.GROUP_OWNER,
+                    groupOwnerAddress = "192.168.49.1"
+                )
+            ),
+            socketDiagnostics = WifiDirectSocketDiagnostics(),
+            adapterDiagnostics = WifiDirectTransportAdapterDiagnostics(),
+            sendBridgeDiagnostics = WifiDirectSendBridgeDiagnostics(),
+            globalSendDiagnostics = WifiDirectGlobalDebugSendDiagnostics(),
+            privateDebugSendDiagnostics = WifiDirectPrivateDebugSendDiagnostics(),
+            receiveBridgeDiagnostics = WifiDirectReceiveBridgeDiagnostics()
+        )
+
+        assertEquals("Start socket server.", nextStep.title)
+        assertEquals(
+            "This device is the Wi-Fi Direct group owner.",
+            nextStep.detail
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectManualNextStepUsesClientSocketStepAfterConnection() {
+        val nextStep = nearbyWifiDirectManualNextStep(
+            runtimeStatus = wifiDirectRuntimeStatus(
+                discoveryState = WifiDirectDiscoveryState.INACTIVE,
+                connectionStatus = WifiDirectConnectionStatus(
+                    state = WifiDirectConnectionState.CONNECTED,
+                    groupFormed = WifiDirectGroupFormedState.YES,
+                    role = WifiDirectConnectionRole.CLIENT,
+                    groupOwnerAddress = "192.168.49.1"
+                )
+            ),
+            socketDiagnostics = WifiDirectSocketDiagnostics(),
+            adapterDiagnostics = WifiDirectTransportAdapterDiagnostics(),
+            sendBridgeDiagnostics = WifiDirectSendBridgeDiagnostics(),
+            globalSendDiagnostics = WifiDirectGlobalDebugSendDiagnostics(),
+            privateDebugSendDiagnostics = WifiDirectPrivateDebugSendDiagnostics(),
+            receiveBridgeDiagnostics = WifiDirectReceiveBridgeDiagnostics()
+        )
+
+        assertEquals("Connect socket client.", nextStep.title)
+        assertEquals("Use group owner host 192.168.49.1.", nextStep.detail)
+    }
+
+    @Test
+    fun nearbyWifiDirectSocketSetupUiStateShowsGroupOwnerPrimaryActionOnly() {
+        val uiState = nearbyWifiDirectSocketSetupUiState(
+            runtimeStatus = wifiDirectRuntimeStatus(
+                connectionStatus = WifiDirectConnectionStatus(
+                    state = WifiDirectConnectionState.CONNECTED,
+                    groupFormed = WifiDirectGroupFormedState.YES,
+                    role = WifiDirectConnectionRole.GROUP_OWNER,
+                    groupOwnerAddress = "192.168.49.1"
+                )
+            ),
+            socketControlsState = NearbyWifiDirectSocketControlsState(
+                canStartServer = true,
+                canConnectClient = false,
+                canSendFrame = false,
+                canSendAdapterFrame = false,
+                canCloseSocket = false,
+                connectClientBlockedReason = "Connect client only on Wi-Fi Direct client."
+            ),
+            socketDiagnostics = WifiDirectSocketDiagnostics(),
+            adapterDiagnostics = WifiDirectTransportAdapterDiagnostics()
+        )
+
+        assertEquals("Role: group owner", uiState.roleText)
+        assertEquals("Next step: Start socket server.", uiState.nextStepText)
+        assertTrue(uiState.showPrimaryStartServer)
+        assertFalse(uiState.showPrimaryConnectClient)
+        assertFalse(uiState.showCloseSocket)
+        assertFalse(uiState.showFrameActions)
+    }
+
+    @Test
+    fun nearbyWifiDirectSocketSetupUiStateShowsClientPrimaryActionOnly() {
+        val uiState = nearbyWifiDirectSocketSetupUiState(
+            runtimeStatus = wifiDirectRuntimeStatus(
+                connectionStatus = WifiDirectConnectionStatus(
+                    state = WifiDirectConnectionState.CONNECTED,
+                    groupFormed = WifiDirectGroupFormedState.YES,
+                    role = WifiDirectConnectionRole.CLIENT,
+                    groupOwnerAddress = "192.168.49.1"
+                )
+            ),
+            socketControlsState = NearbyWifiDirectSocketControlsState(
+                canStartServer = false,
+                canConnectClient = true,
+                canSendFrame = false,
+                canSendAdapterFrame = false,
+                canCloseSocket = false,
+                connectHost = "192.168.49.1",
+                startServerBlockedReason = "Start server only on group owner."
+            ),
+            socketDiagnostics = WifiDirectSocketDiagnostics(),
+            adapterDiagnostics = WifiDirectTransportAdapterDiagnostics()
+        )
+
+        assertEquals("Role: client", uiState.roleText)
+        assertEquals("Group owner host: 192.168.49.1", uiState.hostText)
+        assertEquals("Next step: Connect socket client.", uiState.nextStepText)
+        assertFalse(uiState.showPrimaryStartServer)
+        assertTrue(uiState.showPrimaryConnectClient)
+        assertFalse(uiState.showCloseSocket)
+        assertFalse(uiState.showFrameActions)
+    }
+
+    @Test
+    fun nearbyWifiDirectSocketSetupUiStateExplainsMissingOrInvalidClientHost() {
+        val missingHostUiState = nearbyWifiDirectSocketSetupUiState(
+            runtimeStatus = wifiDirectRuntimeStatus(
+                connectionStatus = WifiDirectConnectionStatus(
+                    state = WifiDirectConnectionState.CONNECTED,
+                    groupFormed = WifiDirectGroupFormedState.YES,
+                    role = WifiDirectConnectionRole.CLIENT,
+                    groupOwnerAddress = null
+                )
+            ),
+            socketControlsState = NearbyWifiDirectSocketControlsState(
+                canStartServer = false,
+                canConnectClient = false,
+                canSendFrame = false,
+                canSendAdapterFrame = false,
+                canCloseSocket = false,
+                startServerBlockedReason = "Start server only on group owner.",
+                connectClientBlockedReason = "Group owner address missing."
+            ),
+            socketDiagnostics = WifiDirectSocketDiagnostics(),
+            adapterDiagnostics = WifiDirectTransportAdapterDiagnostics()
+        )
+        val macHostUiState = nearbyWifiDirectSocketSetupUiState(
+            runtimeStatus = wifiDirectRuntimeStatus(
+                connectionStatus = WifiDirectConnectionStatus(
+                    state = WifiDirectConnectionState.CONNECTED,
+                    groupFormed = WifiDirectGroupFormedState.YES,
+                    role = WifiDirectConnectionRole.CLIENT,
+                    groupOwnerAddress = "AA:BB:CC:DD:EE:01"
+                )
+            ),
+            socketControlsState = NearbyWifiDirectSocketControlsState(
+                canStartServer = false,
+                canConnectClient = false,
+                canSendFrame = false,
+                canSendAdapterFrame = false,
+                canCloseSocket = false,
+                startServerBlockedReason = "Start server only on group owner.",
+                connectClientBlockedReason = "Socket client needs the group owner IP address."
+            ),
+            socketDiagnostics = WifiDirectSocketDiagnostics(),
+            adapterDiagnostics = WifiDirectTransportAdapterDiagnostics()
+        )
+
+        assertEquals(
+            "Cannot connect: group owner IP missing.",
+            missingHostUiState.supportingText
+        )
+        assertEquals(
+            "Cannot connect: group owner host is not an IP.",
+            macHostUiState.supportingText
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectSocketSetupUiStateRevealsFrameAndBridgeControlsWhenReady() {
+        val uiState = nearbyWifiDirectSocketSetupUiState(
+            runtimeStatus = wifiDirectRuntimeStatus(
+                connectionStatus = WifiDirectConnectionStatus(
+                    state = WifiDirectConnectionState.CONNECTED,
+                    groupFormed = WifiDirectGroupFormedState.YES,
+                    role = WifiDirectConnectionRole.CLIENT,
+                    groupOwnerAddress = "192.168.49.1"
+                )
+            ),
+            socketControlsState = NearbyWifiDirectSocketControlsState(
+                canStartServer = false,
+                canConnectClient = false,
+                canSendFrame = true,
+                canSendAdapterFrame = true,
+                canCloseSocket = true,
+                connectHost = "192.168.49.1"
+            ),
+            socketDiagnostics = WifiDirectSocketDiagnostics(
+                state = WifiDirectSocketState.CONNECTED,
+                role = WifiDirectSocketRole.CLIENT,
+                isConnected = true
+            ),
+            adapterDiagnostics = WifiDirectTransportAdapterDiagnostics(
+                state = WifiDirectTransportAdapterState.READY
+            )
+        )
+
+        assertEquals("Socket/frame: ready", uiState.headline)
+        assertTrue(uiState.showFrameActions)
+        assertTrue(uiState.showBridgeControls)
+        assertTrue(uiState.showGlobalControls)
+        assertTrue(uiState.showCloseSocket)
+        assertEquals("Next step: Send debug frame or enable bridges.", uiState.nextStepText)
     }
 
     @Test
@@ -1120,6 +2032,27 @@ class NearbyDevicesScreenTest {
     }
 
     @Test
+    fun nearbyWifiDirectSocketFrameDebugSectionTreatsConnectedSocketAsReadyWhenRawFrameStateIsIdle() {
+        val section = buildNearbyWifiDirectSocketFrameDebugSection(
+            diagnostics = WifiDirectSocketDiagnostics(
+                state = WifiDirectSocketState.CONNECTED,
+                role = WifiDirectSocketRole.SERVER,
+                endpoint = WifiDirectSocketEndpoint(host = "192.168.49.1", port = 8988),
+                isConnected = true,
+                frameDiagnostics = gr.hua.aurora.wifidirect.WifiDirectFrameDiagnostics(
+                    state = gr.hua.aurora.wifidirect.WifiDirectFrameTransportState.IDLE
+                )
+            ),
+            adapterDiagnostics = WifiDirectTransportAdapterDiagnostics(
+                state = WifiDirectTransportAdapterState.READY
+            )
+        )
+
+        assertTrue(section.items.contains(DebugInfoItem("Frame", "ready")))
+        assertFalse(section.items.any { it.label == "Frame reason" })
+    }
+
+    @Test
     fun nearbyWifiDirectAdapterDebugSectionShowsCompactDiagnostics() {
         assertEquals(
             DebugInfoSection(
@@ -1145,6 +2078,26 @@ class NearbyDevicesScreenTest {
                     bytesSubmitted = 24,
                     bytesReceived = 12,
                     lastFrameSize = 12
+                )
+            )
+        )
+    }
+
+    @Test
+    fun nearbyWifiDirectAdapterDebugSectionShowsBlockedReasonWhenNotReady() {
+        val section = buildNearbyWifiDirectAdapterDebugSection(
+            diagnostics = WifiDirectTransportAdapterDiagnostics(
+                state = WifiDirectTransportAdapterState.NOT_READY,
+                notReadyReason = "Waiting for a socket client."
+            )
+        )
+
+        assertTrue(
+            section.items.contains(
+                DebugInfoItem(
+                    "Blocked",
+                    "Waiting for a socket client.",
+                    preferFullWidth = true
                 )
             )
         )
@@ -1215,6 +2168,8 @@ class NearbyDevicesScreenTest {
                 canSendFrame = false,
                 canSendAdapterFrame = false,
                 canCloseSocket = false,
+                startServerBlockedReason = "Wi-Fi Direct group not formed.",
+                connectClientBlockedReason = "Wi-Fi Direct group not formed.",
                 helpText = "Wi-Fi Direct group not formed."
             ),
             nearbyWifiDirectSocketControlsState(
@@ -1232,7 +2187,8 @@ class NearbyDevicesScreenTest {
                 canConnectClient = false,
                 canSendFrame = false,
                 canSendAdapterFrame = false,
-                canCloseSocket = false
+                canCloseSocket = false,
+                connectClientBlockedReason = "Connect client only on Wi-Fi Direct client."
             ),
             nearbyWifiDirectSocketControlsState(
                 runtimeStatus = wifiDirectRuntimeStatus(
@@ -1256,7 +2212,8 @@ class NearbyDevicesScreenTest {
                 canSendFrame = false,
                 canSendAdapterFrame = false,
                 canCloseSocket = false,
-                connectHost = "192.168.49.1"
+                connectHost = "192.168.49.1",
+                startServerBlockedReason = "Start server only on group owner."
             ),
             nearbyWifiDirectSocketControlsState(
                 runtimeStatus = wifiDirectRuntimeStatus(
@@ -1281,6 +2238,8 @@ class NearbyDevicesScreenTest {
                 canSendFrame = false,
                 canSendAdapterFrame = false,
                 canCloseSocket = false,
+                startServerBlockedReason = "Wi-Fi Direct role unavailable.",
+                connectClientBlockedReason = "Wi-Fi Direct role unavailable.",
                 helpText = "Wi-Fi Direct role unavailable."
             ),
             nearbyWifiDirectSocketControlsState(
@@ -1302,7 +2261,9 @@ class NearbyDevicesScreenTest {
                 canSendAdapterFrame = false,
                 canCloseSocket = false,
                 connectHost = null,
-                helpText = "Group owner address unavailable."
+                startServerBlockedReason = "Start server only on group owner.",
+                connectClientBlockedReason = "Group owner address missing.",
+                helpText = "Group owner address missing."
             ),
             nearbyWifiDirectSocketControlsState(
                 runtimeStatus = wifiDirectRuntimeStatus(
@@ -1347,6 +2308,30 @@ class NearbyDevicesScreenTest {
                 adapterDiagnostics = gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics(
                     state = gr.hua.aurora.wifidirect.WifiDirectTransportAdapterState.READY
                 )
+            )
+        )
+        assertEquals(
+            NearbyWifiDirectSocketControlsState(
+                canStartServer = false,
+                canConnectClient = false,
+                canSendFrame = false,
+                canSendAdapterFrame = false,
+                canCloseSocket = false,
+                connectHost = null,
+                startServerBlockedReason = "Start server only on group owner.",
+                connectClientBlockedReason = "Socket client needs the group owner IP address.",
+                helpText = "Socket client needs the group owner IP address."
+            ),
+            nearbyWifiDirectSocketControlsState(
+                runtimeStatus = wifiDirectRuntimeStatus(
+                    connectionStatus = WifiDirectConnectionStatus(
+                        state = WifiDirectConnectionState.CONNECTED,
+                        groupFormed = WifiDirectGroupFormedState.YES,
+                        role = WifiDirectConnectionRole.CLIENT,
+                        groupOwnerAddress = "AA:BB:CC:DD:EE:01"
+                    )
+                ),
+                diagnostics = WifiDirectSocketDiagnostics()
             )
         )
     }

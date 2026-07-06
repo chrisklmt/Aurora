@@ -73,6 +73,42 @@ class WifiDirectPrivateDebugSendBridgeTest {
     }
 
     @Test
+    fun privateDebugSendIsBlockedWhenAdapterIsNotReady() {
+        val submittedFrames = mutableListOf<WifiDirectTransportFrame>()
+        val bridge = WifiDirectPrivateDebugSendBridge(
+            submitFrame = { frame, onResult ->
+                submittedFrames += frame
+                onResult(Result.success(Unit))
+            },
+            sendBridgeDiagnostics = { WifiDirectSendBridgeDiagnostics(enabled = true) },
+            transportAdapterDiagnostics = {
+                WifiDirectTransportAdapterDiagnostics(
+                    state = WifiDirectTransportAdapterState.NOT_READY
+                )
+            }
+        )
+        bridge.setEnabled(true)
+
+        val failure = runCatching {
+            bridge.submitPrivateMessage(samplePreparedFrame()) { result ->
+                result.getOrThrow()
+            }
+        }.exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertEquals(
+            "Wi-Fi Direct Private send requires a ready transport adapter.",
+            failure?.message
+        )
+        assertEquals(emptyList<WifiDirectTransportFrame>(), submittedFrames)
+        assertEquals(1L, bridge.currentDiagnostics().privateSubmissionAttempts)
+        assertEquals(0L, bridge.currentDiagnostics().privateSubmissionSuccesses)
+        assertEquals(1L, bridge.currentDiagnostics().privateSubmitFailures)
+        assertEquals("private-msg-1", bridge.currentDiagnostics().lastPrivateMessageId)
+        assertEquals("blocked", bridge.currentDiagnostics().lastPrivateSendResult)
+    }
+
+    @Test
     fun privateDebugSendBuildsValidPrivateTransportFrames() {
         val submittedFrames = mutableListOf<WifiDirectTransportFrame>()
         val bridge = WifiDirectPrivateDebugSendBridge(
@@ -111,6 +147,36 @@ class WifiDirectPrivateDebugSendBridgeTest {
         assertEquals("private-msg-1", bridge.currentDiagnostics().lastPrivateMessageId)
         assertEquals("alex", bridge.currentDiagnostics().lastPrivateTargetPeerId)
         assertEquals("submitted locally", bridge.currentDiagnostics().lastPrivateSendResult)
+    }
+
+    @Test
+    fun privateDebugSendRecordsTransportFailure() {
+        val bridge = WifiDirectPrivateDebugSendBridge(
+            submitFrame = { _, onResult ->
+                onResult(Result.failure(IllegalStateException("socket write failed")))
+            },
+            sendBridgeDiagnostics = { WifiDirectSendBridgeDiagnostics(enabled = true) },
+            transportAdapterDiagnostics = {
+                WifiDirectTransportAdapterDiagnostics(
+                    state = WifiDirectTransportAdapterState.READY
+                )
+            }
+        )
+        bridge.setEnabled(true)
+
+        val failure = runCatching {
+            bridge.submitPrivateMessage(samplePreparedFrame()) { result ->
+                result.getOrThrow()
+            }
+        }.exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertEquals("socket write failed", failure?.message)
+        assertEquals(1L, bridge.currentDiagnostics().privateSubmissionAttempts)
+        assertEquals(0L, bridge.currentDiagnostics().privateSubmissionSuccesses)
+        assertEquals(1L, bridge.currentDiagnostics().privateSubmitFailures)
+        assertEquals("failed", bridge.currentDiagnostics().lastPrivateSendResult)
+        assertEquals("socket write failed", bridge.currentDiagnostics().lastPrivateSendError)
     }
 
     @Test

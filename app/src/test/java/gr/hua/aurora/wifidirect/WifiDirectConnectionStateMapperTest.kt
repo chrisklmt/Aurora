@@ -83,6 +83,18 @@ class WifiDirectConnectionStateMapperTest {
     }
 
     @Test
+    fun socketConnectHostRejectsMacLikeOwnerAddress() {
+        assertEquals(
+            "192.168.49.1",
+            wifiDirectSocketConnectHostOrNull(" 192.168.49.1 ")
+        )
+        assertEquals(
+            null,
+            wifiDirectSocketConnectHostOrNull("AA:BB:CC:DD:EE:01")
+        )
+    }
+
+    @Test
     fun connectionStatusFromSnapshotKeepsConnectingUntilGroupForms() {
         val status = wifiDirectConnectionStatusFromSnapshot(
             current = WifiDirectConnectionStatus(

@@ -18,7 +18,7 @@ data class RememberedWifiDirectRuntimeStatusState(
     val refreshConnectionInfo: () -> Unit,
     val startDiscovery: () -> Unit,
     val stopDiscovery: () -> Unit,
-    val connectToPeer: (WifiDirectPeer) -> Unit,
+    val connectToPeer: (WifiDirectPeer, WifiDirectRolePreference) -> Unit,
     val disconnect: () -> Unit
 )
 
@@ -56,8 +56,11 @@ fun rememberWifiDirectRuntimeStatusState(
         }
     }
     val connectToPeer = remember(resolvedController) {
-        { peer: WifiDirectPeer ->
-            resolvedController.connectToPeer(peer)
+        { peer: WifiDirectPeer, rolePreference: WifiDirectRolePreference ->
+            resolvedController.connectToPeer(
+                peer = peer,
+                rolePreference = rolePreference
+            )
         }
     }
     val disconnect = remember(resolvedController) {

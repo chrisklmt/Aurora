@@ -9,6 +9,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import gr.hua.aurora.model.AuroraContact
@@ -27,6 +31,7 @@ import gr.hua.aurora.wifidirect.WifiDirectReceiveBridgeDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectPrivateDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
 import gr.hua.aurora.wifidirect.WifiDirectSendBridgeDiagnostics
+import gr.hua.aurora.wifidirect.WifiDirectSocketDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics
 
 internal data class PrivateChatScreenContent(
@@ -55,6 +60,7 @@ internal fun PrivateChatScreen(
     activeTransportPeerId: String?,
     lastIdentityExchangeStatus: String?,
     wifiDirectRuntimeStatus: WifiDirectRuntimeStatus,
+    wifiDirectSocketDiagnostics: WifiDirectSocketDiagnostics,
     wifiDirectAdapterDiagnostics: WifiDirectTransportAdapterDiagnostics,
     wifiDirectSendBridgeDiagnostics: WifiDirectSendBridgeDiagnostics,
     wifiDirectPrivateDebugSendDiagnostics: WifiDirectPrivateDebugSendDiagnostics,
@@ -72,7 +78,21 @@ internal fun PrivateChatScreen(
         hasRuntimeSession = hasRuntimeSession,
         isNearbyVisible = isNearbyVisible
     )
+    var showPrivateDebugDetails by remember {
+        mutableStateOf(false)
+    }
     val mappedMessages = messages.map { it.toMessageListItem(showRetryAction = true) }
+    val wifiDirectDebugDiagnostics = privateChatWifiDirectDebugDiagnostics(
+        contact = contact,
+        privateChatIdentity = privateChatIdentity,
+        hasRuntimeSession = hasRuntimeSession,
+        runtimeStatus = wifiDirectRuntimeStatus,
+        socketDiagnostics = wifiDirectSocketDiagnostics,
+        adapterDiagnostics = wifiDirectAdapterDiagnostics,
+        sendBridgeDiagnostics = wifiDirectSendBridgeDiagnostics,
+        privateDebugSendDiagnostics = wifiDirectPrivateDebugSendDiagnostics,
+        receiveBridgeDiagnostics = wifiDirectReceiveBridgeDiagnostics
+    )
     val debugCard = buildPrivateChatDebugCard(
         showDebugDiagnostics = showDebugDiagnostics,
         requestedPeerId = requestedPeerId,
@@ -85,11 +105,22 @@ internal fun PrivateChatScreen(
         peerSessionDiagnostics = peerSessionDiagnostics,
         activeTransportPeerId = activeTransportPeerId,
         lastIdentityExchangeStatus = lastIdentityExchangeStatus,
-        wifiDirectRuntimeStatus = wifiDirectRuntimeStatus,
-        wifiDirectAdapterDiagnostics = wifiDirectAdapterDiagnostics,
-        wifiDirectSendBridgeDiagnostics = wifiDirectSendBridgeDiagnostics,
-        wifiDirectPrivateDebugSendDiagnostics = wifiDirectPrivateDebugSendDiagnostics,
-        wifiDirectReceiveBridgeDiagnostics = wifiDirectReceiveBridgeDiagnostics,
+        wifiDirectDiagnostics = wifiDirectDebugDiagnostics,
+        isComposerEnabled = content.isComposerEnabled
+    )
+    val debugDetailsCard = buildPrivateChatDebugDetailsCard(
+        showDebugDiagnostics = showDebugDiagnostics,
+        requestedPeerId = requestedPeerId,
+        contact = contact,
+        privateChatIdentity = privateChatIdentity,
+        hasRuntimeSession = hasRuntimeSession,
+        isNearbyVisible = isNearbyVisible,
+        messages = messages,
+        lastDeliveryResult = lastDeliveryResult,
+        peerSessionDiagnostics = peerSessionDiagnostics,
+        activeTransportPeerId = activeTransportPeerId,
+        lastIdentityExchangeStatus = lastIdentityExchangeStatus,
+        wifiDirectDiagnostics = wifiDirectDebugDiagnostics,
         isComposerEnabled = content.isComposerEnabled
     )
     val bodyTopContent: (@Composable ColumnScope.() -> Unit)? = when {
@@ -119,6 +150,18 @@ internal fun PrivateChatScreen(
                     )
                     debugCard?.let { card ->
                         DebugInfoCard(card = card)
+                    }
+                    debugDetailsCard?.let { detailsCard ->
+                        TextButton(
+                            onClick = {
+                                showPrivateDebugDetails = !showPrivateDebugDetails
+                            }
+                        ) {
+                            Text(privateChatDebugDetailsToggleLabel(showPrivateDebugDetails))
+                        }
+                        if (showPrivateDebugDetails) {
+                            DebugInfoCard(card = detailsCard)
+                        }
                     }
                 }
             }
@@ -157,6 +200,18 @@ internal fun PrivateChatScreen(
                 )
                 debugCard?.let { card ->
                     DebugInfoCard(card = card)
+                }
+                debugDetailsCard?.let { detailsCard ->
+                    TextButton(
+                        onClick = {
+                            showPrivateDebugDetails = !showPrivateDebugDetails
+                        }
+                    ) {
+                        Text(privateChatDebugDetailsToggleLabel(showPrivateDebugDetails))
+                    }
+                    if (showPrivateDebugDetails) {
+                        DebugInfoCard(card = detailsCard)
+                    }
                 }
             }
         }
@@ -248,11 +303,45 @@ internal fun buildPrivateChatDebugCard(
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
     activeTransportPeerId: String?,
     lastIdentityExchangeStatus: String?,
-    wifiDirectRuntimeStatus: WifiDirectRuntimeStatus,
-    wifiDirectAdapterDiagnostics: WifiDirectTransportAdapterDiagnostics,
-    wifiDirectSendBridgeDiagnostics: WifiDirectSendBridgeDiagnostics,
-    wifiDirectPrivateDebugSendDiagnostics: WifiDirectPrivateDebugSendDiagnostics,
-    wifiDirectReceiveBridgeDiagnostics: WifiDirectReceiveBridgeDiagnostics,
+    wifiDirectDiagnostics: WifiDirectPrivateDebugDiagnostics,
+    isComposerEnabled: Boolean
+): DebugInfoCardModel? {
+    if (!showDebugDiagnostics) {
+        return null
+    }
+
+    return DebugInfoCardModel(
+        title = "Debug",
+        sections = listOf(
+            buildPrivateChatWifiDirectDebugSection(
+                diagnostics = wifiDirectDiagnostics
+            ),
+            DebugInfoSection(
+                title = "Events",
+                items = listOf(
+                    DebugInfoItem(
+                        "Last send",
+                        privateChatDebugDeliveryValue(lastDeliveryResult)
+                    )
+                )
+            )
+        )
+    )
+}
+
+internal fun buildPrivateChatDebugDetailsCard(
+    showDebugDiagnostics: Boolean,
+    requestedPeerId: String,
+    contact: AuroraContact?,
+    privateChatIdentity: PrivateChatIdentity?,
+    hasRuntimeSession: Boolean,
+    isNearbyVisible: Boolean,
+    messages: List<ChatMessage>,
+    lastDeliveryResult: PrivateChatMessageSendResult?,
+    peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
+    activeTransportPeerId: String?,
+    lastIdentityExchangeStatus: String?,
+    wifiDirectDiagnostics: WifiDirectPrivateDebugDiagnostics,
     isComposerEnabled: Boolean
 ): DebugInfoCardModel? {
     if (!showDebugDiagnostics) {
@@ -264,47 +353,66 @@ internal fun buildPrivateChatDebugCard(
         peerId = targetPeerId,
         diagnostics = peerSessionDiagnostics
     )
-    val sections = buildList {
+    val eventItems = buildList {
         add(
-                    DebugInfoSection(
-                        title = "Target",
-                        items = buildList {
-                            add(DebugInfoItem("Peer", privateChatShortPeerId(targetPeerId)))
-                            add(
+            DebugInfoItem(
+                "Last send",
+                privateChatDebugDeliveryValue(lastDeliveryResult)
+            )
+        )
+        if (!lastIdentityExchangeStatus.isNullOrBlank()) {
+            add(
+                DebugInfoItem(
+                    "Last identity",
+                    lastIdentityExchangeStatus,
+                    preferFullWidth = true
+                )
+            )
+        }
+    }
+
+    return DebugInfoCardModel(
+        title = "Private debug details",
+        sections = listOf(
+            DebugInfoSection(
+                title = "Target",
+                items = buildList {
+                    add(DebugInfoItem("Peer", privateChatShortPeerId(targetPeerId)))
+                    add(
                         DebugInfoItem(
                             "Chat",
-                                    if (privateChatIdentity?.isEstablished == true) "ready" else "missing"
-                                )
+                            if (privateChatIdentity?.isEstablished == true) "ready" else "missing"
+                        )
+                    )
+                    add(
+                        DebugInfoItem(
+                            "Local prop",
+                            privateChatDebugIdentifierValue(privateChatIdentity?.localProposalId)
+                        )
+                    )
+                    add(
+                        DebugInfoItem(
+                            "Remote prop",
+                            privateChatDebugIdentifierValue(privateChatIdentity?.remoteProposalId)
+                        )
+                    )
+                    add(
+                        DebugInfoItem(
+                            "Chat id",
+                            privateChatDebugIdentifierValue(privateChatIdentity?.privateChatId)
+                        )
+                    )
+                    add(
+                        DebugInfoItem(
+                            "Visible",
+                            privateChatVisibilityDebugValue(
+                                isNearbyVisible = isNearbyVisible,
+                                lastSeenMillis = contact?.lastSeenMillis
                             )
-                            add(
-                                DebugInfoItem(
-                                    "Local prop",
-                                    privateChatDebugIdentifierValue(privateChatIdentity?.localProposalId)
-                                )
-                            )
-                            add(
-                                DebugInfoItem(
-                                    "Remote prop",
-                                    privateChatDebugIdentifierValue(privateChatIdentity?.remoteProposalId)
-                                )
-                            )
-                            add(
-                                DebugInfoItem(
-                                    "Chat id",
-                                    privateChatDebugIdentifierValue(privateChatIdentity?.privateChatId)
-                                )
-                            )
-                            add(
-                                DebugInfoItem(
-                                    "Visible",
-                                    privateChatVisibilityDebugValue(
-                                        isNearbyVisible = isNearbyVisible,
-                                        lastSeenMillis = contact?.lastSeenMillis
-                                    )
-                                )
-                            )
-                            add(DebugInfoItem("Messages", messages.size.toString()))
-                            privateChatIdentity?.customChatName?.let { customName ->
+                        )
+                    )
+                    add(DebugInfoItem("Messages", messages.size.toString()))
+                    privateChatIdentity?.customChatName?.let { customName ->
                         add(
                             DebugInfoItem(
                                 "Custom",
@@ -314,9 +422,7 @@ internal fun buildPrivateChatDebugCard(
                         )
                     }
                 }
-            )
-        )
-        add(
+            ),
             DebugInfoSection(
                 title = "Runtime",
                 items = listOf(
@@ -337,53 +443,15 @@ internal fun buildPrivateChatDebugCard(
                         privateChatDebugKeyStatusText(hasRuntimeSession)
                     )
                 )
+            ),
+            buildPrivateChatWifiDirectDetailsSection(
+                diagnostics = wifiDirectDiagnostics
+            ),
+            DebugInfoSection(
+                title = "Events",
+                items = eventItems
             )
         )
-        add(
-            buildPrivateChatWifiDirectDebugSection(
-                diagnostics = privateChatWifiDirectDebugDiagnostics(
-                    contact = contact,
-                    privateChatIdentity = privateChatIdentity,
-                    hasRuntimeSession = hasRuntimeSession,
-                    runtimeStatus = wifiDirectRuntimeStatus,
-                    adapterDiagnostics = wifiDirectAdapterDiagnostics,
-                    sendBridgeDiagnostics = wifiDirectSendBridgeDiagnostics,
-                    privateDebugSendDiagnostics = wifiDirectPrivateDebugSendDiagnostics,
-                    receiveBridgeDiagnostics = wifiDirectReceiveBridgeDiagnostics
-                )
-            )
-        )
-
-        val eventItems = buildList {
-            add(
-                DebugInfoItem(
-                    "Last send",
-                    privateChatDebugDeliveryValue(lastDeliveryResult)
-                )
-            )
-            if (!lastIdentityExchangeStatus.isNullOrBlank()) {
-                add(
-                    DebugInfoItem(
-                        "Last identity",
-                        lastIdentityExchangeStatus,
-                        preferFullWidth = true
-                    )
-                )
-            }
-        }
-        if (eventItems.isNotEmpty()) {
-            add(
-                DebugInfoSection(
-                    title = "Events",
-                    items = eventItems
-                )
-            )
-        }
-    }
-
-    return DebugInfoCardModel(
-        title = "Debug",
-        sections = sections
     )
 }
 

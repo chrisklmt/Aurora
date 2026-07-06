@@ -8,6 +8,30 @@ import org.junit.Test
 
 class AndroidWifiDirectControllerTest {
     @Test
+    fun groupOwnerIntentMappingMatchesDebugRolePreference() {
+        assertNull(wifiDirectGroupOwnerIntentOrNull(WifiDirectRolePreference.AUTOMATIC))
+        assertEquals(15, wifiDirectGroupOwnerIntentOrNull(WifiDirectRolePreference.PREFER_GROUP_OWNER))
+        assertEquals(0, wifiDirectGroupOwnerIntentOrNull(WifiDirectRolePreference.PREFER_CLIENT))
+    }
+
+    @Test
+    fun connectRequestDebugTextIncludesPeerPreferenceAndIntent() {
+        val peer = WifiDirectPeer(
+            deviceName = "Aurora White",
+            deviceAddress = "AA:BB:CC:DD:EE:01"
+        )
+
+        assertEquals(
+            "peerName=Aurora White peerAddress=AA:BB:CC:DD:EE:01 preference=prefer_group_owner groupOwnerIntent=15",
+            wifiDirectConnectRequestDebugText(peer, WifiDirectRolePreference.PREFER_GROUP_OWNER)
+        )
+        assertEquals(
+            "peerName=Aurora White peerAddress=AA:BB:CC:DD:EE:01 preference=automatic groupOwnerIntent=default",
+            wifiDirectConnectRequestDebugText(peer, WifiDirectRolePreference.AUTOMATIC)
+        )
+    }
+
+    @Test
     fun connectionStateDefaultsToDisconnected() {
         val permissionStatus = readyPermissionStatus()
         val controller = AndroidWifiDirectController(
@@ -124,7 +148,10 @@ class AndroidWifiDirectControllerTest {
             nowMillis = { 60L }
         )
 
-        controller.connectToPeer(client.requestPeersResult.first())
+        controller.connectToPeer(
+            peer = client.requestPeersResult.first(),
+            rolePreference = WifiDirectRolePreference.AUTOMATIC
+        )
 
         assertEquals(0, client.connectToPeerCallCount)
         assertEquals(
@@ -158,7 +185,10 @@ class AndroidWifiDirectControllerTest {
             nowMillis = { 61L }
         )
 
-        controller.connectToPeer(client.requestPeersResult.first())
+        controller.connectToPeer(
+            peer = client.requestPeersResult.first(),
+            rolePreference = WifiDirectRolePreference.AUTOMATIC
+        )
 
         assertEquals(0, client.connectToPeerCallCount)
         assertEquals(
@@ -179,10 +209,11 @@ class AndroidWifiDirectControllerTest {
         )
 
         controller.connectToPeer(
-            WifiDirectPeer(
+            peer = WifiDirectPeer(
                 deviceName = "Aurora Missing",
                 deviceAddress = "AA:BB:CC:DD:EE:09"
-            )
+            ),
+            rolePreference = WifiDirectRolePreference.AUTOMATIC
         )
 
         assertEquals(0, client.connectToPeerCallCount)
@@ -219,10 +250,14 @@ class AndroidWifiDirectControllerTest {
                 action = WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION
             )
         )
-        controller.connectToPeer(peer)
+        controller.connectToPeer(
+            peer = peer,
+            rolePreference = WifiDirectRolePreference.PREFER_CLIENT
+        )
 
         assertEquals(1, client.connectToPeerCallCount)
         assertEquals(1, client.requestConnectionSnapshotCallCount)
+        assertEquals(WifiDirectRolePreference.PREFER_CLIENT, client.lastRolePreference)
         assertEquals(
             WifiDirectConnectionState.CONNECTING,
             controller.currentRuntimeStatus().connectionStatus.state
@@ -270,7 +305,10 @@ class AndroidWifiDirectControllerTest {
                 action = WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION
             )
         )
-        controller.connectToPeer(peer)
+        controller.connectToPeer(
+            peer = peer,
+            rolePreference = WifiDirectRolePreference.AUTOMATIC
+        )
 
         val status = controller.currentRuntimeStatus().connectionStatus
         assertEquals(WifiDirectConnectionState.FAILED, status.state)
@@ -470,7 +508,10 @@ class AndroidWifiDirectControllerTest {
                 action = WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION
             )
         )
-        controller.connectToPeer(peer)
+        controller.connectToPeer(
+            peer = peer,
+            rolePreference = WifiDirectRolePreference.AUTOMATIC
+        )
         controller.handleBroadcast(
             WifiDirectBroadcastEvent(
                 action = WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION,
@@ -551,6 +592,7 @@ private class FakeWifiDirectPlatformClient : WifiDirectPlatformClient {
     var requestConnectionSnapshotFailureReason: String? = null
     var requestPeersResult: List<WifiDirectPeer> = emptyList()
     var connectionSnapshot: WifiDirectConnectionSnapshot = WifiDirectConnectionSnapshot()
+    var lastRolePreference: WifiDirectRolePreference? = null
 
     override fun discoverPeers(
         onSuccess: () -> Unit,
@@ -578,10 +620,12 @@ private class FakeWifiDirectPlatformClient : WifiDirectPlatformClient {
 
     override fun connectToPeer(
         peer: WifiDirectPeer,
+        rolePreference: WifiDirectRolePreference,
         onSuccess: () -> Unit,
         onFailure: (Int) -> Unit
     ) {
         connectToPeerCallCount += 1
+        lastRolePreference = rolePreference
         connectFailureReason?.let(onFailure) ?: onSuccess()
     }
 

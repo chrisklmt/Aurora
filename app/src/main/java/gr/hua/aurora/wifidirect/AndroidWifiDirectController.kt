@@ -3,6 +3,9 @@ package gr.hua.aurora.wifidirect
 import android.content.Context
 import android.net.wifi.p2p.WifiP2pManager
 import android.os.Build
+import android.util.Log
+
+private const val androidWifiDirectControllerLogTag = "AndroidWifiDirectController"
 
 class AndroidWifiDirectController internal constructor(
     private val permissionStatusReader: () -> WifiDirectPermissionStatus,
@@ -93,8 +96,14 @@ class AndroidWifiDirectController internal constructor(
         )
     }
 
-    override fun connectToPeer(peer: WifiDirectPeer) {
+    override fun connectToPeer(
+        peer: WifiDirectPeer,
+        rolePreference: WifiDirectRolePreference
+    ) {
         val permissionStatus = readPermissionStatusSafely()
+        safeWifiDirectControllerLogDebug(
+            "connectToPeer requested: ${wifiDirectConnectRequestDebugText(peer, rolePreference)}"
+        )
         val decision = wifiDirectConnectCommandDecision(
             permissionStatus = permissionStatus,
             platformClientAvailable = platformClient != null,
@@ -104,6 +113,9 @@ class AndroidWifiDirectController internal constructor(
         )
         when (decision) {
             is WifiDirectConnectCommandDecision.Blocked -> {
+                safeWifiDirectControllerLogWarning(
+                    "connectToPeer blocked: ${wifiDirectConnectRequestDebugText(peer, rolePreference)} reason=${decision.reason}"
+                )
                 connectionStatus = wifiDirectConnectionFailureStatus(
                     current = connectionStatus,
                     targetPeer = decision.targetPeer,
@@ -130,6 +142,9 @@ class AndroidWifiDirectController internal constructor(
         }
         val client = platformClient ?: return
         val targetPeer = (decision as WifiDirectConnectCommandDecision.Allowed).targetPeer
+        safeWifiDirectControllerLogDebug(
+            "connectToPeer accepted: ${wifiDirectConnectRequestDebugText(targetPeer, rolePreference)}"
+        )
 
         connectionStatus = connectionStatus.copy(
             state = WifiDirectConnectionState.CONNECTING,
@@ -144,11 +159,18 @@ class AndroidWifiDirectController internal constructor(
 
         client.connectToPeer(
             peer = targetPeer,
+            rolePreference = rolePreference,
             onSuccess = {
+                safeWifiDirectControllerLogDebug(
+                    "connectToPeer platform success: ${wifiDirectConnectRequestDebugText(targetPeer, rolePreference)}"
+                )
                 clearConnectionError()
                 requestConnectionSnapshot(client)
             },
             onFailure = { reason ->
+                safeWifiDirectControllerLogWarning(
+                    "connectToPeer platform failure: ${wifiDirectConnectRequestDebugText(targetPeer, rolePreference)} reason=${wifiDirectFailureLabel(reason)}"
+                )
                 connectionStatus = wifiDirectConnectionFailureStatus(
                     current = connectionStatus,
                     targetPeer = targetPeer,
@@ -189,6 +211,11 @@ class AndroidWifiDirectController internal constructor(
     override fun disconnect() {
         val permissionStatus = readPermissionStatusSafely()
         val client = platformClient
+        safeWifiDirectControllerLogDebug(
+            "disconnect requested: state=${connectionStatus.state.name.lowercase()} " +
+                "role=${connectionStatus.role.name.lowercase()} " +
+                "group=${connectionStatus.groupFormed.name.lowercase()}"
+        )
         if (client == null) {
             connectionStatus = wifiDirectDisconnectedStatus(
                 current = connectionStatus,
@@ -211,10 +238,16 @@ class AndroidWifiDirectController internal constructor(
                 emit(permissionStatus)
                 client.cancelPendingConnection(
                     onSuccess = {
+                        safeWifiDirectControllerLogDebug(
+                            "disconnect cancelConnect success"
+                        )
                         connectionStatus = wifiDirectDisconnectedStatus(connectionStatus)
                         emitCurrentRuntimeStatus()
                     },
                     onFailure = { reason ->
+                        safeWifiDirectControllerLogWarning(
+                            "disconnect cancelConnect failure: ${wifiDirectFailureLabel(reason)}"
+                        )
                         connectionStatus = wifiDirectConnectionFailureStatus(
                             current = connectionStatus,
                             targetPeer = connectionStatus.targetPeer,
@@ -233,10 +266,16 @@ class AndroidWifiDirectController internal constructor(
                 emit(permissionStatus)
                 client.disconnectFromPeer(
                     onSuccess = {
+                        safeWifiDirectControllerLogDebug(
+                            "disconnect removeGroup success"
+                        )
                         connectionStatus = wifiDirectDisconnectedStatus(connectionStatus)
                         emitCurrentRuntimeStatus()
                     },
                     onFailure = { reason ->
+                        safeWifiDirectControllerLogWarning(
+                            "disconnect removeGroup failure: ${wifiDirectFailureLabel(reason)}"
+                        )
                         connectionStatus = wifiDirectConnectionFailureStatus(
                             current = connectionStatus,
                             targetPeer = connectionStatus.targetPeer,
@@ -436,5 +475,21 @@ class AndroidWifiDirectController internal constructor(
 
     private fun touch() {
         lastUpdatedAtMillis = nowMillis()
+    }
+}
+
+private fun safeWifiDirectControllerLogDebug(
+    message: String
+) {
+    runCatching {
+        Log.d(androidWifiDirectControllerLogTag, message)
+    }
+}
+
+private fun safeWifiDirectControllerLogWarning(
+    message: String
+) {
+    runCatching {
+        Log.w(androidWifiDirectControllerLogTag, message)
     }
 }

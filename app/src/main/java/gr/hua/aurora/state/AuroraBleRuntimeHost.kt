@@ -111,9 +111,13 @@ data class AuroraBleRuntimeState(
     val bleTransportSender: BleTransportSender,
     val transportSenderSourceLabel: String,
     val wifiDirectRuntimeStatus: WifiDirectRuntimeStatus,
+    val refreshWifiDirectStatus: () -> Unit,
     val startWifiDirectDiscovery: () -> Unit,
     val stopWifiDirectDiscovery: () -> Unit,
-    val connectToWifiDirectPeer: (gr.hua.aurora.wifidirect.WifiDirectPeer) -> Unit,
+    val connectToWifiDirectPeer: (
+        gr.hua.aurora.wifidirect.WifiDirectPeer,
+        gr.hua.aurora.wifidirect.WifiDirectRolePreference
+    ) -> Unit,
     val disconnectWifiDirectPeer: () -> Unit,
     val receiveWifiDirectDebugTransportFrame: (BleGattTransportFrame) -> BleTransportReceiveResult,
     val peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
@@ -886,6 +890,7 @@ fun rememberAuroraBleRuntimeState(
         bleTransportSender = bleTransportSender,
         transportSenderSourceLabel = transportSenderSourceLabel,
         wifiDirectRuntimeStatus = wifiDirectRuntimeStatus,
+        refreshWifiDirectStatus = wifiDirectRuntimeState.refresh,
         startWifiDirectDiscovery = wifiDirectRuntimeState.startDiscovery,
         stopWifiDirectDiscovery = wifiDirectRuntimeState.stopDiscovery,
         connectToWifiDirectPeer = wifiDirectRuntimeState.connectToPeer,

@@ -1,5 +1,6 @@
 package gr.hua.aurora.wifidirect
 
+import android.util.Log
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
@@ -10,6 +11,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 private const val wifiDirectSocketConnectTimeoutMillis = 5_000
+private const val androidWifiDirectSocketControllerLogTag = "AndroidWifiDirectSocketController"
 
 internal class AndroidWifiDirectSocketController internal constructor(
     private val requestedPort: Int = wifiDirectDebugSocketPort,
@@ -53,17 +55,44 @@ internal class AndroidWifiDirectSocketController internal constructor(
 
     override fun startServer(hostHint: String?) {
         val trimmedHostHint = hostHint?.trim()?.takeIf { it.isNotEmpty() }
-        val token = stateMachine.nextOperationToken()
-        ioScope.launch {
-            releaseResources()
-            emitIfPresent(
-                stateMachine.markStartingServer(
-                    token = token,
-                    hostHint = trimmedHostHint,
-                    requestedPort = requestedPort
+        val currentDiagnostics = currentDiagnostics()
+        safeSocketControllerLogDebug(
+            "startServer invoked host=${trimmedHostHint ?: "none"} state=${currentDiagnostics.state.name.lowercase()}"
+        )
+        startServerBlockedReason(currentDiagnostics)?.let { blockedReason ->
+            safeSocketControllerLogDebug(
+                "startServer blocked: $blockedReason"
+            )
+            emit(
+                stateMachine.markBlockedInCurrentState(
+                    command = WifiDirectSocketCommand.START_SERVER,
+                    reason = blockedReason,
+                    host = trimmedHostHint
                 )
             )
+            return
+        }
+        val token = stateMachine.nextOperationToken()
+        emitIfPresent(
+            stateMachine.markStartingServer(
+                token = token,
+                hostHint = trimmedHostHint,
+                requestedPort = requestedPort
+            )
+        )
+        safeSocketControllerLogDebug(
+            "startServer accepted: token=$token requestedPort=$requestedPort"
+        )
+        safeSocketControllerLogDebug(
+            "startServer starting: token=$token host=${trimmedHostHint ?: "none"} requestedPort=$requestedPort"
+        )
+        ioScope.launch {
+            releaseResources()
             val listeningSocket = socketServer.openListeningSocket().getOrElse { error ->
+                safeSocketControllerLogWarning(
+                    "startServer failed to open listening socket",
+                    error
+                )
                 failSocket(
                     token = token,
                     reason = "Debug socket server failed: ${error::class.java.simpleName}"
@@ -81,15 +110,39 @@ internal class AndroidWifiDirectSocketController internal constructor(
                     port = listeningSocket.localPort
                 )
             )
+            safeSocketControllerLogDebug(
+                "startServer listening: token=$token port=${listeningSocket.localPort}"
+            )
             acceptClient(token, listeningSocket)
         }
     }
 
     override fun connectClient(host: String) {
         val trimmedHost = host.trim()
-        if (trimmedHost.isEmpty()) {
+        val currentDiagnostics = currentDiagnostics()
+        safeSocketControllerLogDebug(
+            "connectClient invoked host=${trimmedHost.ifEmpty { "none" }} state=${currentDiagnostics.state.name.lowercase()}"
+        )
+        connectClientBlockedReason(currentDiagnostics)?.let { blockedReason ->
+            safeSocketControllerLogDebug(
+                "connectClient blocked: $blockedReason"
+            )
             emit(
-                stateMachine.markImmediateFailure(
+                stateMachine.markBlockedInCurrentState(
+                    command = WifiDirectSocketCommand.CONNECT_CLIENT,
+                    reason = blockedReason,
+                    host = trimmedHost.ifEmpty { null }
+                )
+            )
+            return
+        }
+        if (trimmedHost.isEmpty()) {
+            safeSocketControllerLogDebug(
+                "connectClient blocked: Group owner address unavailable."
+            )
+            emit(
+                stateMachine.markBlocked(
+                    command = WifiDirectSocketCommand.CONNECT_CLIENT,
                     role = WifiDirectSocketRole.CLIENT,
                     reason = "Group owner address unavailable.",
                     endpoint = WifiDirectSocketEndpoint(
@@ -101,15 +154,21 @@ internal class AndroidWifiDirectSocketController internal constructor(
         }
 
         val token = stateMachine.nextOperationToken()
+        emitIfPresent(
+            stateMachine.markConnectingClient(
+                token = token,
+                host = trimmedHost,
+                requestedPort = requestedPort
+            )
+        )
+        safeSocketControllerLogDebug(
+            "connectClient accepted: token=$token host=$trimmedHost requestedPort=$requestedPort"
+        )
+        safeSocketControllerLogDebug(
+            "connectClient connecting: token=$token host=$trimmedHost requestedPort=$requestedPort"
+        )
         ioScope.launch {
             releaseResources()
-            emitIfPresent(
-                stateMachine.markConnectingClient(
-                    token = token,
-                    host = trimmedHost,
-                    requestedPort = requestedPort
-                )
-            )
             val targetPort = currentDiagnostics().endpoint?.port ?: requestedPort
             val clientSocket = socketClient.newSocket()
             if (!adoptClientSocket(token, clientSocket)) {
@@ -121,6 +180,10 @@ internal class AndroidWifiDirectSocketController internal constructor(
                 host = trimmedHost,
                 port = targetPort
             ).getOrElse { error ->
+                safeSocketControllerLogWarning(
+                    "connectClient failed to connect: host=$trimmedHost port=$targetPort",
+                    error
+                )
                 failSocket(
                     token = token,
                     reason = "Debug socket connect failed: ${error::class.java.simpleName}"
@@ -136,6 +199,9 @@ internal class AndroidWifiDirectSocketController internal constructor(
                         port = targetPort
                     )
                 )
+            )
+            safeSocketControllerLogDebug(
+                "connectClient connected: token=$token host=$trimmedHost port=$targetPort"
             )
             startReadLoop(token, clientSocket)
         }
@@ -157,8 +223,12 @@ internal class AndroidWifiDirectSocketController internal constructor(
 
     override fun isTransportFrameReady(): Boolean {
         val diagnostics = currentDiagnostics()
-        return diagnostics.isConnected &&
-            diagnostics.frameDiagnostics.state == WifiDirectFrameTransportState.READY
+        return wifiDirectEffectiveFrameTransportState(diagnostics) ==
+            WifiDirectFrameTransportState.READY
+    }
+
+    override fun transportFrameReadinessReason(): String? {
+        return wifiDirectSocketFrameReadinessReason(currentDiagnostics())
     }
 
     override fun submitTransportFramePayload(
@@ -185,6 +255,9 @@ internal class AndroidWifiDirectSocketController internal constructor(
     }
 
     override fun closeSocket() {
+        safeSocketControllerLogDebug(
+            "closeSocket invoked: state=${currentDiagnostics().state.name.lowercase()}"
+        )
         val token = stateMachine.nextOperationToken()
         emitIfPresent(stateMachine.markClosing(token))
         releaseResources()
@@ -220,6 +293,10 @@ internal class AndroidWifiDirectSocketController internal constructor(
     ) {
         val acceptedSocket = socketServer.acceptClient(listeningSocket).getOrElse { error ->
             if (stateMachine.isCurrentToken(token)) {
+                safeSocketControllerLogWarning(
+                    "acceptClient failed: token=$token",
+                    error
+                )
                 failSocket(
                     token = token,
                     reason = "Debug socket accept failed: ${error::class.java.simpleName}"
@@ -238,6 +315,9 @@ internal class AndroidWifiDirectSocketController internal constructor(
                 role = WifiDirectSocketRole.SERVER
             )
         )
+        safeSocketControllerLogDebug(
+            "acceptClient connected: token=$token"
+        )
         startReadLoop(token, acceptedSocket)
     }
 
@@ -245,12 +325,19 @@ internal class AndroidWifiDirectSocketController internal constructor(
         token: Long,
         activeSocket: Socket
     ) {
+        emitIfPresent(stateMachine.markReadLoopActive(token))
+        safeSocketControllerLogDebug(
+            "readLoop starting: token=$token role=${currentDiagnostics().role.name.lowercase()} connected=${currentDiagnostics().isConnected}"
+        )
         ioScope.launch {
             frameIoLoop.readUntilClosed(
                 socket = activeSocket,
                 isActive = { stateMachine.isCurrentToken(token) },
                 onIncomingFrame = { incomingFrame ->
                     val frame = incomingFrame.frame
+                    safeSocketControllerLogDebug(
+                        "readLoop received: token=$token payloadSize=${frame.payloadSize} bytes=${incomingFrame.frameByteCount}"
+                    )
                     emitIncomingTransportFramePayload(
                         payload = frame.payloadBytes(),
                         byteCount = incomingFrame.frameByteCount
@@ -270,9 +357,16 @@ internal class AndroidWifiDirectSocketController internal constructor(
                 onClosed = {
                     releaseResources()
                     emitIfPresent(stateMachine.markIdle(token))
+                    safeSocketControllerLogDebug(
+                        "readLoop closed: token=$token"
+                    )
                 },
                 onFailure = { error ->
                     if (stateMachine.isCurrentToken(token)) {
+                        safeSocketControllerLogWarning(
+                            "readLoop failed: token=$token",
+                            error
+                        )
                         failSocket(
                             token = token,
                             reason = "Debug frame read failed: ${safeFrameErrorDetail(error)}"
@@ -315,6 +409,9 @@ internal class AndroidWifiDirectSocketController internal constructor(
             socket = activeSocket,
             frame = frame
         ).onSuccess { byteCount ->
+            safeSocketControllerLogDebug(
+                "writeFrame success: token=$token payloadSize=${frame.payloadSize} bytes=$byteCount"
+            )
             emitIfPresent(
                 stateMachine.recordSentFrame(
                     token = token,
@@ -325,6 +422,10 @@ internal class AndroidWifiDirectSocketController internal constructor(
             )
             onResult(Result.success(Unit))
         }.onFailure { error ->
+            safeSocketControllerLogWarning(
+                "writeFrame failed: token=$token payloadSize=${frame.payloadSize}",
+                error
+            )
             failSocket(
                 token = token,
                 reason = "Debug frame send failed: ${safeFrameErrorDetail(error)}"
@@ -337,6 +438,9 @@ internal class AndroidWifiDirectSocketController internal constructor(
         token: Long,
         reason: String
     ) {
+        safeSocketControllerLogDebug(
+            "socket failed: token=$token reason=$reason"
+        )
         releaseResources()
         emitIfPresent(stateMachine.markFailed(token, reason))
     }
@@ -418,6 +522,12 @@ internal class AndroidWifiDirectSocketController internal constructor(
     private fun emit(
         updated: WifiDirectSocketDiagnostics
     ) {
+        safeSocketControllerLogDebug(
+            "emit diagnostics: state=${updated.state.name.lowercase()} " +
+                "command=${updated.lastCommand.name.lowercase()} " +
+                "result=${updated.lastCommandResult.name.lowercase()} " +
+                "seq=${updated.lastCommandSequence} listeners=${listeners.size}"
+        )
         listeners.forEach { listener ->
             listener.onSocketDiagnosticsChanged(updated)
         }
@@ -440,5 +550,57 @@ internal class AndroidWifiDirectSocketController internal constructor(
     ): String {
         return error.message?.trim()?.takeIf { it.isNotEmpty() }
             ?: error::class.java.simpleName
+    }
+
+    private fun safeSocketControllerLogDebug(
+        message: String
+    ) {
+        runCatching {
+            Log.d(
+                androidWifiDirectSocketControllerLogTag,
+                message
+            )
+        }
+    }
+
+    private fun safeSocketControllerLogWarning(
+        message: String,
+        error: Throwable
+    ) {
+        runCatching {
+            Log.w(
+                androidWifiDirectSocketControllerLogTag,
+                message,
+                error
+            )
+        }
+    }
+
+    private fun startServerBlockedReason(
+        diagnostics: WifiDirectSocketDiagnostics
+    ): String? {
+        return when (diagnostics.state) {
+            WifiDirectSocketState.STARTING_SERVER -> "Socket server already starting."
+            WifiDirectSocketState.SERVER_LISTENING -> "Socket server already listening."
+            WifiDirectSocketState.CONNECTING -> "Socket client already connecting."
+            WifiDirectSocketState.CONNECTED -> "Socket already connected."
+            WifiDirectSocketState.CLOSING -> "Socket closing in progress."
+            WifiDirectSocketState.IDLE,
+            WifiDirectSocketState.FAILED -> null
+        }
+    }
+
+    private fun connectClientBlockedReason(
+        diagnostics: WifiDirectSocketDiagnostics
+    ): String? {
+        return when (diagnostics.state) {
+            WifiDirectSocketState.STARTING_SERVER -> "Socket server already starting."
+            WifiDirectSocketState.SERVER_LISTENING -> "Socket server already listening."
+            WifiDirectSocketState.CONNECTING -> "Socket client already connecting."
+            WifiDirectSocketState.CONNECTED -> "Socket already connected."
+            WifiDirectSocketState.CLOSING -> "Socket closing in progress."
+            WifiDirectSocketState.IDLE,
+            WifiDirectSocketState.FAILED -> null
+        }
     }
 }

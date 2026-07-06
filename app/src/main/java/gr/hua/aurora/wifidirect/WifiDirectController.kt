@@ -17,7 +17,10 @@ interface WifiDirectController {
     fun refreshConnectionInfo()
     fun startDiscovery()
     fun stopDiscovery()
-    fun connectToPeer(peer: WifiDirectPeer)
+    fun connectToPeer(
+        peer: WifiDirectPeer,
+        rolePreference: WifiDirectRolePreference = WifiDirectRolePreference.AUTOMATIC
+    )
     fun disconnect()
     fun handleBroadcast(event: WifiDirectBroadcastEvent)
     fun addListener(listener: Listener)

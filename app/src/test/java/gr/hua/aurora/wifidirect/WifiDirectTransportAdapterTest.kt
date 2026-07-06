@@ -34,6 +34,35 @@ class WifiDirectTransportAdapterTest {
                 WifiDirectTransportAdapterState.NOT_READY,
                 adapter.currentDiagnostics().state
             )
+            assertEquals(
+                "Wi-Fi Direct transport frame sink not ready.",
+                adapter.currentDiagnostics().notReadyReason
+            )
+        } finally {
+            adapter.dispose()
+        }
+    }
+
+    @Test
+    fun enabledAdapterSurfacesTransportReadinessReasonWhenBlocked() {
+        val transport = FakeWifiDirectTransport(
+            readinessReason = "Waiting for a socket client."
+        )
+        val adapter = WifiDirectTransportAdapter(
+            frameSink = transport,
+            frameSource = transport,
+            enabled = true
+        )
+
+        try {
+            assertEquals(
+                WifiDirectTransportAdapterState.NOT_READY,
+                adapter.currentDiagnostics().state
+            )
+            assertEquals(
+                "Waiting for a socket client.",
+                adapter.currentDiagnostics().notReadyReason
+            )
         } finally {
             adapter.dispose()
         }
@@ -61,6 +90,7 @@ class WifiDirectTransportAdapterTest {
             )
             assertEquals(1L, adapter.currentDiagnostics().framesSubmitted)
             assertEquals(13L, adapter.currentDiagnostics().bytesSubmitted)
+            assertEquals(13, adapter.currentDiagnostics().lastSubmittedFrameSize)
             assertEquals(
                 WifiDirectTransportAdapterState.READY,
                 adapter.currentDiagnostics().state
@@ -157,6 +187,7 @@ class WifiDirectTransportAdapterTest {
             assertArrayEquals("hello".toByteArray(), receivedFrames.single().payloadBytes())
             assertEquals(1L, adapter.currentDiagnostics().framesReceived)
             assertEquals(5L, adapter.currentDiagnostics().bytesReceived)
+            assertEquals(5, adapter.currentDiagnostics().lastReceivedFrameSize)
         } finally {
             adapter.removeListener(listener)
             adapter.dispose()
@@ -258,6 +289,7 @@ class WifiDirectTransportAdapterTest {
 
     private class FakeWifiDirectTransport(
         var isReady: Boolean = false,
+        private val readinessReason: String? = null,
         private val submitFailure: Throwable? = null
     ) : WifiDirectTransportFrameSink, WifiDirectTransportFrameSource {
         val submittedPayloads = mutableListOf<ByteArray>()
@@ -265,6 +297,10 @@ class WifiDirectTransportAdapterTest {
 
         override fun isTransportFrameReady(): Boolean {
             return isReady
+        }
+
+        override fun transportFrameReadinessReason(): String? {
+            return readinessReason
         }
 
         override fun submitTransportFramePayload(

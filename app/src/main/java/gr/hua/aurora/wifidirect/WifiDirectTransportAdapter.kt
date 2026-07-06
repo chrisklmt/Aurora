@@ -1,7 +1,10 @@
 package gr.hua.aurora.wifidirect
 
+import android.util.Log
+
 private const val wifiDirectTransportAdapterNote =
     "Wi-Fi Direct chat routing not wired yet."
+private const val wifiDirectTransportAdapterLogTag = "WifiDirectTransportAdapter"
 
 internal enum class WifiDirectTransportAdapterState {
     DISABLED,
@@ -17,12 +20,16 @@ internal data class WifiDirectTransportAdapterDiagnostics(
     val bytesSubmitted: Long = 0L,
     val bytesReceived: Long = 0L,
     val lastFrameSize: Int? = null,
+    val lastSubmittedFrameSize: Int? = null,
+    val lastReceivedFrameSize: Int? = null,
     val lastError: String? = null,
+    val notReadyReason: String? = null,
     val note: String = wifiDirectTransportAdapterNote
 )
 
 internal interface WifiDirectTransportFrameSink {
     fun isTransportFrameReady(): Boolean
+    fun transportFrameReadinessReason(): String? = null
     fun submitTransportFramePayload(
         payload: ByteArray,
         onResult: (Result<Unit>) -> Unit = {}
@@ -64,6 +71,8 @@ internal class WifiDirectTransportAdapter(
     private var bytesSubmitted = 0L
     private var bytesReceived = 0L
     private var lastFrameSize: Int? = null
+    private var lastSubmittedFrameSize: Int? = null
+    private var lastReceivedFrameSize: Int? = null
     private var lastError: String? = null
 
     private val sourceListener = object : WifiDirectTransportFrameSource.Listener {
@@ -81,15 +90,7 @@ internal class WifiDirectTransportAdapter(
 
     fun currentDiagnostics(): WifiDirectTransportAdapterDiagnostics {
         return synchronized(stateLock) {
-            WifiDirectTransportAdapterDiagnostics(
-                state = currentStateLocked(),
-                framesSubmitted = framesSubmitted,
-                framesReceived = framesReceived,
-                bytesSubmitted = bytesSubmitted,
-                bytesReceived = bytesReceived,
-                lastFrameSize = lastFrameSize,
-                lastError = lastError
-            )
+            currentDiagnosticsLocked()
         }
     }
 
@@ -109,6 +110,8 @@ internal class WifiDirectTransportAdapter(
                 bytesSubmitted = 0L
                 bytesReceived = 0L
                 lastFrameSize = null
+                lastSubmittedFrameSize = null
+                lastReceivedFrameSize = null
                 lastError = null
                 currentDiagnosticsLocked()
             }
@@ -133,6 +136,9 @@ internal class WifiDirectTransportAdapter(
         frame: WifiDirectTransportFrame,
         onResult: (Result<Unit>) -> Unit = {}
     ) {
+        safeWifiDirectTransportAdapterLogDebug(
+            "submit requested: enabled=$enabled frameSize=${frame.payloadSize} ready=${frameSink?.isTransportFrameReady() == true}"
+        )
         if (!enabled) {
             val error = IllegalStateException("Wi-Fi Direct transport adapter disabled.")
             emit(updateFailure(error.message))
@@ -140,7 +146,10 @@ internal class WifiDirectTransportAdapter(
             return
         }
         if (frameSink == null || !frameSink.isTransportFrameReady()) {
-            val error = IllegalStateException("Wi-Fi Direct transport adapter not ready.")
+            val error = IllegalStateException(
+                frameSink?.transportFrameReadinessReason()
+                    ?: "Wi-Fi Direct transport adapter not ready."
+            )
             emit(updateFailure(error.message))
             onResult(Result.failure(error))
             return
@@ -161,12 +170,20 @@ internal class WifiDirectTransportAdapter(
                         framesSubmitted += 1L
                         bytesSubmitted += frame.payloadSize.toLong()
                         lastFrameSize = frame.payloadSize
+                        lastSubmittedFrameSize = frame.payloadSize
                         lastError = null
                         currentDiagnosticsLocked()
                     }
                 )
+                safeWifiDirectTransportAdapterLogDebug(
+                    "submit success: frameSize=${frame.payloadSize} bytes=${encodedPayload.size}"
+                )
                 onResult(Result.success(Unit))
             }.onFailure { error ->
+                safeWifiDirectTransportAdapterLogWarning(
+                    "submit failure: frameSize=${frame.payloadSize}",
+                    error
+                )
                 emit(updateFailure(safeErrorDetail(error)))
                 onResult(Result.failure(error))
             }
@@ -190,10 +207,14 @@ internal class WifiDirectTransportAdapter(
                 if (frame == null) {
                     return
                 }
+                safeWifiDirectTransportAdapterLogDebug(
+                    "receive success: frameSize=${frame.payloadSize} bytes=$byteCount"
+                )
                 val diagnostics = synchronized(stateLock) {
                     framesReceived += 1L
                     bytesReceived += frame.payloadSize.toLong()
                     lastFrameSize = frame.payloadSize
+                    lastReceivedFrameSize = frame.payloadSize
                     lastError = null
                     currentDiagnosticsLocked()
                 }
@@ -203,6 +224,10 @@ internal class WifiDirectTransportAdapter(
                 }
             }
             .onFailure { error ->
+                safeWifiDirectTransportAdapterLogWarning(
+                    "receive decode failure: payloadBytes=${payload.size}",
+                    error
+                )
                 emit(updateFailure(safeErrorDetail(error)))
             }
     }
@@ -225,14 +250,22 @@ internal class WifiDirectTransportAdapter(
     }
 
     private fun currentDiagnosticsLocked(): WifiDirectTransportAdapterDiagnostics {
+        val state = currentStateLocked()
         return WifiDirectTransportAdapterDiagnostics(
-            state = currentStateLocked(),
+            state = state,
             framesSubmitted = framesSubmitted,
             framesReceived = framesReceived,
             bytesSubmitted = bytesSubmitted,
             bytesReceived = bytesReceived,
             lastFrameSize = lastFrameSize,
-            lastError = lastError
+            lastSubmittedFrameSize = lastSubmittedFrameSize,
+            lastReceivedFrameSize = lastReceivedFrameSize,
+            lastError = lastError,
+            notReadyReason = if (state == WifiDirectTransportAdapterState.NOT_READY) {
+                currentNotReadyReasonLocked()
+            } else {
+                null
+            }
         )
     }
 
@@ -246,11 +279,45 @@ internal class WifiDirectTransportAdapter(
         }
     }
 
+    private fun currentNotReadyReasonLocked(): String? {
+        return when {
+            !enabled -> "Wi-Fi Direct transport adapter disabled."
+            frameSink == null -> "Wi-Fi Direct transport frame sink unavailable."
+            frameSink.isTransportFrameReady() -> null
+            else -> frameSink.transportFrameReadinessReason()
+                ?: "Wi-Fi Direct transport frame sink not ready."
+        }
+    }
+
     private fun safeErrorDetail(
         error: Throwable
     ): String {
         return error.message?.trim()?.takeIf { it.isNotEmpty() }
             ?: error::class.java.simpleName
+    }
+
+    private fun safeWifiDirectTransportAdapterLogDebug(
+        message: String
+    ) {
+        runCatching {
+            Log.d(
+                wifiDirectTransportAdapterLogTag,
+                message
+            )
+        }
+    }
+
+    private fun safeWifiDirectTransportAdapterLogWarning(
+        message: String,
+        error: Throwable
+    ) {
+        runCatching {
+            Log.w(
+                wifiDirectTransportAdapterLogTag,
+                message,
+                error
+            )
+        }
     }
 }
 

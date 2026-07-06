@@ -34,6 +34,12 @@ enum class WifiDirectConnectionRole {
     UNKNOWN
 }
 
+enum class WifiDirectRolePreference {
+    AUTOMATIC,
+    PREFER_GROUP_OWNER,
+    PREFER_CLIENT
+}
+
 data class WifiDirectConnectionStatus(
     val state: WifiDirectConnectionState = WifiDirectConnectionState.DISCONNECTED,
     val targetPeer: WifiDirectPeer? = null,
@@ -142,6 +148,16 @@ fun wifiDirectConnectionRoleSummary(
         WifiDirectConnectionRole.GROUP_OWNER -> "group owner"
         WifiDirectConnectionRole.CLIENT -> "client"
         WifiDirectConnectionRole.UNKNOWN -> "unknown"
+    }
+}
+
+internal fun wifiDirectRolePreferenceSummary(
+    preference: WifiDirectRolePreference
+): String {
+    return when (preference) {
+        WifiDirectRolePreference.AUTOMATIC -> "Automatic"
+        WifiDirectRolePreference.PREFER_GROUP_OWNER -> "Prefer this device as group owner"
+        WifiDirectRolePreference.PREFER_CLIENT -> "Prefer this device as client"
     }
 }
 

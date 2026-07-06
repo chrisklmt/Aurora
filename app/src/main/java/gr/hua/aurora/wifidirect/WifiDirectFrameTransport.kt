@@ -42,6 +42,8 @@ internal data class WifiDirectFrameDiagnostics(
     val bytesSent: Long = 0L,
     val bytesReceived: Long = 0L,
     val lastFrameSize: Int? = null,
+    val lastSentFrameSize: Int? = null,
+    val lastReceivedFrameSize: Int? = null,
     val lastError: String? = null,
     val note: String = wifiDirectFrameTransportNote
 )

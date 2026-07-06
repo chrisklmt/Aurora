@@ -11,7 +11,8 @@ class WifiDirectSocketCommandGuardTest {
                 canStartServer = true,
                 canConnectClient = false,
                 canSendFrame = false,
-                canCloseSocket = false
+                canCloseSocket = false,
+                connectClientBlockedReason = "Connect client only on Wi-Fi Direct client."
             ),
             wifiDirectSocketCommandAvailability(
                 runtimeStatus = runtimeStatus(
@@ -34,7 +35,8 @@ class WifiDirectSocketCommandGuardTest {
                 canConnectClient = true,
                 canSendFrame = false,
                 canCloseSocket = false,
-                connectHost = "192.168.49.1"
+                connectHost = "192.168.49.1",
+                startServerBlockedReason = "Start server only on group owner."
             ),
             wifiDirectSocketCommandAvailability(
                 runtimeStatus = runtimeStatus(
@@ -58,6 +60,8 @@ class WifiDirectSocketCommandGuardTest {
                 canConnectClient = false,
                 canSendFrame = false,
                 canCloseSocket = false,
+                startServerBlockedReason = "Wi-Fi Direct group not formed.",
+                connectClientBlockedReason = "Wi-Fi Direct group not formed.",
                 helpText = "Wi-Fi Direct group not formed."
             ),
             wifiDirectSocketCommandAvailability(
@@ -89,6 +93,60 @@ class WifiDirectSocketCommandGuardTest {
                     state = WifiDirectSocketState.CONNECTED,
                     role = WifiDirectSocketRole.CLIENT,
                     isConnected = true
+                )
+            )
+        )
+    }
+
+    @Test
+    fun macLikeOwnerAddressDoesNotEnableSocketClientConnect() {
+        assertEquals(
+            WifiDirectSocketCommandAvailability(
+                canStartServer = false,
+                canConnectClient = false,
+                canSendFrame = false,
+                canCloseSocket = false,
+                connectHost = null,
+                startServerBlockedReason = "Start server only on group owner.",
+                connectClientBlockedReason = "Socket client needs the group owner IP address.",
+                helpText = "Socket client needs the group owner IP address."
+            ),
+            wifiDirectSocketCommandAvailability(
+                runtimeStatus = runtimeStatus(
+                    connectionStatus = WifiDirectConnectionStatus(
+                        state = WifiDirectConnectionState.CONNECTED,
+                        groupFormed = WifiDirectGroupFormedState.YES,
+                        role = WifiDirectConnectionRole.CLIENT,
+                        groupOwnerAddress = "AA:BB:CC:DD:EE:01"
+                    )
+                ),
+                diagnostics = WifiDirectSocketDiagnostics()
+            )
+        )
+    }
+
+    @Test
+    fun guardSummaryIncludesRoleGroupAndResolvedHost() {
+        val runtimeStatus = runtimeStatus(
+            connectionStatus = WifiDirectConnectionStatus(
+                state = WifiDirectConnectionState.CONNECTED,
+                groupFormed = WifiDirectGroupFormedState.YES,
+                role = WifiDirectConnectionRole.CLIENT,
+                groupOwnerAddress = "192.168.49.1"
+            )
+        )
+        val availability = wifiDirectSocketCommandAvailability(
+            runtimeStatus = runtimeStatus,
+            diagnostics = WifiDirectSocketDiagnostics()
+        )
+
+        assertEquals(
+            "command=connectClient role=client group=yes host=192.168.49.1 accepted=true blocked=none",
+            wifiDirectSocketCommandGuardSummary(
+                wifiDirectSocketCommandGuardSnapshot(
+                    command = WifiDirectSocketCommand.CONNECT_CLIENT,
+                    runtimeStatus = runtimeStatus,
+                    availability = availability
                 )
             )
         )

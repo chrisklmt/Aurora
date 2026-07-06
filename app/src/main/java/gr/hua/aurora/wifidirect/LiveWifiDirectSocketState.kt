@@ -10,6 +10,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -40,6 +41,7 @@ internal data class RememberedWifiDirectSocketState(
     val setSendBridgeEnabled: (Boolean) -> Unit,
     val disableSendBridge: () -> Unit,
     val setReceiveBridgeEnabled: (Boolean) -> Unit,
+    val reportReceiveBridgeToggleBlocked: (String) -> Unit,
     val disableReceiveBridge: () -> Unit,
     val resetDiagnostics: () -> Unit,
     val closeSocket: () -> Unit
@@ -72,9 +74,19 @@ internal fun rememberWifiDirectSocketState(
             WifiDirectTransportAdapter(enabled = false)
         }
     }
-    val receiveBridge = remember(processReceiveBridgeFrame) {
-        processReceiveBridgeFrame?.let(::WifiDirectReceiveBridge)
+    val latestProcessReceiveBridgeFrameState = rememberUpdatedState(processReceiveBridgeFrame)
+    val receiveBridge = remember(processReceiveBridgeFrame != null) {
+        if (processReceiveBridgeFrame == null) {
+            null
+        } else {
+            WifiDirectReceiveBridge { frame ->
+                checkNotNull(latestProcessReceiveBridgeFrameState.value) {
+                    "Wi-Fi Direct receive bridge processor unavailable."
+                }(frame)
+            }
+        }
     }
+    val currentReceiveBridgeState = rememberUpdatedState(receiveBridge)
     val sendBridge = remember(transportAdapter) {
         WifiDirectSendBridge(transportAdapter)
     }
@@ -199,8 +211,36 @@ internal fun rememberWifiDirectSocketState(
     val setReceiveBridgeEnabled = remember(receiveBridge) {
         { enabled: Boolean ->
             receiveBridge?.setEnabled(enabled)
-            if (receiveBridge == null && !enabled) {
-                receiveBridgeDiagnostics = WifiDirectReceiveBridgeDiagnostics()
+            receiveBridgeDiagnostics = if (receiveBridge != null) {
+                receiveBridge.currentDiagnostics()
+            } else {
+                receiveBridgeDiagnostics.copy(
+                    enabled = false,
+                    lastToggleAction = if (enabled) {
+                        "Enable receive bridge"
+                    } else {
+                        "Disable receive bridge"
+                    },
+                    lastToggleResult = "blocked",
+                    lastToggleBlockedReason = "Receive bridge unavailable."
+                )
+            }
+        }
+    }
+    val reportReceiveBridgeToggleBlocked = remember(receiveBridge) {
+        { blockedReason: String ->
+            if (receiveBridge != null) {
+                receiveBridge.recordBlockedToggle(
+                    enabled = true,
+                    reason = blockedReason
+                )
+                receiveBridgeDiagnostics = receiveBridge.currentDiagnostics()
+            } else {
+                receiveBridgeDiagnostics = receiveBridgeDiagnostics.copy(
+                    lastToggleAction = "Enable receive bridge",
+                    lastToggleResult = "blocked",
+                    lastToggleBlockedReason = blockedReason
+                )
             }
         }
     }
@@ -251,8 +291,7 @@ internal fun rememberWifiDirectSocketState(
         sendBridge,
         globalDebugSender,
         privateDebugSender,
-        smokeTestSender,
-        receiveBridge
+        smokeTestSender
     ) {
         val listener = object : WifiDirectSocketController.Listener {
             override fun onSocketDiagnosticsChanged(diagnosticsUpdate: WifiDirectSocketDiagnostics) {
@@ -279,7 +318,7 @@ internal fun rememberWifiDirectSocketState(
 
             override fun onTransportFrameReceived(frame: WifiDirectTransportFrame) {
                 mainHandler.post {
-                    receiveBridge?.onTransportFrameReceived(frame)
+                    currentReceiveBridgeState.value?.onTransportFrameReceived(frame)
                 }
             }
         }
@@ -322,6 +361,25 @@ internal fun rememberWifiDirectSocketState(
                 }
             }
         }
+        resolvedController.addListener(listener)
+        transportAdapter.addListener(adapterListener)
+        sendBridge.addListener(sendBridgeListener)
+        globalDebugSender.addListener(globalDebugSendListener)
+        privateDebugSender.addListener(privateDebugSendListener)
+        smokeTestSender.addListener(smokeTestListener)
+        onDispose {
+            resolvedController.removeListener(listener)
+            transportAdapter.removeListener(adapterListener)
+            sendBridge.removeListener(sendBridgeListener)
+            globalDebugSender.removeListener(globalDebugSendListener)
+            privateDebugSender.removeListener(privateDebugSendListener)
+            smokeTestSender.removeListener(smokeTestListener)
+            transportAdapter.dispose()
+            resolvedController.dispose()
+        }
+    }
+
+    DisposableEffect(receiveBridge, mainHandler) {
         val receiveBridgeListener = object : WifiDirectReceiveBridge.Listener {
             override fun onReceiveBridgeDiagnosticsChanged(
                 diagnosticsUpdate: WifiDirectReceiveBridgeDiagnostics
@@ -332,23 +390,9 @@ internal fun rememberWifiDirectSocketState(
             }
         }
 
-        resolvedController.addListener(listener)
-        transportAdapter.addListener(adapterListener)
-        sendBridge.addListener(sendBridgeListener)
-        globalDebugSender.addListener(globalDebugSendListener)
-        privateDebugSender.addListener(privateDebugSendListener)
-        smokeTestSender.addListener(smokeTestListener)
         receiveBridge?.addListener(receiveBridgeListener)
         onDispose {
-            resolvedController.removeListener(listener)
-            transportAdapter.removeListener(adapterListener)
-            sendBridge.removeListener(sendBridgeListener)
-            globalDebugSender.removeListener(globalDebugSendListener)
-            privateDebugSender.removeListener(privateDebugSendListener)
-            smokeTestSender.removeListener(smokeTestListener)
             receiveBridge?.removeListener(receiveBridgeListener)
-            transportAdapter.dispose()
-            resolvedController.dispose()
         }
     }
 
@@ -400,6 +444,7 @@ internal fun rememberWifiDirectSocketState(
         setSendBridgeEnabled = setSendBridgeEnabled,
         disableSendBridge = disableSendBridge,
         setReceiveBridgeEnabled = setReceiveBridgeEnabled,
+        reportReceiveBridgeToggleBlocked = reportReceiveBridgeToggleBlocked,
         disableReceiveBridge = disableReceiveBridge,
         resetDiagnostics = resetDiagnostics,
         closeSocket = closeSocket

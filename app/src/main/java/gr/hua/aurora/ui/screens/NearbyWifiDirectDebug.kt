@@ -2,9 +2,11 @@ package gr.hua.aurora.ui.screens
 
 import gr.hua.aurora.ui.components.DebugInfoItem
 import gr.hua.aurora.ui.components.DebugInfoSection
+import gr.hua.aurora.ui.components.DebugInfoCardModel
 import gr.hua.aurora.wifidirect.WifiDirectEnabledState
 import gr.hua.aurora.wifidirect.WifiDirectPrivateDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectPeer
+import gr.hua.aurora.wifidirect.WifiDirectRolePreference
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
 import gr.hua.aurora.wifidirect.WifiDirectSocketDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectReceiveBridgeDiagnostics
@@ -15,6 +17,7 @@ import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics
 import gr.hua.aurora.wifidirect.wifiDirectFrameByteSummary
 import gr.hua.aurora.wifidirect.wifiDirectFrameCountSummary
 import gr.hua.aurora.wifidirect.wifiDirectFrameSizeSummary
+import gr.hua.aurora.wifidirect.WifiDirectFrameTransportState
 import gr.hua.aurora.wifidirect.wifiDirectFrameTransportStateSummary
 import gr.hua.aurora.wifidirect.wifiDirectConnectionRoleSummary
 import gr.hua.aurora.wifidirect.wifiDirectConnectionSummary
@@ -26,10 +29,13 @@ import gr.hua.aurora.wifidirect.wifiDirectMissingPermissionsSummary
 import gr.hua.aurora.wifidirect.wifiDirectPeerMatches
 import gr.hua.aurora.wifidirect.wifiDirectPermissionsSummary
 import gr.hua.aurora.wifidirect.wifiDirectSocketByteSummary
+import gr.hua.aurora.wifidirect.wifiDirectSocketCommandResultSummary
+import gr.hua.aurora.wifidirect.wifiDirectSocketCommandSummary
 import gr.hua.aurora.wifidirect.wifiDirectSocketConnectedSummary
 import gr.hua.aurora.wifidirect.wifiDirectSocketEndpointSummary
 import gr.hua.aurora.wifidirect.wifiDirectSocketMessageSummary
 import gr.hua.aurora.wifidirect.wifiDirectSocketRoleSummary
+import gr.hua.aurora.wifidirect.wifiDirectSocketFrameReadinessReason
 import gr.hua.aurora.wifidirect.wifiDirectSocketStateSummary
 import gr.hua.aurora.wifidirect.wifiDirectSupportSummary
 import gr.hua.aurora.wifidirect.wifiDirectTransportSummary
@@ -40,6 +46,7 @@ import gr.hua.aurora.wifidirect.wifiDirectGlobalDebugSendModeSummary
 import gr.hua.aurora.wifidirect.wifiDirectGlobalDebugSendStateSummary
 import gr.hua.aurora.wifidirect.wifiDirectSendBridgeStateSummary
 import gr.hua.aurora.wifidirect.wifiDirectSmokeTestStateSummary
+import gr.hua.aurora.wifidirect.wifiDirectEffectiveFrameTransportState
 
 private val nearbyWifiDirectManualTestSteps = listOf(
     "Enable Debug Mode.",
@@ -56,6 +63,19 @@ private val nearbyWifiDirectManualTestSteps = listOf(
     "Verify BLE still works if Wi-Fi Direct debug send fails.",
     "Verify disabling receive bridge prevents Wi-Fi Direct frames from changing chat UI.",
     "Verify no Delivered/ACK appears."
+)
+
+internal data class NearbyWifiDirectCompactSummary(
+    val status: String,
+    val discovery: String,
+    val group: String,
+    val role: String,
+    val socket: String,
+    val adapter: String,
+    val sendBridge: String,
+    val receiveBridge: String,
+    val globalDebugSend: String,
+    val nextStep: String
 )
 
 internal fun buildNearbyWifiDirectDebugSection(
@@ -130,6 +150,13 @@ internal fun buildNearbyWifiDirectDebugSection(
         }
         add(DebugInfoItem("Peers", runtimeStatus.peerCount.toString()))
         runtimeStatus.peers.takeIf { it.isNotEmpty() }?.let { peers ->
+            add(
+                DebugInfoItem(
+                    "Peer type",
+                    "Generic Wi-Fi Direct peers",
+                    preferFullWidth = true
+                )
+            )
             add(
                 DebugInfoItem(
                     "Devices",
@@ -210,6 +237,42 @@ internal fun buildNearbyWifiDirectSocketDebugSection(
                 wifiDirectSocketByteSummary(diagnostics)
             )
         )
+        add(
+            DebugInfoItem(
+                "Action",
+                wifiDirectSocketCommandSummary(diagnostics)
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Result",
+                wifiDirectSocketCommandResultSummary(diagnostics)
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Attempts",
+                "S${diagnostics.serverStartAttempts} C${diagnostics.clientConnectAttempts} X${diagnostics.closeAttempts}"
+            )
+        )
+        diagnostics.lastCommandHost?.takeIf { it.isNotBlank() }?.let { hostText ->
+            add(
+                DebugInfoItem(
+                    "Host",
+                    hostText,
+                    preferFullWidth = true
+                )
+            )
+        }
+        diagnostics.lastCommandError?.takeIf { it.isNotBlank() }?.let { errorText ->
+            add(
+                DebugInfoItem(
+                    "Action error",
+                    errorText,
+                    preferFullWidth = true
+                )
+            )
+        }
         diagnostics.lastError?.takeIf { it.isNotBlank() }?.let { errorText ->
             add(
                 DebugInfoItem(
@@ -238,11 +301,12 @@ internal fun buildNearbyWifiDirectFrameDebugSection(
     diagnostics: WifiDirectSocketDiagnostics
 ): DebugInfoSection {
     val frameDiagnostics = diagnostics.frameDiagnostics
+    val effectiveFrameState = wifiDirectEffectiveFrameTransportState(diagnostics)
     val items = buildList {
         add(
             DebugInfoItem(
                 "Transport",
-                wifiDirectFrameTransportStateSummary(frameDiagnostics.state)
+                wifiDirectFrameTransportStateSummary(effectiveFrameState)
             )
         )
         add(
@@ -263,6 +327,15 @@ internal fun buildNearbyWifiDirectFrameDebugSection(
                 wifiDirectFrameSizeSummary(frameDiagnostics.lastFrameSize)
             )
         )
+        wifiDirectSocketFrameReadinessReason(diagnostics)?.takeIf { it.isNotBlank() }?.let { reason ->
+            add(
+                DebugInfoItem(
+                    "Reason",
+                    reason,
+                    preferFullWidth = true
+                )
+            )
+        }
         frameDiagnostics.lastError?.takeIf { it.isNotBlank() }?.let { errorText ->
             add(
                 DebugInfoItem(
@@ -321,6 +394,15 @@ internal fun buildNearbyWifiDirectAdapterDebugSection(
                 wifiDirectFrameSizeSummary(diagnostics.lastFrameSize)
             )
         )
+        diagnostics.notReadyReason?.takeIf { it.isNotBlank() }?.let { reasonText ->
+            add(
+                DebugInfoItem(
+                    "Blocked",
+                    reasonText,
+                    preferFullWidth = true
+                )
+            )
+        }
         diagnostics.lastError?.takeIf { it.isNotBlank() }?.let { errorText ->
             add(
                 DebugInfoItem(
@@ -567,14 +649,61 @@ internal fun buildNearbyWifiDirectReceiveBridgeDebugSection(
         )
         add(
             DebugInfoItem(
-                "Failures",
-                diagnostics.bridgeFailures.toString()
+                "Transport",
+                diagnostics.transportFramesObserved.toString()
             )
         )
         add(
             DebugInfoItem(
+                "Duplicates",
+                diagnostics.duplicateFramesDropped.toString()
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Failures",
+                diagnostics.bridgeFailures.toString()
+            )
+        )
+        diagnostics.lastToggleAction?.takeIf { it.isNotBlank() }?.let { actionText ->
+            add(
+                DebugInfoItem(
+                    "Action",
+                    actionText,
+                    preferFullWidth = true
+                )
+            )
+        }
+        diagnostics.lastToggleResult?.takeIf { it.isNotBlank() }?.let { resultText ->
+            add(
+                DebugInfoItem(
+                    "Toggle",
+                    resultText
+                )
+            )
+        }
+        diagnostics.lastToggleBlockedReason?.takeIf { it.isNotBlank() }?.let { reasonText ->
+            add(
+                DebugInfoItem(
+                    "Blocked",
+                    reasonText,
+                    preferFullWidth = true
+                )
+            )
+        }
+        diagnostics.lastBridgeResult?.takeIf { it.isNotBlank() }?.let { resultText ->
+            add(
+                DebugInfoItem(
+                    "Last result",
+                    resultText,
+                    preferFullWidth = true
+                )
+            )
+        }
+        add(
+            DebugInfoItem(
                 "Last size",
-                wifiDirectFrameSizeSummary(diagnostics.lastBridgedFrameSize)
+                wifiDirectFrameSizeSummary(diagnostics.lastTransportFrameSize)
             )
         )
         diagnostics.lastBridgeError?.takeIf { it.isNotBlank() }?.let { errorText ->
@@ -624,6 +753,13 @@ internal fun buildNearbyWifiDirectDiscoveryDebugSection(
         )
         add(DebugInfoItem("Peers", runtimeStatus.peerCount.toString()))
         runtimeStatus.peers.takeIf { it.isNotEmpty() }?.let { peers ->
+            add(
+                DebugInfoItem(
+                    "Peer type",
+                    "Generic Wi-Fi Direct peers",
+                    preferFullWidth = true
+                )
+            )
             add(
                 DebugInfoItem(
                     "Devices",
@@ -700,9 +836,17 @@ internal fun buildNearbyWifiDirectSocketFrameDebugSection(
     adapterDiagnostics: WifiDirectTransportAdapterDiagnostics
 ): DebugInfoSection {
     val frameDiagnostics = diagnostics.frameDiagnostics
+    val effectiveFrameState = wifiDirectEffectiveFrameTransportState(diagnostics)
     val items = buildList {
         add(DebugInfoItem("Socket", wifiDirectSocketStateSummary(diagnostics.state)))
+        add(DebugInfoItem("Role", wifiDirectSocketRoleSummary(diagnostics.role)))
         add(DebugInfoItem("Connected", wifiDirectSocketConnectedSummary(diagnostics.isConnected)))
+        add(
+            DebugInfoItem(
+                "Read loop",
+                if (diagnostics.isReadLoopActive) "active" else "idle"
+            )
+        )
         add(DebugInfoItem("Endpoint", wifiDirectSocketEndpointSummary(diagnostics.endpoint)))
         add(
             DebugInfoItem(
@@ -712,8 +856,39 @@ internal fun buildNearbyWifiDirectSocketFrameDebugSection(
         )
         add(
             DebugInfoItem(
+                "Action",
+                wifiDirectSocketCommandSummary(diagnostics)
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Result",
+                wifiDirectSocketCommandResultSummary(diagnostics)
+            )
+        )
+        diagnostics.lastCommandHost?.takeIf { it.isNotBlank() }?.let { hostText ->
+            add(
+                DebugInfoItem(
+                    "Host",
+                    hostText,
+                    preferFullWidth = true
+                )
+            )
+        }
+        add(
+            DebugInfoItem(
                 "Frame",
-                wifiDirectFrameTransportStateSummary(frameDiagnostics.state)
+                wifiDirectFrameTransportStateSummary(effectiveFrameState)
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Write path",
+                if (diagnostics.isConnected && effectiveFrameState == WifiDirectFrameTransportState.READY) {
+                    "ready"
+                } else {
+                    "not ready"
+                }
             )
         )
         add(
@@ -722,6 +897,25 @@ internal fun buildNearbyWifiDirectSocketFrameDebugSection(
                 wifiDirectFrameByteSummary(frameDiagnostics)
             )
         )
+        add(
+            DebugInfoItem(
+                "Out size",
+                wifiDirectFrameSizeSummary(
+                    diagnostics.lastOutboundFrameSize ?: frameDiagnostics.lastSentFrameSize
+                )
+            )
+        )
+        add(
+            DebugInfoItem(
+                "In size",
+                wifiDirectFrameSizeSummary(
+                    diagnostics.lastInboundFrameSize ?: frameDiagnostics.lastReceivedFrameSize
+                )
+            )
+        )
+        wifiDirectSocketFrameReadinessReason(diagnostics)?.takeIf { it.isNotBlank() }?.let { reasonText ->
+            add(DebugInfoItem("Frame reason", reasonText, preferFullWidth = true))
+        }
         add(
             DebugInfoItem(
                 "Adapter",
@@ -734,6 +928,21 @@ internal fun buildNearbyWifiDirectSocketFrameDebugSection(
                 wifiDirectTransportAdapterByteSummary(adapterDiagnostics)
             )
         )
+        add(
+            DebugInfoItem(
+                "Adapter out",
+                wifiDirectFrameSizeSummary(adapterDiagnostics.lastSubmittedFrameSize)
+            )
+        )
+        add(
+            DebugInfoItem(
+                "Adapter in",
+                wifiDirectFrameSizeSummary(adapterDiagnostics.lastReceivedFrameSize)
+            )
+        )
+        adapterDiagnostics.notReadyReason?.takeIf { it.isNotBlank() }?.let { reasonText ->
+            add(DebugInfoItem("Adapter reason", reasonText, preferFullWidth = true))
+        }
         add(DebugInfoItem("Sent", wifiDirectSocketMessageSummary(diagnostics.lastSentMessage)))
         add(
             DebugInfoItem(
@@ -794,7 +1003,18 @@ internal fun buildNearbyWifiDirectBridgesDebugSection(
                 wifiDirectReceiveBridgeStateSummary(receiveBridgeDiagnostics)
             )
         )
+        receiveBridgeDiagnostics.lastToggleAction?.takeIf { it.isNotBlank() }?.let { actionText ->
+            add(DebugInfoItem("Receive action", actionText, preferFullWidth = true))
+        }
+        receiveBridgeDiagnostics.lastToggleResult?.takeIf { it.isNotBlank() }?.let { resultText ->
+            add(DebugInfoItem("Receive toggle", resultText))
+        }
+        receiveBridgeDiagnostics.lastToggleBlockedReason?.takeIf { it.isNotBlank() }?.let { reasonText ->
+            add(DebugInfoItem("Receive blocked", reasonText, preferFullWidth = true))
+        }
         add(DebugInfoItem("Bridged", receiveBridgeDiagnostics.framesBridged.toString()))
+        add(DebugInfoItem("Transport", receiveBridgeDiagnostics.transportFramesObserved.toString()))
+        add(DebugInfoItem("Dup", receiveBridgeDiagnostics.duplicateFramesDropped.toString()))
         add(DebugInfoItem("Recv fail", receiveBridgeDiagnostics.bridgeFailures.toString()))
         add(
             DebugInfoItem(
@@ -925,6 +1145,50 @@ internal fun buildNearbyWifiDirectManualChecklistSection(): DebugInfoSection {
     )
 }
 
+internal fun buildNearbyWifiDirectDetailsCard(
+    runtimeStatus: WifiDirectRuntimeStatus,
+    socketDiagnostics: WifiDirectSocketDiagnostics,
+    adapterDiagnostics: WifiDirectTransportAdapterDiagnostics,
+    sendBridgeDiagnostics: WifiDirectSendBridgeDiagnostics,
+    globalSendDiagnostics: WifiDirectGlobalDebugSendDiagnostics,
+    smokeTestDiagnostics: WifiDirectSmokeTestDiagnostics,
+    receiveBridgeDiagnostics: WifiDirectReceiveBridgeDiagnostics
+): DebugInfoCardModel {
+    return DebugInfoCardModel(
+        title = "Wi-Fi Direct details",
+        sections = listOf(
+            buildNearbyWifiDirectDiscoveryDebugSection(runtimeStatus),
+            buildNearbyWifiDirectConnectionDebugSection(runtimeStatus),
+            buildNearbyWifiDirectSocketFrameDebugSection(
+                diagnostics = socketDiagnostics,
+                adapterDiagnostics = adapterDiagnostics
+            ),
+            buildNearbyWifiDirectBridgesDebugSection(
+                sendBridgeDiagnostics = sendBridgeDiagnostics,
+                smokeTestDiagnostics = smokeTestDiagnostics,
+                receiveBridgeDiagnostics = receiveBridgeDiagnostics,
+                readiness = nearbyWifiDirectGlobalDebugReadiness(
+                    runtimeStatus = runtimeStatus,
+                    socketDiagnostics = socketDiagnostics,
+                    adapterDiagnostics = adapterDiagnostics,
+                    sendBridgeDiagnostics = sendBridgeDiagnostics,
+                    globalSendDiagnostics = globalSendDiagnostics,
+                    receiveBridgeDiagnostics = receiveBridgeDiagnostics
+                )
+            ),
+            buildNearbyWifiDirectGlobalWorkflowDebugSection(
+                runtimeStatus = runtimeStatus,
+                socketDiagnostics = socketDiagnostics,
+                adapterDiagnostics = adapterDiagnostics,
+                sendBridgeDiagnostics = sendBridgeDiagnostics,
+                globalSendDiagnostics = globalSendDiagnostics,
+                receiveBridgeDiagnostics = receiveBridgeDiagnostics
+            ),
+            buildNearbyWifiDirectManualChecklistSection()
+        )
+    )
+}
+
 internal fun nearbyWifiDirectPeerListValue(
     peers: List<WifiDirectPeer>
 ): String {
@@ -947,4 +1211,167 @@ internal fun nearbyWifiDirectEnabledValue(
     state: WifiDirectEnabledState
 ): String {
     return wifiDirectEnabledSummary(state)
+}
+
+internal fun nearbyWifiDirectCompactSummary(
+    runtimeStatus: WifiDirectRuntimeStatus,
+    socketDiagnostics: WifiDirectSocketDiagnostics,
+    adapterDiagnostics: WifiDirectTransportAdapterDiagnostics,
+    sendBridgeDiagnostics: WifiDirectSendBridgeDiagnostics,
+    globalSendDiagnostics: WifiDirectGlobalDebugSendDiagnostics,
+    privateDebugSendDiagnostics: WifiDirectPrivateDebugSendDiagnostics,
+    receiveBridgeDiagnostics: WifiDirectReceiveBridgeDiagnostics
+): NearbyWifiDirectCompactSummary {
+    val manualReadiness = nearbyWifiDirectManualTestReadiness(
+        runtimeStatus = runtimeStatus,
+        socketDiagnostics = socketDiagnostics,
+        adapterDiagnostics = adapterDiagnostics,
+        sendBridgeDiagnostics = sendBridgeDiagnostics,
+        globalSendDiagnostics = globalSendDiagnostics,
+        privateDebugSendDiagnostics = privateDebugSendDiagnostics,
+        receiveBridgeDiagnostics = receiveBridgeDiagnostics
+    )
+    val nextStep = nearbyWifiDirectManualNextStep(
+        runtimeStatus = runtimeStatus,
+        socketDiagnostics = socketDiagnostics,
+        adapterDiagnostics = adapterDiagnostics,
+        sendBridgeDiagnostics = sendBridgeDiagnostics,
+        globalSendDiagnostics = globalSendDiagnostics,
+        privateDebugSendDiagnostics = privateDebugSendDiagnostics,
+        receiveBridgeDiagnostics = receiveBridgeDiagnostics
+    )
+    val socketReady = wifiDirectEffectiveFrameTransportState(socketDiagnostics) ==
+        WifiDirectFrameTransportState.READY
+
+    return NearbyWifiDirectCompactSummary(
+        status = if (manualReadiness.overallStatus.startsWith("Ready")) "Ready" else "Not ready",
+        discovery = manualReadiness.discoveryStatus,
+        group = manualReadiness.groupStatus,
+        role = wifiDirectConnectionRoleSummary(runtimeStatus.connectionStatus.role),
+        socket = if (socketReady) "ready" else "not ready",
+        adapter = if (adapterDiagnostics.state == gr.hua.aurora.wifidirect.WifiDirectTransportAdapterState.READY) {
+            "ready"
+        } else {
+            "not ready"
+        },
+        sendBridge = manualReadiness.sendBridgeStatus,
+        receiveBridge = manualReadiness.receiveBridgeStatus,
+        globalDebugSend = manualReadiness.globalDebugSendStatus,
+        nextStep = nextStep.title
+    )
+}
+
+internal fun nearbyAdvancedSectionToggleLabel(
+    title: String,
+    expanded: Boolean
+): String {
+    require(title.isNotBlank()) {
+        "Nearby advanced section title must not be blank."
+    }
+
+    return if (expanded) {
+        "Hide $title"
+    } else {
+        "Show $title"
+    }
+}
+
+internal fun buildNearbyWifiDirectDetailsAdvancedCard(
+    runtimeStatus: WifiDirectRuntimeStatus
+): DebugInfoCardModel {
+    return DebugInfoCardModel(
+        title = "Wi-Fi Direct details",
+        sections = listOf(
+            buildNearbyWifiDirectDiscoveryDebugSection(runtimeStatus),
+            buildNearbyWifiDirectConnectionDebugSection(runtimeStatus)
+        )
+    )
+}
+
+internal fun buildNearbyWifiDirectSocketDiagnosticsCard(
+    socketDiagnostics: WifiDirectSocketDiagnostics,
+    adapterDiagnostics: WifiDirectTransportAdapterDiagnostics
+): DebugInfoCardModel {
+    return DebugInfoCardModel(
+        title = "Socket diagnostics",
+        sections = listOf(
+            buildNearbyWifiDirectSocketDebugSection(socketDiagnostics),
+            buildNearbyWifiDirectFrameDebugSection(socketDiagnostics),
+            buildNearbyWifiDirectAdapterDebugSection(adapterDiagnostics)
+        )
+    )
+}
+
+internal fun buildNearbyWifiDirectBridgeDiagnosticsCard(
+    sendBridgeDiagnostics: WifiDirectSendBridgeDiagnostics,
+    smokeTestDiagnostics: WifiDirectSmokeTestDiagnostics,
+    receiveBridgeDiagnostics: WifiDirectReceiveBridgeDiagnostics
+): DebugInfoCardModel {
+    return DebugInfoCardModel(
+        title = "Bridge diagnostics",
+        sections = listOf(
+            buildNearbyWifiDirectSendBridgeDebugSection(sendBridgeDiagnostics),
+            buildNearbyWifiDirectReceiveBridgeDebugSection(receiveBridgeDiagnostics),
+            buildNearbyWifiDirectSmokeTestDebugSection(smokeTestDiagnostics)
+        )
+    )
+}
+
+internal fun buildNearbyWifiDirectGlobalDiagnosticsCard(
+    diagnostics: WifiDirectGlobalDebugSendDiagnostics
+): DebugInfoCardModel {
+    return DebugInfoCardModel(
+        title = "Global debug diagnostics",
+        sections = listOf(
+            buildNearbyWifiDirectGlobalSendDebugSection(diagnostics)
+        )
+    )
+}
+
+internal fun buildNearbyWifiDirectRolePreferenceHelpCard(
+    requestedPreference: WifiDirectRolePreference?,
+    runtimeStatus: WifiDirectRuntimeStatus
+): DebugInfoCardModel {
+    val items = buildList {
+        nearbyWifiDirectRolePreferenceHelpLines().forEachIndexed { index, helpText ->
+            add(
+                DebugInfoItem(
+                    label = "Help ${index + 1}",
+                    value = helpText,
+                    preferFullWidth = true
+                )
+            )
+        }
+        nearbyWifiDirectRolePreferenceOutcomeLines(
+            requestedPreference = requestedPreference,
+            runtimeStatus = runtimeStatus
+        ).forEachIndexed { index, outcomeText ->
+            add(
+                DebugInfoItem(
+                    label = "Outcome ${index + 1}",
+                    value = outcomeText,
+                    preferFullWidth = true
+                )
+            )
+        }
+    }
+
+    return DebugInfoCardModel(
+        title = "Role preference help",
+        sections = listOf(
+            DebugInfoSection(
+                title = "Role preference",
+                items = items
+            )
+        )
+    )
+}
+
+internal fun buildNearbyWifiDirectManualGuideCard(): DebugInfoCardModel {
+    return DebugInfoCardModel(
+        title = "Manual test guide",
+        sections = listOf(
+            buildNearbyWifiDirectManualChecklistSection()
+        )
+    )
 }

@@ -1,6 +1,7 @@
 package gr.hua.aurora.ui.screens
 
 import android.content.Intent
+import android.net.Uri
 import android.provider.Settings
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -65,6 +66,8 @@ import gr.hua.aurora.ui.components.DebugInfoSection
 import gr.hua.aurora.ui.components.buildAuroraAvailabilityUiState
 import gr.hua.aurora.wifidirect.RememberedWifiDirectSocketState
 import gr.hua.aurora.wifidirect.WifiDirectPeer
+import gr.hua.aurora.wifidirect.WifiDirectRolePreference
+import gr.hua.aurora.wifidirect.WifiDirectPermissionStatusReader
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
 import kotlinx.coroutines.launch
 
@@ -129,9 +132,10 @@ internal fun NearbyDevicesScreen(
     transportSenderSourceLabel: String,
     wifiDirectRuntimeStatus: WifiDirectRuntimeStatus,
     wifiDirectSocketState: RememberedWifiDirectSocketState,
+    onRefreshWifiDirectStatus: () -> Unit,
     onStartWifiDirectDiscovery: () -> Unit,
     onStopWifiDirectDiscovery: () -> Unit,
-    onConnectWifiDirectPeer: (WifiDirectPeer) -> Unit,
+    onConnectWifiDirectPeer: (WifiDirectPeer, WifiDirectRolePreference) -> Unit,
     onDisconnectWifiDirectPeer: () -> Unit,
     identityHandlerStatus: String,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
@@ -151,6 +155,7 @@ internal fun NearbyDevicesScreen(
     onResetLocalData: () -> Unit,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
     val bleSessionState = rememberNearbyBleSessionState(
         desiredAvailability = desiredAvailability,
         runtimeBleScanStatus = bleScanStatus,
@@ -180,17 +185,62 @@ internal fun NearbyDevicesScreen(
         advertiseStatus = bleAdvertiseStatus,
         gattServerStatus = bleGattServerStatus,
         scanStatus = bleScanStatus,
-        wifiDirectRuntimeStatus = wifiDirectRuntimeStatus,
-        wifiDirectSocketDiagnostics = wifiDirectSocketState.diagnostics,
-        wifiDirectAdapterDiagnostics = wifiDirectSocketState.adapterDiagnostics,
-        wifiDirectSendBridgeDiagnostics = wifiDirectSocketState.sendBridgeDiagnostics,
-        wifiDirectGlobalDebugSendDiagnostics = wifiDirectSocketState.globalDebugSendDiagnostics,
-        wifiDirectPrivateDebugSendDiagnostics = wifiDirectSocketState.privateDebugSendDiagnostics,
-        wifiDirectSmokeTestDiagnostics = wifiDirectSocketState.smokeTestDiagnostics,
-        wifiDirectReceiveBridgeDiagnostics = wifiDirectSocketState.receiveBridgeDiagnostics,
         identityHandlerStatus = identityHandlerStatus,
         peerSessionDiagnostics = peerSessionDiagnostics
     )
+    val wifiDirectPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        onRefreshWifiDirectStatus()
+    }
+    val requestWifiDirectPermissions: () -> Unit = remember(
+        context,
+        onRefreshWifiDirectStatus
+    ) {
+        {
+            val currentStatus = WifiDirectPermissionStatusReader.read(context)
+            if (currentStatus.missingPermissions.isNotEmpty()) {
+                wifiDirectPermissionLauncher.launch(
+                    currentStatus.missingPermissions.toTypedArray()
+                )
+            } else {
+                onRefreshWifiDirectStatus()
+            }
+        }
+    }
+    val openWifiDirectPermissionSettings: () -> Unit = remember(context) {
+        {
+            context.startActivity(
+                Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.fromParts("package", context.packageName, null)
+                ).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            )
+        }
+    }
+    val openWifiDirectSettings: () -> Unit = remember(context) {
+        {
+            val primaryIntent = Intent(Settings.ACTION_WIFI_SETTINGS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            val fallbackIntent = Intent(Settings.ACTION_WIRELESS_SETTINGS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            runCatching {
+                context.startActivity(primaryIntent)
+            }.recoverCatching {
+                context.startActivity(fallbackIntent)
+            }.onFailure { error ->
+                Log.w(
+                    nearbyDevicesLogTag,
+                    "Failed to open Wi-Fi settings",
+                    error
+                )
+            }
+        }
+    }
     val handleResetLocalData = remember(wifiDirectSocketState, onResetLocalData) {
         {
             wifiDirectSocketState.disableGlobalDebugSend()
@@ -319,15 +369,20 @@ internal fun NearbyDevicesScreen(
                     Column(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        DebugInfoCard(card = card)
                         NearbyWifiDirectDebugControls(
                             runtimeStatus = wifiDirectRuntimeStatus,
                             socketDiagnostics = wifiDirectSocketState.diagnostics,
                             adapterDiagnostics = wifiDirectSocketState.adapterDiagnostics,
                             sendBridgeDiagnostics = wifiDirectSocketState.sendBridgeDiagnostics,
                             globalSendDiagnostics = wifiDirectSocketState.globalDebugSendDiagnostics,
+                            privateDebugSendDiagnostics =
+                            wifiDirectSocketState.privateDebugSendDiagnostics,
                             smokeTestDiagnostics = wifiDirectSocketState.smokeTestDiagnostics,
                             receiveBridgeDiagnostics = wifiDirectSocketState.receiveBridgeDiagnostics,
+                            onRequestPermissions = requestWifiDirectPermissions,
+                            onOpenPermissionSettings = openWifiDirectPermissionSettings,
+                            onOpenWifiSettings = openWifiDirectSettings,
+                            onRefreshStatus = onRefreshWifiDirectStatus,
                             onStartDiscovery = onStartWifiDirectDiscovery,
                             onStopDiscovery = onStopWifiDirectDiscovery,
                             onConnectToPeer = onConnectWifiDirectPeer,
@@ -344,9 +399,12 @@ internal fun NearbyDevicesScreen(
                             wifiDirectSocketState.setGlobalDebugSendEnabled,
                             onSetSendBridgeEnabled = wifiDirectSocketState.setSendBridgeEnabled,
                             onSetReceiveBridgeEnabled = wifiDirectSocketState.setReceiveBridgeEnabled,
+                            onReportReceiveBridgeToggleBlocked =
+                            wifiDirectSocketState.reportReceiveBridgeToggleBlocked,
                             onResetDiagnostics = wifiDirectSocketState.resetDiagnostics,
                             onCloseSocket = wifiDirectSocketState.closeSocket
                         )
+                        DebugInfoCard(card = card)
                     }
                 }
             }
@@ -1404,20 +1462,6 @@ internal fun buildNearbyDebugCard(
     advertiseStatus: BleAdvertiseStatus,
     gattServerStatus: BleGattServerStatus,
     scanStatus: BleScanStatus,
-    wifiDirectRuntimeStatus: WifiDirectRuntimeStatus,
-    wifiDirectSocketDiagnostics: gr.hua.aurora.wifidirect.WifiDirectSocketDiagnostics,
-    wifiDirectAdapterDiagnostics: gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics =
-        gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics(),
-    wifiDirectSendBridgeDiagnostics: gr.hua.aurora.wifidirect.WifiDirectSendBridgeDiagnostics =
-        gr.hua.aurora.wifidirect.WifiDirectSendBridgeDiagnostics(),
-    wifiDirectGlobalDebugSendDiagnostics: gr.hua.aurora.wifidirect.WifiDirectGlobalDebugSendDiagnostics =
-        gr.hua.aurora.wifidirect.WifiDirectGlobalDebugSendDiagnostics(),
-    wifiDirectPrivateDebugSendDiagnostics: gr.hua.aurora.wifidirect.WifiDirectPrivateDebugSendDiagnostics =
-        gr.hua.aurora.wifidirect.WifiDirectPrivateDebugSendDiagnostics(),
-    wifiDirectSmokeTestDiagnostics: gr.hua.aurora.wifidirect.WifiDirectSmokeTestDiagnostics =
-        gr.hua.aurora.wifidirect.WifiDirectSmokeTestDiagnostics(),
-    wifiDirectReceiveBridgeDiagnostics: gr.hua.aurora.wifidirect.WifiDirectReceiveBridgeDiagnostics =
-        gr.hua.aurora.wifidirect.WifiDirectReceiveBridgeDiagnostics(),
     identityHandlerStatus: String,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics
 ): DebugInfoCardModel? {
@@ -1433,49 +1477,6 @@ internal fun buildNearbyDebugCard(
                 gattServerStatus = gattServerStatus,
                 scanStatus = scanStatus
             ),
-            buildNearbyWifiDirectDiscoveryDebugSection(
-                runtimeStatus = wifiDirectRuntimeStatus
-            ),
-            buildNearbyWifiDirectConnectionDebugSection(
-                runtimeStatus = wifiDirectRuntimeStatus
-            ),
-            buildNearbyWifiDirectSocketFrameDebugSection(
-                diagnostics = wifiDirectSocketDiagnostics,
-                adapterDiagnostics = wifiDirectAdapterDiagnostics
-            ),
-            buildNearbyWifiDirectBridgesDebugSection(
-                sendBridgeDiagnostics = wifiDirectSendBridgeDiagnostics,
-                smokeTestDiagnostics = wifiDirectSmokeTestDiagnostics,
-                receiveBridgeDiagnostics = wifiDirectReceiveBridgeDiagnostics,
-                readiness = nearbyWifiDirectGlobalDebugReadiness(
-                    runtimeStatus = wifiDirectRuntimeStatus,
-                    socketDiagnostics = wifiDirectSocketDiagnostics,
-                    adapterDiagnostics = wifiDirectAdapterDiagnostics,
-                    sendBridgeDiagnostics = wifiDirectSendBridgeDiagnostics,
-                    globalSendDiagnostics = wifiDirectGlobalDebugSendDiagnostics,
-                    receiveBridgeDiagnostics = wifiDirectReceiveBridgeDiagnostics
-                )
-            ),
-            buildNearbyWifiDirectGlobalWorkflowDebugSection(
-                runtimeStatus = wifiDirectRuntimeStatus,
-                socketDiagnostics = wifiDirectSocketDiagnostics,
-                adapterDiagnostics = wifiDirectAdapterDiagnostics,
-                sendBridgeDiagnostics = wifiDirectSendBridgeDiagnostics,
-                globalSendDiagnostics = wifiDirectGlobalDebugSendDiagnostics,
-                receiveBridgeDiagnostics = wifiDirectReceiveBridgeDiagnostics
-            ),
-            buildNearbyWifiDirectManualReadinessSection(
-                readiness = nearbyWifiDirectManualTestReadiness(
-                    runtimeStatus = wifiDirectRuntimeStatus,
-                    socketDiagnostics = wifiDirectSocketDiagnostics,
-                    adapterDiagnostics = wifiDirectAdapterDiagnostics,
-                    sendBridgeDiagnostics = wifiDirectSendBridgeDiagnostics,
-                    globalSendDiagnostics = wifiDirectGlobalDebugSendDiagnostics,
-                    privateDebugSendDiagnostics = wifiDirectPrivateDebugSendDiagnostics,
-                    receiveBridgeDiagnostics = wifiDirectReceiveBridgeDiagnostics
-                )
-            ),
-            buildNearbyWifiDirectManualChecklistSection(),
             buildNearbyIdentityDebugSection(
                 identityHandlerStatus = identityHandlerStatus,
                 peerSessionDiagnostics = peerSessionDiagnostics

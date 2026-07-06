@@ -7,6 +7,9 @@ import android.net.wifi.p2p.WifiP2pGroup
 import android.net.wifi.p2p.WifiP2pInfo
 import android.net.wifi.p2p.WifiP2pManager
 import android.os.Looper
+import android.util.Log
+
+private const val wifiDirectPlatformClientLogTag = "WifiDirectPlatformClient"
 
 internal interface WifiDirectPlatformClient {
     fun discoverPeers(
@@ -26,6 +29,7 @@ internal interface WifiDirectPlatformClient {
 
     fun connectToPeer(
         peer: WifiDirectPeer,
+        rolePreference: WifiDirectRolePreference = WifiDirectRolePreference.AUTOMATIC,
         onSuccess: () -> Unit,
         onFailure: (Int) -> Unit
     )
@@ -110,11 +114,24 @@ internal class AndroidWifiDirectPlatformClient private constructor(
 
     override fun connectToPeer(
         peer: WifiDirectPeer,
+        rolePreference: WifiDirectRolePreference,
         onSuccess: () -> Unit,
         onFailure: (Int) -> Unit
     ) {
         val deviceAddress = peer.deviceAddress?.trim()?.takeIf { it.isNotEmpty() }
+        val requestedGroupOwnerIntent = wifiDirectGroupOwnerIntentOrNull(rolePreference)
+        safeWifiDirectPlatformClientLogDebug(
+            "connectToPeer invoked: ${wifiDirectConnectRequestDebugText(peer, rolePreference)} " +
+                if (requestedGroupOwnerIntent == null) {
+                    "groupOwnerIntent left default"
+                } else {
+                    "groupOwnerIntent set=$requestedGroupOwnerIntent"
+                }
+        )
         if (deviceAddress == null) {
+            safeWifiDirectPlatformClientLogDebug(
+                "connectToPeer blocked: ${wifiDirectConnectRequestDebugText(peer, rolePreference)} reason=missing-device-address"
+            )
             onFailure(WifiP2pManager.ERROR)
             return
         }
@@ -124,6 +141,9 @@ internal class AndroidWifiDirectPlatformClient private constructor(
                 channel,
                 WifiP2pConfig().apply {
                     this.deviceAddress = deviceAddress
+                    requestedGroupOwnerIntent?.let { groupOwnerIntent ->
+                        this.groupOwnerIntent = groupOwnerIntent
+                    }
                 },
                 object : WifiP2pManager.ActionListener {
                     override fun onSuccess() {
@@ -193,10 +213,13 @@ internal class AndroidWifiDirectPlatformClient private constructor(
                 val baseSnapshot = wifiDirectConnectionSnapshot(info)
                 runCatching {
                     manager.requestGroupInfo(channel) { group: WifiP2pGroup? ->
+                        val fallbackOwnerHost = wifiDirectSocketConnectHostOrNull(
+                            wifiDirectGroupOwnerAddress(group)
+                        )
                         onSuccess(
                             baseSnapshot.copy(
-                                groupOwnerAddress = wifiDirectGroupOwnerAddress(group)
-                                    ?: baseSnapshot.groupOwnerAddress
+                                groupOwnerAddress = baseSnapshot.groupOwnerAddress
+                                    ?: fallbackOwnerHost
                             )
                         )
                     }
@@ -222,5 +245,40 @@ internal class AndroidWifiDirectPlatformClient private constructor(
                 channel = channel
             )
         }
+    }
+}
+
+internal fun wifiDirectGroupOwnerIntentOrNull(
+    preference: WifiDirectRolePreference
+): Int? {
+    return when (preference) {
+        WifiDirectRolePreference.AUTOMATIC -> null
+        WifiDirectRolePreference.PREFER_GROUP_OWNER -> 15
+        WifiDirectRolePreference.PREFER_CLIENT -> 0
+    }
+}
+
+internal fun wifiDirectGroupOwnerIntentDebugLabel(
+    preference: WifiDirectRolePreference
+): String {
+    return wifiDirectGroupOwnerIntentOrNull(preference)?.toString() ?: "default"
+}
+
+internal fun wifiDirectConnectRequestDebugText(
+    peer: WifiDirectPeer,
+    rolePreference: WifiDirectRolePreference
+): String {
+    val peerName = peer.deviceName?.trim()?.takeIf { it.isNotEmpty() } ?: "unknown"
+    val peerAddress = peer.deviceAddress?.trim()?.takeIf { it.isNotEmpty() } ?: "unknown"
+    return "peerName=$peerName peerAddress=$peerAddress " +
+        "preference=${rolePreference.name.lowercase()} " +
+        "groupOwnerIntent=${wifiDirectGroupOwnerIntentDebugLabel(rolePreference)}"
+}
+
+private fun safeWifiDirectPlatformClientLogDebug(
+    message: String
+) {
+    runCatching {
+        Log.d(wifiDirectPlatformClientLogTag, message)
     }
 }
