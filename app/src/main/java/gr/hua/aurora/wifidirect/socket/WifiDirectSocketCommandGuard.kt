@@ -2,6 +2,7 @@ package gr.hua.aurora.wifidirect.socket
 
 import android.util.Log
 import gr.hua.aurora.wifidirect.*
+import gr.hua.aurora.wifidirect.runtime.*
 
 private const val wifiDirectSocketCommandGuardLogTag = "WifiDirectSocketCommandGuard"
 

@@ -1,4 +1,4 @@
-package gr.hua.aurora.wifidirect
+package gr.hua.aurora.wifidirect.runtime
 
 import gr.hua.aurora.wifidirect.controller.WifiDirectPermissionStatus
 

@@ -2,6 +2,7 @@ package gr.hua.aurora.wifidirect.controller
 
 import android.net.wifi.p2p.WifiP2pManager
 import gr.hua.aurora.wifidirect.*
+import gr.hua.aurora.wifidirect.runtime.*
 
 private const val wifiDirectStatusUnavailableMessage = "Wi-Fi Direct status unavailable"
 

@@ -2,6 +2,7 @@ package gr.hua.aurora.wifidirect.socket
 
 import gr.hua.aurora.wifidirect.*
 import gr.hua.aurora.wifidirect.controller.WifiDirectPermissionStatus
+import gr.hua.aurora.wifidirect.runtime.*
 
 import org.junit.Assert.assertEquals
 import org.junit.Test

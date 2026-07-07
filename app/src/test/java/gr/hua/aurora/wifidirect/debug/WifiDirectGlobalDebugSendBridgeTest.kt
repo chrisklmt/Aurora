@@ -9,6 +9,7 @@ import gr.hua.aurora.protocol.MessageFrameType
 import gr.hua.aurora.protocol.NoOpIncomingSessionMaterialProvider
 import gr.hua.aurora.wifidirect.*
 import gr.hua.aurora.wifidirect.frame.*
+import gr.hua.aurora.wifidirect.runtime.*
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

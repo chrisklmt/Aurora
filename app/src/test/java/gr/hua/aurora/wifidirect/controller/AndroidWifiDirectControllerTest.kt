@@ -2,6 +2,7 @@ package gr.hua.aurora.wifidirect.controller
 
 import android.net.wifi.p2p.WifiP2pManager
 import gr.hua.aurora.wifidirect.*
+import gr.hua.aurora.wifidirect.runtime.*
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue

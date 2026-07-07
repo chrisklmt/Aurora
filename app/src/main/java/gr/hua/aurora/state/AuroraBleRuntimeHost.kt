@@ -89,8 +89,10 @@ import gr.hua.aurora.state.IncomingMessageIngestionResult.Duplicate
 import gr.hua.aurora.state.IncomingMessageIngestionResult.UnsupportedThread
 import gr.hua.aurora.state.IncomingMessageIngestionResult.UnsupportedType
 import gr.hua.aurora.ui.components.buildAuroraAvailabilityUiState
-import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
-import gr.hua.aurora.wifidirect.rememberWifiDirectRuntimeStatusState
+import gr.hua.aurora.wifidirect.runtime.RememberedWifiDirectRuntimeStatusState
+import gr.hua.aurora.wifidirect.runtime.WifiDirectRolePreference
+import gr.hua.aurora.wifidirect.runtime.WifiDirectRuntimeStatus
+import gr.hua.aurora.wifidirect.runtime.rememberWifiDirectRuntimeStatusState
 import java.security.PrivateKey
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -116,7 +118,7 @@ data class AuroraBleRuntimeState(
     val stopWifiDirectDiscovery: () -> Unit,
     val connectToWifiDirectPeer: (
         gr.hua.aurora.wifidirect.WifiDirectPeer,
-        gr.hua.aurora.wifidirect.WifiDirectRolePreference
+        WifiDirectRolePreference
     ) -> Unit,
     val disconnectWifiDirectPeer: () -> Unit,
     val receiveWifiDirectDebugTransportFrame: (BleGattTransportFrame) -> BleTransportReceiveResult,

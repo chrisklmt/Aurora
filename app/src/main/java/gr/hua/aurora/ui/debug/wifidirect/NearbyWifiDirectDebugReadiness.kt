@@ -1,8 +1,5 @@
 package gr.hua.aurora.ui.debug.wifidirect
 
-import gr.hua.aurora.wifidirect.WifiDirectConnectionState
-import gr.hua.aurora.wifidirect.WifiDirectConnectionRole
-import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
 import gr.hua.aurora.wifidirect.controller.WifiDirectEnabledState
 import gr.hua.aurora.wifidirect.controller.wifiDirectDiscoveryBlockedReason
 import gr.hua.aurora.wifidirect.debug.WifiDirectGlobalDebugSendDiagnostics
@@ -15,6 +12,11 @@ import gr.hua.aurora.wifidirect.debug.wifiDirectSendBridgeStateSummary
 import gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterDiagnostics
 import gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterState
 import gr.hua.aurora.wifidirect.frame.wifiDirectTransportAdapterStateSummary
+import gr.hua.aurora.wifidirect.runtime.WifiDirectConnectionRole
+import gr.hua.aurora.wifidirect.runtime.WifiDirectConnectionState
+import gr.hua.aurora.wifidirect.runtime.WifiDirectDiscoveryState
+import gr.hua.aurora.wifidirect.runtime.WifiDirectGroupFormedState
+import gr.hua.aurora.wifidirect.runtime.WifiDirectRuntimeStatus
 import gr.hua.aurora.wifidirect.socket.WifiDirectSocketDiagnostics
 import gr.hua.aurora.wifidirect.socket.WifiDirectSocketState
 import gr.hua.aurora.wifidirect.socket.wifiDirectSocketConnectHostOrNull
@@ -148,7 +150,7 @@ internal fun nearbyWifiDirectGlobalDebugReadiness(
     )
     val discoveryStatus = when {
         wifiDirectDiscoveryBlockedReason(runtimeStatus.permissionStatus) != null -> "blocked"
-        runtimeStatus.discoveryState == gr.hua.aurora.wifidirect.WifiDirectDiscoveryState.ACTIVE -> {
+        runtimeStatus.discoveryState == WifiDirectDiscoveryState.ACTIVE -> {
             "active"
         }
         runtimeStatus.peerCount > 0 -> "peers visible"
@@ -156,7 +158,7 @@ internal fun nearbyWifiDirectGlobalDebugReadiness(
     }
     val connectionReady =
         runtimeStatus.connectionStatus.state == WifiDirectConnectionState.CONNECTED &&
-            runtimeStatus.connectionStatus.groupFormed == gr.hua.aurora.wifidirect.WifiDirectGroupFormedState.YES
+            runtimeStatus.connectionStatus.groupFormed == WifiDirectGroupFormedState.YES
     val socketFrameReady = socketControlsState.canSendFrame
     val adapterReady = adapterDiagnostics.state == WifiDirectTransportAdapterState.READY
     val sendBridgeEnabled = sendBridgeDiagnostics.enabled
@@ -236,7 +238,7 @@ internal fun nearbyWifiDirectManualTestReadiness(
     val groupConnected =
         runtimeStatus.connectionStatus.state == WifiDirectConnectionState.CONNECTED &&
             runtimeStatus.connectionStatus.groupFormed ==
-            gr.hua.aurora.wifidirect.WifiDirectGroupFormedState.YES
+            WifiDirectGroupFormedState.YES
     val socketFrameReady = socketControlsState.canSendFrame
     val adapterReady = adapterDiagnostics.state == WifiDirectTransportAdapterState.READY
     val sendBridgeEnabled = sendBridgeDiagnostics.enabled
@@ -301,10 +303,10 @@ internal fun nearbyWifiDirectManualNextStep(
     val groupConnected =
         runtimeStatus.connectionStatus.state == WifiDirectConnectionState.CONNECTED &&
             runtimeStatus.connectionStatus.groupFormed ==
-            gr.hua.aurora.wifidirect.WifiDirectGroupFormedState.YES
+            WifiDirectGroupFormedState.YES
     if (
         !groupConnected &&
-        runtimeStatus.discoveryState != gr.hua.aurora.wifidirect.WifiDirectDiscoveryState.ACTIVE
+        runtimeStatus.discoveryState != WifiDirectDiscoveryState.ACTIVE
     ) {
         return NearbyWifiDirectManualNextStep(
             title = if (runtimeStatus.peerCount > 0) {

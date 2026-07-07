@@ -16,23 +16,24 @@ import gr.hua.aurora.ui.debug.wifidirect.*
 import gr.hua.aurora.ui.components.DebugInfoCardModel
 import gr.hua.aurora.ui.components.DebugInfoItem
 import gr.hua.aurora.ui.components.DebugInfoSection
-import gr.hua.aurora.wifidirect.WifiDirectDiscoveryState
-import gr.hua.aurora.wifidirect.WifiDirectConnectionRole
-import gr.hua.aurora.wifidirect.WifiDirectConnectionState
-import gr.hua.aurora.wifidirect.WifiDirectConnectionStatus
-import gr.hua.aurora.wifidirect.WifiDirectGroupFormedState
 import gr.hua.aurora.wifidirect.WifiDirectPeer
-import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
-import gr.hua.aurora.wifidirect.WifiDirectRolePreference
 import gr.hua.aurora.wifidirect.controller.WifiDirectPermissionStatus
 import gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterDiagnostics
 import gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterState
-import gr.hua.aurora.wifidirect.WifiDirectTransportState
 import gr.hua.aurora.wifidirect.debug.WifiDirectGlobalDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.debug.WifiDirectPrivateDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.debug.WifiDirectReceiveBridgeDiagnostics
 import gr.hua.aurora.wifidirect.debug.WifiDirectSendBridgeDiagnostics
 import gr.hua.aurora.wifidirect.debug.WifiDirectSmokeTestDiagnostics
+import gr.hua.aurora.wifidirect.runtime.WifiDirectConnectionRole
+import gr.hua.aurora.wifidirect.runtime.WifiDirectConnectionState
+import gr.hua.aurora.wifidirect.runtime.WifiDirectConnectionStatus
+import gr.hua.aurora.wifidirect.runtime.WifiDirectDiscoveryState
+import gr.hua.aurora.wifidirect.runtime.WifiDirectGroupFormedState
+import gr.hua.aurora.wifidirect.runtime.WifiDirectRolePreference
+import gr.hua.aurora.wifidirect.runtime.WifiDirectRuntimeStatus
+import gr.hua.aurora.wifidirect.runtime.WifiDirectTransportState
+import gr.hua.aurora.wifidirect.runtime.wifiDirectRolePreferenceSummary
 import gr.hua.aurora.wifidirect.socket.WifiDirectSocketCommand
 import gr.hua.aurora.wifidirect.socket.WifiDirectSocketCommandResult
 import gr.hua.aurora.wifidirect.socket.WifiDirectSocketDiagnostics
@@ -1756,7 +1757,7 @@ class NearbyDevicesScreenTest {
             ),
             nearbyWifiDirectRolePreferenceHelpLines()
         )
-        assertEquals("Automatic", gr.hua.aurora.wifidirect.wifiDirectRolePreferenceSummary(WifiDirectRolePreference.AUTOMATIC))
+        assertEquals("Automatic", wifiDirectRolePreferenceSummary(WifiDirectRolePreference.AUTOMATIC))
     }
 
     @Test

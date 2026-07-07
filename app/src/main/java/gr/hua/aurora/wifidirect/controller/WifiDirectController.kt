@@ -1,8 +1,8 @@
 package gr.hua.aurora.wifidirect.controller
 
 import gr.hua.aurora.wifidirect.WifiDirectPeer
-import gr.hua.aurora.wifidirect.WifiDirectRolePreference
-import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
+import gr.hua.aurora.wifidirect.runtime.WifiDirectRolePreference
+import gr.hua.aurora.wifidirect.runtime.WifiDirectRuntimeStatus
 
 data class WifiDirectBroadcastEvent(
     val action: String? = null,

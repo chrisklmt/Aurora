@@ -6,7 +6,6 @@ import gr.hua.aurora.ui.components.DebugInfoCardModel
 import gr.hua.aurora.ui.components.DebugInfoItem
 import gr.hua.aurora.ui.components.DebugInfoSection
 import gr.hua.aurora.ui.screens.privateChatDebugIdentifierValue
-import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
 import gr.hua.aurora.wifidirect.controller.wifiDirectDiscoveryBlockedReason
 import gr.hua.aurora.wifidirect.debug.WifiDirectPrivateDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.debug.WifiDirectReceiveBridgeDiagnostics
@@ -19,6 +18,7 @@ import gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterDiagnostics
 import gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterState
 import gr.hua.aurora.wifidirect.frame.wifiDirectFrameTransportStateSummary
 import gr.hua.aurora.wifidirect.frame.wifiDirectTransportAdapterStateSummary
+import gr.hua.aurora.wifidirect.runtime.WifiDirectRuntimeStatus
 import gr.hua.aurora.wifidirect.socket.WifiDirectSocketDiagnostics
 import gr.hua.aurora.wifidirect.socket.wifiDirectEffectiveFrameTransportState
 import gr.hua.aurora.wifidirect.socket.wifiDirectSocketFrameReadinessReason
