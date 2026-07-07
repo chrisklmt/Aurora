@@ -44,6 +44,7 @@ import gr.hua.aurora.protocol.PrivateChatMessagePayloadCodec
 import gr.hua.aurora.protocol.PrivateChatMessageSendResult
 import gr.hua.aurora.protocol.PeerSessionEstablisher
 import gr.hua.aurora.protocol.SeenMessageIdCache
+import gr.hua.aurora.transport.processing.IncomingTransportFrameProcessingResult
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

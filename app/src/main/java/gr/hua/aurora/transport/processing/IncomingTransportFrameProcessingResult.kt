@@ -1,9 +1,10 @@
-package gr.hua.aurora.state
+package gr.hua.aurora.transport.processing
 
 import gr.hua.aurora.protocol.EncryptedMessageEnvelope
 import gr.hua.aurora.protocol.IncomingTransportMessage
 import gr.hua.aurora.protocol.IncomingTransportReceiveResult
 import gr.hua.aurora.protocol.PeerIdentityExchangeHandlingResult
+import gr.hua.aurora.state.IncomingMessageIngestionResult
 
 sealed interface IncomingTransportFrameProcessingSuccessResult :
     IncomingTransportFrameProcessingResult

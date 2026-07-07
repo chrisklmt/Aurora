@@ -1,4 +1,4 @@
-package gr.hua.aurora.state
+package gr.hua.aurora.transport.processing
 
 import gr.hua.aurora.ble.transport.BleGattTransportFrame
 import gr.hua.aurora.protocol.IncomingSessionMaterialProvider
@@ -7,6 +7,8 @@ import gr.hua.aurora.protocol.IncomingTransportMessage
 import gr.hua.aurora.protocol.IncomingTransportReceiveResult
 import gr.hua.aurora.protocol.MessageFrameType
 import gr.hua.aurora.protocol.PeerIdentityExchangeHandlingResult
+import gr.hua.aurora.state.AuroraStateHolder
+import gr.hua.aurora.state.IncomingMessageIngestionResult
 
 object IncomingTransportFrameProcessor {
     fun process(

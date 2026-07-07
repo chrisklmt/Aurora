@@ -1,7 +1,7 @@
 package gr.hua.aurora.ble.transport
 
-import gr.hua.aurora.state.IncomingTransportFrameProcessingResult
-import gr.hua.aurora.state.IncomingTransportFrameProcessingSuccessResult
+import gr.hua.aurora.transport.processing.IncomingTransportFrameProcessingResult
+import gr.hua.aurora.transport.processing.IncomingTransportFrameProcessingSuccessResult
 
 sealed interface BleTransportReceiveResult {
     data class Buffered(

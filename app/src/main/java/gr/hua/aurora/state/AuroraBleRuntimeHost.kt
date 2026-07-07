@@ -37,7 +37,6 @@ import gr.hua.aurora.ble.gatt.BleGattServer
 import gr.hua.aurora.ble.gatt.BleGattServerStatus
 import gr.hua.aurora.ble.noop.NoOpBleTransportSender
 import gr.hua.aurora.ble.permissions.BluetoothPermissionStatus
-import gr.hua.aurora.ble.permissions.rememberBluetoothPermissionStatusState
 import gr.hua.aurora.ble.transport.AndroidBleTransportSender
 import gr.hua.aurora.ble.transport.BleGattTransportFrame
 import gr.hua.aurora.ble.transport.BleGattTransportFrameWriter
@@ -84,16 +83,16 @@ import gr.hua.aurora.protocol.PrivateChatMessageSendUseCase
 import gr.hua.aurora.protocol.PreparedPrivateChatTransportFrame
 import gr.hua.aurora.protocol.PrivateChatTransportFrameFactory
 import gr.hua.aurora.protocol.SeenMessageIdCache
+import gr.hua.aurora.transport.processing.IncomingTransportFrameProcessor
+import gr.hua.aurora.transport.processing.IncomingTransportFrameProcessingResult
 import gr.hua.aurora.state.IncomingMessageIngestionResult.Appended
 import gr.hua.aurora.state.IncomingMessageIngestionResult.Duplicate
 import gr.hua.aurora.state.IncomingMessageIngestionResult.UnsupportedThread
 import gr.hua.aurora.state.IncomingMessageIngestionResult.UnsupportedType
-import gr.hua.aurora.ui.components.buildAuroraAvailabilityUiState
 import gr.hua.aurora.wifidirect.model.WifiDirectPeer
 import gr.hua.aurora.wifidirect.runtime.RememberedWifiDirectRuntimeStatusState
 import gr.hua.aurora.wifidirect.runtime.WifiDirectRolePreference
 import gr.hua.aurora.wifidirect.runtime.WifiDirectRuntimeStatus
-import gr.hua.aurora.wifidirect.runtime.rememberWifiDirectRuntimeStatusState
 import java.security.PrivateKey
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -149,7 +148,7 @@ internal fun shouldRunAuroraBleRuntime(
     bluetoothStatus: BluetoothPermissionStatus,
     isAppVisible: Boolean
 ): Boolean {
-    return isAppVisible && buildAuroraAvailabilityUiState(
+    return isAppVisible && gr.hua.aurora.ui.components.buildAuroraAvailabilityUiState(
         desiredAvailability = desiredAvailability,
         bluetoothStatus = bluetoothStatus
     ).isOnline
@@ -192,7 +191,8 @@ fun rememberAuroraBleRuntimeState(
     val transportSenderSourceLabel = remember(bleTransportSender) {
         auroraTransportSenderSourceLabel(bleTransportSender)
     }
-    val wifiDirectRuntimeState = rememberWifiDirectRuntimeStatusState()
+    val wifiDirectRuntimeState =
+        gr.hua.aurora.wifidirect.runtime.rememberWifiDirectRuntimeStatusState()
     val wifiDirectRuntimeStatus = wifiDirectRuntimeState.status
     var lastIdentityExchangeStatus by remember(runtimeGeneration) {
         mutableStateOf<String?>(null)
@@ -589,7 +589,8 @@ fun rememberAuroraBleRuntimeState(
             payload = BleDiscoveryPayload.current(advertisedStablePeerId).toByteArray()
         )
     }
-    val bluetoothStatusState = rememberBluetoothPermissionStatusState()
+    val bluetoothStatusState =
+        gr.hua.aurora.ble.permissions.rememberBluetoothPermissionStatusState()
     val bluetoothStatus = bluetoothStatusState.status
     var isAppVisible by remember(lifecycleOwner) {
         mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))

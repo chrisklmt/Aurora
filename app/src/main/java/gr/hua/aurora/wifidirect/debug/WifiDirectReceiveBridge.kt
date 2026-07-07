@@ -4,7 +4,7 @@ import android.util.Log
 import gr.hua.aurora.ble.transport.BleGattTransportFrame
 import gr.hua.aurora.ble.transport.BleTransportReceiveResult
 import gr.hua.aurora.state.IncomingMessageIngestionResult
-import gr.hua.aurora.state.IncomingTransportFrameProcessingResult
+import gr.hua.aurora.transport.processing.IncomingTransportFrameProcessingResult
 import gr.hua.aurora.wifidirect.frame.WifiDirectTransportFrame
 
 private const val wifiDirectReceiveBridgeNote =

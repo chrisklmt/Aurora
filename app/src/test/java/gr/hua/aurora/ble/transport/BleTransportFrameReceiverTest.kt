@@ -7,7 +7,7 @@ import gr.hua.aurora.protocol.IncomingTransportReceiveResult
 import gr.hua.aurora.protocol.MessageFrame
 import gr.hua.aurora.protocol.MessageFrameType
 import gr.hua.aurora.state.IncomingMessageIngestionResult
-import gr.hua.aurora.state.IncomingTransportFrameProcessingResult
+import gr.hua.aurora.transport.processing.IncomingTransportFrameProcessingResult
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
