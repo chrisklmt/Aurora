@@ -6,6 +6,9 @@ import android.os.Build
 import android.util.Log
 import gr.hua.aurora.wifidirect.*
 import gr.hua.aurora.wifidirect.model.WifiDirectPeer
+import gr.hua.aurora.wifidirect.platform.AndroidWifiDirectPlatformClient
+import gr.hua.aurora.wifidirect.platform.WifiDirectPlatformClient
+import gr.hua.aurora.wifidirect.platform.wifiDirectConnectRequestDebugText
 import gr.hua.aurora.wifidirect.runtime.*
 
 private const val androidWifiDirectControllerLogTag = "AndroidWifiDirectController"

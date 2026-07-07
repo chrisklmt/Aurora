@@ -19,7 +19,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import gr.hua.aurora.ui.components.DebugInfoCard
 import gr.hua.aurora.wifidirect.model.WifiDirectPeer
-import gr.hua.aurora.wifidirect.wifiDirectConnectRequestDebugText
 import gr.hua.aurora.wifidirect.controller.wifiDirectDiscoveryBlockedReason
 import gr.hua.aurora.wifidirect.debug.WifiDirectGlobalDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.debug.WifiDirectPrivateDebugSendDiagnostics
@@ -32,6 +31,7 @@ import gr.hua.aurora.wifidirect.debug.wifiDirectSendBridgeStateSummary
 import gr.hua.aurora.wifidirect.frame.WifiDirectFrameTransportState
 import gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterDiagnostics
 import gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterState
+import gr.hua.aurora.wifidirect.platform.wifiDirectConnectRequestDebugText
 import gr.hua.aurora.wifidirect.runtime.WifiDirectConnectionRole
 import gr.hua.aurora.wifidirect.runtime.WifiDirectConnectionState
 import gr.hua.aurora.wifidirect.runtime.WifiDirectDiscoveryState
