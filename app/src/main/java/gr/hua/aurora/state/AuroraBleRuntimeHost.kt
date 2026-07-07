@@ -89,6 +89,7 @@ import gr.hua.aurora.state.IncomingMessageIngestionResult.Duplicate
 import gr.hua.aurora.state.IncomingMessageIngestionResult.UnsupportedThread
 import gr.hua.aurora.state.IncomingMessageIngestionResult.UnsupportedType
 import gr.hua.aurora.ui.components.buildAuroraAvailabilityUiState
+import gr.hua.aurora.wifidirect.model.WifiDirectPeer
 import gr.hua.aurora.wifidirect.runtime.RememberedWifiDirectRuntimeStatusState
 import gr.hua.aurora.wifidirect.runtime.WifiDirectRolePreference
 import gr.hua.aurora.wifidirect.runtime.WifiDirectRuntimeStatus
@@ -117,7 +118,7 @@ data class AuroraBleRuntimeState(
     val startWifiDirectDiscovery: () -> Unit,
     val stopWifiDirectDiscovery: () -> Unit,
     val connectToWifiDirectPeer: (
-        gr.hua.aurora.wifidirect.WifiDirectPeer,
+        WifiDirectPeer,
         WifiDirectRolePreference
     ) -> Unit,
     val disconnectWifiDirectPeer: () -> Unit,

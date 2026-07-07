@@ -1,6 +1,6 @@
 package gr.hua.aurora.wifidirect.controller
 
-import gr.hua.aurora.wifidirect.WifiDirectPeer
+import gr.hua.aurora.wifidirect.model.WifiDirectPeer
 import gr.hua.aurora.wifidirect.runtime.WifiDirectRolePreference
 import gr.hua.aurora.wifidirect.runtime.WifiDirectRuntimeStatus
 

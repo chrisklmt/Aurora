@@ -1,6 +1,6 @@
 package gr.hua.aurora.wifidirect.controller
 
-import gr.hua.aurora.wifidirect.WifiDirectPeer
+import gr.hua.aurora.wifidirect.model.WifiDirectPeer
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

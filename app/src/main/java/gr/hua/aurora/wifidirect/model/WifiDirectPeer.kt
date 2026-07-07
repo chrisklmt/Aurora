@@ -1,4 +1,4 @@
-package gr.hua.aurora.wifidirect
+package gr.hua.aurora.wifidirect.model
 
 data class WifiDirectPeer(
     val deviceName: String? = null,

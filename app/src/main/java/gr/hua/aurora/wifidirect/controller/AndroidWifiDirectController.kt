@@ -5,6 +5,7 @@ import android.net.wifi.p2p.WifiP2pManager
 import android.os.Build
 import android.util.Log
 import gr.hua.aurora.wifidirect.*
+import gr.hua.aurora.wifidirect.model.WifiDirectPeer
 import gr.hua.aurora.wifidirect.runtime.*
 
 private const val androidWifiDirectControllerLogTag = "AndroidWifiDirectController"

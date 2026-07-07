@@ -12,6 +12,7 @@ import gr.hua.aurora.wifidirect.controller.WifiDirectConnectionSnapshot
 import gr.hua.aurora.wifidirect.controller.WifiDirectPeerMapper
 import gr.hua.aurora.wifidirect.controller.wifiDirectConnectionSnapshot
 import gr.hua.aurora.wifidirect.controller.wifiDirectGroupOwnerAddress
+import gr.hua.aurora.wifidirect.model.WifiDirectPeer
 import gr.hua.aurora.wifidirect.runtime.WifiDirectRolePreference
 import gr.hua.aurora.wifidirect.socket.wifiDirectSocketConnectHostOrNull
 

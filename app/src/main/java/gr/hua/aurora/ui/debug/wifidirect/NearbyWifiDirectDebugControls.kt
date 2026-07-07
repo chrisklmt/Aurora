@@ -18,7 +18,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import gr.hua.aurora.ui.components.DebugInfoCard
-import gr.hua.aurora.wifidirect.WifiDirectPeer
+import gr.hua.aurora.wifidirect.model.WifiDirectPeer
 import gr.hua.aurora.wifidirect.wifiDirectConnectRequestDebugText
 import gr.hua.aurora.wifidirect.controller.wifiDirectDiscoveryBlockedReason
 import gr.hua.aurora.wifidirect.debug.WifiDirectGlobalDebugSendDiagnostics

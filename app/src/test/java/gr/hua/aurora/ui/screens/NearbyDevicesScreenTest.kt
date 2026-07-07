@@ -16,7 +16,7 @@ import gr.hua.aurora.ui.debug.wifidirect.*
 import gr.hua.aurora.ui.components.DebugInfoCardModel
 import gr.hua.aurora.ui.components.DebugInfoItem
 import gr.hua.aurora.ui.components.DebugInfoSection
-import gr.hua.aurora.wifidirect.WifiDirectPeer
+import gr.hua.aurora.wifidirect.model.WifiDirectPeer
 import gr.hua.aurora.wifidirect.controller.WifiDirectPermissionStatus
 import gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterDiagnostics
 import gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterState
