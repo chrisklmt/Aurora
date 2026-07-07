@@ -5,5 +5,6 @@ enum class MessageFrameType {
     GLOBAL_TEXT,
     PRIVATE_TEXT,
     IDENTITY_EXCHANGE,
+    HYBRID_TRANSPORT_CONTROL,
     CONTROL
 }

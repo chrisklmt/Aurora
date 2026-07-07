@@ -524,6 +524,7 @@ fun rememberAuroraBleRuntimeState(
                             }
                         }
                         MessageFrameType.IDENTITY_EXCHANGE,
+                        MessageFrameType.HYBRID_TRANSPORT_CONTROL,
                         MessageFrameType.CONTROL -> Unit
                     }
                 }
@@ -2219,6 +2220,7 @@ internal fun incomingMessageRuntimeStatusText(
                             MessageFrameType.PRIVATE_TEXT ->
                                 "Received encrypted private message from ${ingestionResult.message.senderId}."
                             MessageFrameType.IDENTITY_EXCHANGE,
+                            MessageFrameType.HYBRID_TRANSPORT_CONTROL,
                             MessageFrameType.CONTROL ->
                                 "Received message from ${ingestionResult.message.senderId}."
                         }
@@ -2228,6 +2230,7 @@ internal fun incomingMessageRuntimeStatusText(
                             MessageFrameType.PRIVATE_TEXT ->
                                 "Duplicate encrypted private message ignored from ${processingResult.message.frame.senderId}."
                             MessageFrameType.IDENTITY_EXCHANGE,
+                            MessageFrameType.HYBRID_TRANSPORT_CONTROL,
                             MessageFrameType.CONTROL ->
                                 "Duplicate message ignored from ${processingResult.message.frame.senderId}."
                         }

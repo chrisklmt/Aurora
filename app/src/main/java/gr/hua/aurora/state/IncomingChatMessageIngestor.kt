@@ -51,6 +51,12 @@ object IncomingChatMessageIngestor {
                     reason = "Incoming identity exchange frames need a dedicated peer identity handler before chat ingestion."
                 )
             )
+            MessageFrameType.HYBRID_TRANSPORT_CONTROL -> IncomingMessageIngestionOutcome(
+                updatedState = state,
+                result = IncomingMessageIngestionResult.UnsupportedType(
+                    reason = "Incoming hybrid transport control frames are not supported for chat ingestion."
+                )
+            )
             MessageFrameType.CONTROL -> IncomingMessageIngestionOutcome(
                 updatedState = state,
                 result = IncomingMessageIngestionResult.UnsupportedType(

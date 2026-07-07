@@ -151,6 +151,7 @@ object IncomingMessageReceiveUseCase {
                 )
             }
             MessageFrameType.PRIVATE_TEXT,
+            MessageFrameType.HYBRID_TRANSPORT_CONTROL,
             MessageFrameType.CONTROL -> null
         }
     }
