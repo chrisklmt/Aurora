@@ -1,6 +1,7 @@
-package gr.hua.aurora.wifidirect
+package gr.hua.aurora.wifidirect.socket
 
 import android.util.Log
+import gr.hua.aurora.wifidirect.*
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket

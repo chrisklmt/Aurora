@@ -20,7 +20,7 @@ import gr.hua.aurora.ui.screens.GlobalChatScreen
 import gr.hua.aurora.ui.screens.NearbyDevicesScreen
 import gr.hua.aurora.ui.screens.PrivateChatScreen
 import gr.hua.aurora.ui.screens.SettingsScreen
-import gr.hua.aurora.wifidirect.rememberWifiDirectSocketState
+import gr.hua.aurora.wifidirect.socket.rememberWifiDirectSocketState
 import kotlinx.coroutines.launch
 
 @Composable

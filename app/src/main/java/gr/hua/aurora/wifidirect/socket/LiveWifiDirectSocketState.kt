@@ -1,4 +1,4 @@
-package gr.hua.aurora.wifidirect
+package gr.hua.aurora.wifidirect.socket
 
 import android.os.Handler
 import android.os.Looper
@@ -17,6 +17,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import gr.hua.aurora.model.OutgoingChatMessage
 import gr.hua.aurora.protocol.PreparedPrivateChatTransportFrame
+import gr.hua.aurora.wifidirect.*
 import gr.hua.aurora.wifidirect.debug.WifiDirectGlobalDebugSendBridge
 import gr.hua.aurora.wifidirect.debug.WifiDirectGlobalDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.debug.WifiDirectPrivateDebugSendBridge

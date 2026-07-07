@@ -7,13 +7,9 @@ import gr.hua.aurora.ui.components.DebugInfoItem
 import gr.hua.aurora.ui.components.DebugInfoSection
 import gr.hua.aurora.ui.screens.privateChatDebugIdentifierValue
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
-import gr.hua.aurora.wifidirect.WifiDirectSocketDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterState
 import gr.hua.aurora.wifidirect.wifiDirectDiscoveryBlockedReason
-import gr.hua.aurora.wifidirect.wifiDirectEffectiveFrameTransportState
-import gr.hua.aurora.wifidirect.wifiDirectSocketFrameReadinessReason
-import gr.hua.aurora.wifidirect.wifiDirectSocketStateSummary
 import gr.hua.aurora.wifidirect.wifiDirectTransportAdapterStateSummary
 import gr.hua.aurora.wifidirect.wifiDirectFrameTransportStateSummary
 import gr.hua.aurora.wifidirect.debug.WifiDirectPrivateDebugSendDiagnostics
@@ -23,6 +19,10 @@ import gr.hua.aurora.wifidirect.debug.wifiDirectPrivateDebugSendModeSummary
 import gr.hua.aurora.wifidirect.debug.wifiDirectPrivateDebugSendStateSummary
 import gr.hua.aurora.wifidirect.debug.wifiDirectReceiveBridgeStateSummary
 import gr.hua.aurora.wifidirect.debug.wifiDirectSendBridgeStateSummary
+import gr.hua.aurora.wifidirect.socket.WifiDirectSocketDiagnostics
+import gr.hua.aurora.wifidirect.socket.wifiDirectEffectiveFrameTransportState
+import gr.hua.aurora.wifidirect.socket.wifiDirectSocketFrameReadinessReason
+import gr.hua.aurora.wifidirect.socket.wifiDirectSocketStateSummary
 
 internal const val privateChatWifiDirectDebugNote =
     "Debug only. Receiver must have the Wi-Fi Direct receive bridge enabled. BLE remains the normal Private Chat path."

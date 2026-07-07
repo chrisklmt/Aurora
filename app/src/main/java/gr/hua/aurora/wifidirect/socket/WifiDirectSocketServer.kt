@@ -1,4 +1,4 @@
-package gr.hua.aurora.wifidirect
+package gr.hua.aurora.wifidirect.socket
 
 import java.net.ServerSocket
 import java.net.Socket

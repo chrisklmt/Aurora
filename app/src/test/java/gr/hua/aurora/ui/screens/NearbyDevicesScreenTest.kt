@@ -24,10 +24,6 @@ import gr.hua.aurora.wifidirect.WifiDirectGroupFormedState
 import gr.hua.aurora.wifidirect.WifiDirectPeer
 import gr.hua.aurora.wifidirect.WifiDirectPermissionStatus
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
-import gr.hua.aurora.wifidirect.WifiDirectSocketDiagnostics
-import gr.hua.aurora.wifidirect.WifiDirectSocketEndpoint
-import gr.hua.aurora.wifidirect.WifiDirectSocketRole
-import gr.hua.aurora.wifidirect.WifiDirectSocketState
 import gr.hua.aurora.wifidirect.WifiDirectRolePreference
 import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics
 import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterState
@@ -37,6 +33,12 @@ import gr.hua.aurora.wifidirect.debug.WifiDirectPrivateDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.debug.WifiDirectReceiveBridgeDiagnostics
 import gr.hua.aurora.wifidirect.debug.WifiDirectSendBridgeDiagnostics
 import gr.hua.aurora.wifidirect.debug.WifiDirectSmokeTestDiagnostics
+import gr.hua.aurora.wifidirect.socket.WifiDirectSocketCommand
+import gr.hua.aurora.wifidirect.socket.WifiDirectSocketCommandResult
+import gr.hua.aurora.wifidirect.socket.WifiDirectSocketDiagnostics
+import gr.hua.aurora.wifidirect.socket.WifiDirectSocketEndpoint
+import gr.hua.aurora.wifidirect.socket.WifiDirectSocketRole
+import gr.hua.aurora.wifidirect.socket.WifiDirectSocketState
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
@@ -1391,8 +1393,8 @@ class NearbyDevicesScreenTest {
     @Test
     fun nearbyWifiDirectSocketActionTextShowsImmediateDebugFeedback() {
         val diagnostics = WifiDirectSocketDiagnostics(
-            lastCommand = gr.hua.aurora.wifidirect.WifiDirectSocketCommand.START_SERVER,
-            lastCommandResult = gr.hua.aurora.wifidirect.WifiDirectSocketCommandResult.STARTING,
+            lastCommand = WifiDirectSocketCommand.START_SERVER,
+            lastCommandResult = WifiDirectSocketCommandResult.STARTING,
             lastCommandSequence = 1,
             serverStartAttempts = 1,
             clientConnectAttempts = 0,

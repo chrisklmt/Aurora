@@ -1,4 +1,6 @@
-package gr.hua.aurora.wifidirect
+package gr.hua.aurora.wifidirect.socket
+
+import gr.hua.aurora.wifidirect.*
 
 import java.io.IOException
 import java.net.ServerSocket

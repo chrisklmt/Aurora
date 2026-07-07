@@ -1,4 +1,7 @@
-package gr.hua.aurora.wifidirect
+package gr.hua.aurora.wifidirect.socket
+
+import gr.hua.aurora.wifidirect.WifiDirectFrameDiagnostics
+import gr.hua.aurora.wifidirect.WifiDirectFrameTransportState
 
 internal const val wifiDirectDebugSocketPort = 8988
 
