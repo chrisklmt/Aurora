@@ -30,6 +30,8 @@ import gr.hua.aurora.wifidirect.debug.WifiDirectSendBridgeDiagnostics
 import gr.hua.aurora.wifidirect.debug.WifiDirectSmokeTestDiagnostics
 import gr.hua.aurora.wifidirect.debug.WifiDirectSmokeTestSender
 import gr.hua.aurora.wifidirect.runtime.*
+import gr.hua.aurora.wifidirect.transport.LiveWifiDirectTransportSender
+import gr.hua.aurora.wifidirect.transport.WifiDirectTransportSender
 
 internal data class RememberedWifiDirectSocketState(
     val diagnostics: WifiDirectSocketDiagnostics,
@@ -39,6 +41,7 @@ internal data class RememberedWifiDirectSocketState(
     val privateDebugSendDiagnostics: WifiDirectPrivateDebugSendDiagnostics,
     val smokeTestDiagnostics: WifiDirectSmokeTestDiagnostics,
     val receiveBridgeDiagnostics: WifiDirectReceiveBridgeDiagnostics,
+    val transportSender: WifiDirectTransportSender,
     val startServer: (String?) -> Unit,
     val connectClient: (String) -> Unit,
     val sendFrame: () -> Unit,
@@ -102,6 +105,9 @@ internal fun rememberWifiDirectSocketState(
     val currentReceiveBridgeState = rememberUpdatedState(receiveBridge)
     val sendBridge = remember(transportAdapter) {
         WifiDirectSendBridge(transportAdapter)
+    }
+    val transportSender = remember(transportAdapter) {
+        LiveWifiDirectTransportSender(transportAdapter)
     }
     val globalDebugSender = remember(sendBridge, transportAdapter) {
         WifiDirectGlobalDebugSendBridge(
@@ -442,6 +448,7 @@ internal fun rememberWifiDirectSocketState(
         privateDebugSendDiagnostics = privateDebugSendDiagnostics,
         smokeTestDiagnostics = smokeTestDiagnostics,
         receiveBridgeDiagnostics = receiveBridgeDiagnostics,
+        transportSender = transportSender,
         startServer = startServer,
         connectClient = connectClient,
         sendFrame = sendFrame,

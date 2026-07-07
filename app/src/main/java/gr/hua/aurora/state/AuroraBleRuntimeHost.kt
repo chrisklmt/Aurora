@@ -90,10 +90,14 @@ import gr.hua.aurora.state.IncomingMessageIngestionResult.Duplicate
 import gr.hua.aurora.state.IncomingMessageIngestionResult.UnsupportedThread
 import gr.hua.aurora.state.IncomingMessageIngestionResult.UnsupportedType
 import gr.hua.aurora.wifidirect.model.WifiDirectPeer
+import gr.hua.aurora.wifidirect.frame.WifiDirectTransportFrame
 import gr.hua.aurora.wifidirect.runtime.RememberedWifiDirectRuntimeStatusState
 import gr.hua.aurora.wifidirect.runtime.WifiDirectRolePreference
 import gr.hua.aurora.wifidirect.runtime.WifiDirectRuntimeStatus
+import gr.hua.aurora.wifidirect.transport.WifiDirectTransportSendResult
+import gr.hua.aurora.wifidirect.transport.WifiDirectTransportSender
 import java.security.PrivateKey
+import java.nio.charset.StandardCharsets.UTF_8
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -136,7 +140,13 @@ data class AuroraBleRuntimeState(
     val disconnectTransportPeer: () -> Unit,
     val clearSessionForPeer: (String) -> Unit,
     val resetLocalIdentityAndSessions: () -> Unit
-)
+) {
+    internal var submitGlobalMeshMessageWithOptionalWifiDirect:
+        suspend (OutgoingChatMessage, String, WifiDirectTransportSender?) -> GlobalMeshDeliveryResult =
+        { message, senderId, _ ->
+            submitGlobalMeshMessage(message, senderId)
+        }
+}
 
 data class PrivateChatTransportSubmission(
     val result: PrivateChatMessageSendResult,
@@ -620,13 +630,18 @@ fun rememberAuroraBleRuntimeState(
         refreshGlobalMeshDiagnostics()
     }
 
-    val submitGlobalMeshMessage: suspend (OutgoingChatMessage, String) -> GlobalMeshDeliveryResult =
-        { queuedMessage, senderId ->
+    val submitGlobalMeshMessageWithOptionalWifiDirect: suspend (
+        OutgoingChatMessage,
+        String,
+        WifiDirectTransportSender?
+    ) -> GlobalMeshDeliveryResult =
+        { queuedMessage, senderId, wifiDirectTransportSender ->
             val result = submitPublicGlobalMeshMessage(
                 message = queuedMessage,
                 senderId = senderId,
                 coordinator = globalMeshDeliveryCoordinator,
                 transportSender = bleTransportSender,
+                wifiDirectTransportSender = wifiDirectTransportSender,
                 activeTransportPeerId = activeTransportPeerId,
                 activeTransportDeviceAddress = activeTransportDeviceAddress,
                 isActiveTransportConnected = bleConnectionStatus == BleConnectionStatus.CONNECTED,
@@ -640,6 +655,14 @@ fun rememberAuroraBleRuntimeState(
             refreshGlobalMeshDiagnostics()
             lastGlobalMeshStatus = globalMeshStatusText(result)
             result
+        }
+    val submitGlobalMeshMessage: suspend (OutgoingChatMessage, String) -> GlobalMeshDeliveryResult =
+        { queuedMessage, senderId ->
+            submitGlobalMeshMessageWithOptionalWifiDirect(
+                queuedMessage,
+                senderId,
+                null
+            )
         }
     val submitPrivateChatMessage: suspend (OutgoingChatMessage, String, String) -> PrivateChatTransportSubmission =
         { queuedMessage, senderUsername, privateChatId ->
@@ -914,6 +937,21 @@ fun rememberAuroraBleRuntimeState(
         disconnectTransportPeer = disconnectTransportPeer,
         clearSessionForPeer = clearSessionForPeer,
         resetLocalIdentityAndSessions = resetLocalIdentityAndSessions
+    ).also { runtimeState ->
+        runtimeState.submitGlobalMeshMessageWithOptionalWifiDirect =
+            submitGlobalMeshMessageWithOptionalWifiDirect
+    }
+}
+
+internal suspend fun AuroraBleRuntimeState.submitGlobalMeshMessage(
+    message: OutgoingChatMessage,
+    senderId: String,
+    wifiDirectTransportSender: WifiDirectTransportSender?
+): GlobalMeshDeliveryResult {
+    return submitGlobalMeshMessageWithOptionalWifiDirect(
+        message,
+        senderId,
+        wifiDirectTransportSender
     )
 }
 
@@ -1659,6 +1697,7 @@ internal suspend fun submitPublicGlobalMeshMessage(
     senderId: String,
     coordinator: GlobalMeshDeliveryCoordinator,
     transportSender: BleTransportSender?,
+    wifiDirectTransportSender: WifiDirectTransportSender? = null,
     activeTransportPeerId: String?,
     activeTransportDeviceAddress: String? = null,
     isActiveTransportConnected: Boolean,
@@ -1705,9 +1744,85 @@ internal suspend fun submitPublicGlobalMeshMessage(
             )
         }
     )
-    return coordinator.recordResult(
-        fanoutResult.toGlobalMeshDeliveryResult()
-    )
+    val deliveryResult = fanoutResult.toGlobalMeshDeliveryResult()
+    if (
+        deliveryResult is GlobalMeshDeliveryResult.QueuedToActivePeer ||
+        deliveryResult is GlobalMeshDeliveryResult.QueuedToPeers
+    ) {
+        maybeSendWifiDirectGlobalCopy(
+            frame = relayFrame,
+            transportSender = wifiDirectTransportSender
+        )
+    }
+    return coordinator.recordResult(deliveryResult)
+}
+
+internal suspend fun maybeSendWifiDirectGlobalCopy(
+    frame: MessageFrame,
+    transportSender: WifiDirectTransportSender?
+) {
+    if (transportSender == null) {
+        return
+    }
+
+    val transportFrame = runCatching {
+        WifiDirectTransportFrame.fromPayload(
+            MessageFrameCodec.encode(frame).toByteArray(UTF_8)
+        )
+    }.getOrElse { error ->
+        safeAuroraBleRuntimeLogDebug(
+            "Wi-Fi Direct global copy skipped for ${frame.id}: ${runtimeSafeErrorDetail(error)}"
+        )
+        return
+    }
+
+    when (val result = transportSender.send(transportFrame)) {
+        WifiDirectTransportSendResult.Success -> {
+            safeAuroraBleRuntimeLogDebug(
+                "Wi-Fi Direct global copy submitted for ${frame.id} payloadSize=${transportFrame.payloadSize}"
+            )
+        }
+
+        is WifiDirectTransportSendResult.NotReady -> {
+            safeAuroraBleRuntimeLogDebug(
+                "Wi-Fi Direct global copy unavailable for ${frame.id}: ${result.reason}"
+            )
+        }
+
+        is WifiDirectTransportSendResult.Failed -> {
+            val message = "Wi-Fi Direct global copy failed for ${frame.id}: ${result.reason}"
+            val cause = result.cause
+            safeAuroraBleRuntimeLogWarning(message, cause)
+        }
+    }
+}
+
+private fun runtimeSafeErrorDetail(
+    error: Throwable
+): String {
+    return error.message?.trim()?.takeIf { it.isNotEmpty() }
+        ?: error::class.java.simpleName
+}
+
+private fun safeAuroraBleRuntimeLogDebug(
+    message: String
+) {
+    runCatching {
+        Log.d(auroraBleRuntimeLogTag, message)
+    }
+}
+
+private fun safeAuroraBleRuntimeLogWarning(
+    message: String,
+    cause: Throwable?
+) {
+    runCatching {
+        if (cause != null) {
+            Log.w(auroraBleRuntimeLogTag, message, cause)
+        } else {
+            Log.w(auroraBleRuntimeLogTag, message)
+        }
+    }
 }
 
 internal fun globalMeshStatusText(

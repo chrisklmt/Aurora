@@ -13,6 +13,7 @@ import gr.hua.aurora.state.AuroraAvailabilityPreference
 import gr.hua.aurora.state.AuroraBleRuntimeState
 import gr.hua.aurora.state.AuroraStateHolder
 import gr.hua.aurora.state.PrivateChatTransportSubmission
+import gr.hua.aurora.state.submitGlobalMeshMessage
 import gr.hua.aurora.protocol.PrivateChatMessageSendResult
 import gr.hua.aurora.ui.screens.nearbyContactPeerId
 import gr.hua.aurora.ui.screens.ContactsScreen
@@ -93,7 +94,17 @@ fun NavGraph(
                             val transportResult = submitGlobalQueuedMessage(
                                 queuedMessage = queuedMessage,
                                 currentUsername = { stateHolder.uiState.globalChatUsername },
-                                submitTransport = bleRuntimeState.submitGlobalMeshMessage,
+                                submitTransport = { message, senderId ->
+                                    bleRuntimeState.submitGlobalMeshMessage(
+                                        message,
+                                        senderId,
+                                        if (wifiDirectSocketState.globalDebugSendDiagnostics.enabled) {
+                                            null
+                                        } else {
+                                            wifiDirectSocketState.transportSender
+                                        }
+                                    )
+                                },
                                 submitWifiDirectDebugTransport =
                                 if (wifiDirectSocketState.globalDebugSendDiagnostics.enabled) {
                                     wifiDirectSocketState.sendGlobalDebugMessage
@@ -115,7 +126,17 @@ fun NavGraph(
                             val transportResult = submitGlobalQueuedMessage(
                                 queuedMessage = queuedMessage,
                                 currentUsername = { stateHolder.uiState.globalChatUsername },
-                                submitTransport = bleRuntimeState.submitGlobalMeshMessage,
+                                submitTransport = { message, senderId ->
+                                    bleRuntimeState.submitGlobalMeshMessage(
+                                        message,
+                                        senderId,
+                                        if (wifiDirectSocketState.globalDebugSendDiagnostics.enabled) {
+                                            null
+                                        } else {
+                                            wifiDirectSocketState.transportSender
+                                        }
+                                    )
+                                },
                                 submitWifiDirectDebugTransport =
                                 if (wifiDirectSocketState.globalDebugSendDiagnostics.enabled) {
                                     wifiDirectSocketState.sendGlobalDebugMessage

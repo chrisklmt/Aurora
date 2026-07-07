@@ -45,6 +45,9 @@ import gr.hua.aurora.protocol.PrivateChatMessageSendResult
 import gr.hua.aurora.protocol.PeerSessionEstablisher
 import gr.hua.aurora.protocol.SeenMessageIdCache
 import gr.hua.aurora.transport.processing.IncomingTransportFrameProcessingResult
+import gr.hua.aurora.wifidirect.frame.WifiDirectTransportFrame
+import gr.hua.aurora.wifidirect.transport.WifiDirectTransportSendResult
+import gr.hua.aurora.wifidirect.transport.WifiDirectTransportSender
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -290,6 +293,160 @@ class AuroraBleRuntimeHostTest {
 
         assertEquals(GlobalMeshDeliveryResult.NoReachablePeers, result)
         assertEquals(0, transportSender.sendCallCount)
+    }
+
+    @Test
+    fun globalChatWithoutWifiDirectSenderKeepsBleOnlyBehavior() {
+        val coordinator = GlobalMeshDeliveryCoordinator()
+        val transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally)
+        val reachablePeer = reachableAuroraPeer(
+            address = "AA:BB:CC:00:00:05",
+            stableIdHex = "5032547611223344"
+        )
+
+        val result = runSuspending {
+            submitPublicGlobalMeshMessage(
+                message = globalOutgoingMessage("wifi-direct-null"),
+                senderId = "sender-4",
+                coordinator = coordinator,
+                transportSender = transportSender,
+                wifiDirectTransportSender = null,
+                activeTransportPeerId = "5032547611223344",
+                activeTransportDeviceAddress = reachablePeer.address,
+                isActiveTransportConnected = true,
+                reachablePeers = listOf(reachablePeer),
+                connectToReachablePeer = {
+                    error("connect-on-send should not run with an active transport peer")
+                }
+            )
+        }
+
+        assertEquals(
+            GlobalMeshDeliveryResult.QueuedToActivePeer("5032547611223344"),
+            result
+        )
+        assertEquals(1, transportSender.sendCallCount)
+    }
+
+    @Test
+    fun globalChatWithWifiDirectNotReadyKeepsBleBehavior() {
+        val coordinator = GlobalMeshDeliveryCoordinator()
+        val transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally)
+        val wifiDirectSender = RecordingWifiDirectTransportSender(
+            WifiDirectTransportSendResult.NotReady("Socket transport not ready.")
+        )
+        val reachablePeer = reachableAuroraPeer(
+            address = "AA:BB:CC:00:00:06",
+            stableIdHex = "6032547611223344"
+        )
+
+        val result = runSuspending {
+            submitPublicGlobalMeshMessage(
+                message = globalOutgoingMessage("wifi-direct-not-ready"),
+                senderId = "sender-5",
+                coordinator = coordinator,
+                transportSender = transportSender,
+                wifiDirectTransportSender = wifiDirectSender,
+                activeTransportPeerId = "6032547611223344",
+                activeTransportDeviceAddress = reachablePeer.address,
+                isActiveTransportConnected = true,
+                reachablePeers = listOf(reachablePeer),
+                connectToReachablePeer = {
+                    error("connect-on-send should not run with an active transport peer")
+                }
+            )
+        }
+
+        assertEquals(
+            GlobalMeshDeliveryResult.QueuedToActivePeer("6032547611223344"),
+            result
+        )
+        assertEquals(1, transportSender.sendCallCount)
+        assertEquals(1, wifiDirectSender.sendCallCount)
+    }
+
+    @Test
+    fun globalChatWithWifiDirectSuccessSendsExpectedFrameCopy() {
+        val coordinator = GlobalMeshDeliveryCoordinator()
+        val transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally)
+        val wifiDirectSender = RecordingWifiDirectTransportSender(
+            WifiDirectTransportSendResult.Success
+        )
+        val reachablePeer = reachableAuroraPeer(
+            address = "AA:BB:CC:00:00:07",
+            stableIdHex = "7032547611223344"
+        )
+        val message = globalOutgoingMessage("wifi-direct-success")
+
+        val result = runSuspending {
+            submitPublicGlobalMeshMessage(
+                message = message,
+                senderId = "sender-6",
+                coordinator = coordinator,
+                transportSender = transportSender,
+                wifiDirectTransportSender = wifiDirectSender,
+                activeTransportPeerId = "7032547611223344",
+                activeTransportDeviceAddress = reachablePeer.address,
+                isActiveTransportConnected = true,
+                reachablePeers = listOf(reachablePeer),
+                connectToReachablePeer = {
+                    error("connect-on-send should not run with an active transport peer")
+                }
+            )
+        }
+
+        assertEquals(
+            GlobalMeshDeliveryResult.QueuedToActivePeer("7032547611223344"),
+            result
+        )
+        assertEquals(1, transportSender.sendCallCount)
+        assertEquals(1, wifiDirectSender.sendCallCount)
+        val copiedFrame = decodeWifiDirectMessageFrame(
+            wifiDirectSender.sentFrames.single()
+        )
+        assertEquals(message.messageId, copiedFrame.id)
+        assertEquals(MessageFrameType.GLOBAL_TEXT, copiedFrame.type)
+        assertEquals("sender-6", copiedFrame.senderId)
+        assertEquals(message.userText, copiedFrame.payload)
+        assertEquals(message.createdAtMillis, copiedFrame.createdAtMillis)
+        assertEquals(10, copiedFrame.ttl)
+    }
+
+    @Test
+    fun globalChatWithWifiDirectFailureDoesNotOverrideBleResult() {
+        val coordinator = GlobalMeshDeliveryCoordinator()
+        val transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally)
+        val wifiDirectSender = RecordingWifiDirectTransportSender(
+            WifiDirectTransportSendResult.Failed("socket writer unavailable")
+        )
+        val reachablePeer = reachableAuroraPeer(
+            address = "AA:BB:CC:00:00:08",
+            stableIdHex = "8032547611223344"
+        )
+
+        val result = runSuspending {
+            submitPublicGlobalMeshMessage(
+                message = globalOutgoingMessage("wifi-direct-failed"),
+                senderId = "sender-7",
+                coordinator = coordinator,
+                transportSender = transportSender,
+                wifiDirectTransportSender = wifiDirectSender,
+                activeTransportPeerId = "8032547611223344",
+                activeTransportDeviceAddress = reachablePeer.address,
+                isActiveTransportConnected = true,
+                reachablePeers = listOf(reachablePeer),
+                connectToReachablePeer = {
+                    error("connect-on-send should not run with an active transport peer")
+                }
+            )
+        }
+
+        assertEquals(
+            GlobalMeshDeliveryResult.QueuedToActivePeer("8032547611223344"),
+            result
+        )
+        assertEquals(1, transportSender.sendCallCount)
+        assertEquals(1, wifiDirectSender.sendCallCount)
     }
 
     @Test
@@ -1486,6 +1643,12 @@ class AuroraBleRuntimeHostTest {
         return MessageFrameCodec.decode(String(frameBytes, UTF_8))
     }
 
+    private fun decodeWifiDirectMessageFrame(
+        frame: WifiDirectTransportFrame
+    ): MessageFrame {
+        return MessageFrameCodec.decode(String(frame.payloadBytes(), UTF_8))
+    }
+
     private fun <T> runSuspending(block: suspend () -> T): T {
         var outcome: Result<T>? = null
         block.startCoroutine(
@@ -1501,5 +1664,20 @@ class AuroraBleRuntimeHostTest {
         return requireNotNull(outcome) {
             "Suspending runtime mesh operation did not complete synchronously in the test harness."
         }.getOrThrow()
+    }
+
+    private class RecordingWifiDirectTransportSender(
+        private val result: WifiDirectTransportSendResult
+    ) : WifiDirectTransportSender {
+        val sentFrames = mutableListOf<WifiDirectTransportFrame>()
+        var sendCallCount: Int = 0
+
+        override suspend fun send(
+            frame: WifiDirectTransportFrame
+        ): WifiDirectTransportSendResult {
+            sendCallCount += 1
+            sentFrames += WifiDirectTransportFrame.fromPayload(frame.payloadBytes())
+            return result
+        }
     }
 }
