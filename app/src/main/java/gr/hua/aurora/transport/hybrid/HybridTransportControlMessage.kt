@@ -1,6 +1,6 @@
 package gr.hua.aurora.transport.hybrid
 
-internal data class HybridTransportControlMessage(
+data class HybridTransportControlMessage(
     val protocolVersion: Int = HybridTransportControlCodec.currentProtocolVersion,
     val messageType: MessageType,
     val sessionId: String,
@@ -31,13 +31,13 @@ internal data class HybridTransportControlMessage(
         }
     }
 
-    internal enum class MessageType {
+    enum class MessageType {
         WIFI_DIRECT_OFFER,
         WIFI_DIRECT_ACCEPT,
         WIFI_DIRECT_SOCKET_HINT
     }
 
-    internal enum class CapabilityFlag {
+    enum class CapabilityFlag {
         WIFI_DIRECT_BOOTSTRAP,
         WIFI_DIRECT_SOCKET_HINT,
         BLE_FALLBACK

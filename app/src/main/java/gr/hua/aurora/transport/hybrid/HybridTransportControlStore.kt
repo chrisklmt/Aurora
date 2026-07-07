@@ -1,6 +1,6 @@
 package gr.hua.aurora.transport.hybrid
 
-internal interface HybridTransportControlStore {
+interface HybridTransportControlStore {
     fun record(
         peerId: String,
         message: HybridTransportControlMessage

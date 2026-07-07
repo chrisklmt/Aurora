@@ -4,6 +4,8 @@ import gr.hua.aurora.ble.transport.BleGattTransportChunk
 import gr.hua.aurora.ble.transport.BleGattTransportFrame
 import gr.hua.aurora.ble.transport.BleGattTransportFrameChunker
 import gr.hua.aurora.crypto.Sec1PublicKeyEncoding
+import gr.hua.aurora.transport.hybrid.HybridTransportControlFrameFactory
+import gr.hua.aurora.transport.hybrid.HybridTransportControlMessage
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -398,6 +400,37 @@ class IncomingMessageReceiveUseCaseTest {
         val message = (result as IncomingTransportReceiveResult.Received).message
         assertEquals(frame, message.frame)
         assertArrayEquals(senderPublicKey, message.senderPublicKey)
+    }
+
+    @Test
+    fun plaintextHybridTransportControlFrameIsReceivedWithoutSessionMaterial() {
+        val message = HybridTransportControlMessage(
+            messageType = HybridTransportControlMessage.MessageType.WIFI_DIRECT_OFFER,
+            sessionId = "hybrid-session-001",
+            publicPeerIdHint = "peer-hybrid",
+            createdAtMillis = 1_715_401_810L,
+            capabilityFlags = setOf(
+                HybridTransportControlMessage.CapabilityFlag.WIFI_DIRECT_BOOTSTRAP,
+                HybridTransportControlMessage.CapabilityFlag.BLE_FALLBACK
+            )
+        )
+        val frame = HybridTransportControlFrameFactory.create(
+            message = message,
+            frameId = "hybrid-frame-001",
+            senderId = "peer-hybrid"
+        )
+        val frames = BleGattTransportFrameChunker.chunk(
+            encodedEnvelopeBytes = MessageFrameCodec.encode(frame).toByteArray(UTF_8),
+            groupId = 0x3114
+        )
+
+        val result = IncomingMessageReceiveUseCase.receive(
+            frames = frames,
+            sessionMaterialProvider = NoOpIncomingSessionMaterialProvider
+        )
+
+        assertTrue(result is IncomingTransportReceiveResult.Received)
+        assertEquals(frame, (result as IncomingTransportReceiveResult.Received).message.frame)
     }
 
     @Test

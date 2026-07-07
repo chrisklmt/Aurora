@@ -3,7 +3,7 @@ package gr.hua.aurora.transport.hybrid
 import java.nio.charset.StandardCharsets.UTF_8
 import java.util.Base64
 
-internal object HybridTransportControlCodec {
+object HybridTransportControlCodec {
     internal const val currentProtocolVersion: Int = 1
 
     private const val formatMagic = "AURORA_HYBRID_CONTROL"

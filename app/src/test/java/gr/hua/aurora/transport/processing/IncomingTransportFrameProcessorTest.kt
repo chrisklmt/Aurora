@@ -25,9 +25,14 @@ import gr.hua.aurora.state.AuroraStateHolder
 import gr.hua.aurora.state.IncomingMessageIngestionResult
 import gr.hua.aurora.state.SampleAuroraState
 import gr.hua.aurora.state.createAuroraBleTransportFrameReceiver
+import gr.hua.aurora.transport.hybrid.HybridTransportControlCodec
+import gr.hua.aurora.transport.hybrid.HybridTransportControlFrameFactory
+import gr.hua.aurora.transport.hybrid.HybridTransportControlMessage
+import gr.hua.aurora.transport.hybrid.InMemoryHybridTransportControlStore
 import gr.hua.aurora.wifidirect.frame.WifiDirectTransportFrame
 import gr.hua.aurora.wifidirect.debug.WifiDirectReceiveBridge
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -519,6 +524,131 @@ class IncomingTransportFrameProcessorTest {
         assertEquals(globalCountBefore, holder.uiState.globalMessages.size)
         assertEquals(queueBefore, holder.uiState.pendingOutgoingMessages)
         assertEquals(queuedMessage.messageId, holder.uiState.pendingOutgoingMessages.single().messageId)
+    }
+
+    @Test
+    fun hybridTransportControlFrameIsParsedAndRecordedWithoutChatInsertion() {
+        val holder = createHolder()
+        val queueBefore = holder.uiState.pendingOutgoingMessages.toList()
+        val globalCountBefore = holder.uiState.globalMessages.size
+        val privateCountBefore = holder.uiState.privateMessagesByPeerId.values.sumOf { it.size }
+        val store = InMemoryHybridTransportControlStore()
+        val controlMessage = HybridTransportControlMessage(
+            messageType = HybridTransportControlMessage.MessageType.WIFI_DIRECT_OFFER,
+            sessionId = "hybrid-session-processor-1",
+            publicPeerIdHint = "peer-hybrid-hint",
+            createdAtMillis = 1_715_500_777L,
+            capabilityFlags = setOf(
+                HybridTransportControlMessage.CapabilityFlag.WIFI_DIRECT_BOOTSTRAP,
+                HybridTransportControlMessage.CapabilityFlag.BLE_FALLBACK
+            )
+        )
+        val frame = HybridTransportControlFrameFactory.create(
+            message = controlMessage,
+            frameId = "hybrid-frame-processor-1",
+            senderId = "peer-hybrid-frame"
+        )
+
+        val result = IncomingTransportFrameProcessor.process(
+            frames = publicTransportFramesFor(frame),
+            sessionMaterialProvider = NoOpIncomingSessionMaterialProvider,
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+
+        assertTrue(result is IncomingTransportFrameProcessingResult.HybridControlHandled)
+        val handled = result as IncomingTransportFrameProcessingResult.HybridControlHandled
+        assertEquals("peer-hybrid-frame", handled.peerId)
+        assertEquals(controlMessage, handled.controlMessage)
+        assertEquals(
+            gr.hua.aurora.transport.hybrid.HybridTransportControlStore.RecordResult.Stored,
+            handled.storeResult
+        )
+        assertEquals(globalCountBefore, holder.uiState.globalMessages.size)
+        assertEquals(privateCountBefore, holder.uiState.privateMessagesByPeerId.values.sumOf { it.size })
+        assertEquals(queueBefore, holder.uiState.pendingOutgoingMessages)
+        val storedSession = store.snapshot().sessionStateFor(
+            peerId = "peer-hybrid-frame",
+            sessionId = "hybrid-session-processor-1"
+        )
+        assertEquals(controlMessage, storedSession?.latestOffer)
+        assertNull(storedSession?.latestAccept)
+        assertNull(storedSession?.latestSocketHint)
+    }
+
+    @Test
+    fun malformedHybridTransportControlFrameIsIgnoredSafelyAndNotRecorded() {
+        val holder = createHolder()
+        val queueBefore = holder.uiState.pendingOutgoingMessages.toList()
+        val globalCountBefore = holder.uiState.globalMessages.size
+        val store = InMemoryHybridTransportControlStore()
+        val frame = MessageFrame(
+            id = "hybrid-frame-bad-1",
+            type = MessageFrameType.HYBRID_TRANSPORT_CONTROL,
+            senderId = "peer-hybrid-bad",
+            createdAtMillis = 1_715_500_778L,
+            payload = "not-a-valid-hybrid-payload"
+        )
+
+        val result = IncomingTransportFrameProcessor.process(
+            frames = publicTransportFramesFor(frame),
+            sessionMaterialProvider = NoOpIncomingSessionMaterialProvider,
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+
+        assertTrue(result is IncomingTransportFrameProcessingResult.HybridControlIgnored)
+        val ignored = result as IncomingTransportFrameProcessingResult.HybridControlIgnored
+        assertTrue(ignored.reason.contains("invalid", ignoreCase = true))
+        assertEquals(globalCountBefore, holder.uiState.globalMessages.size)
+        assertEquals(queueBefore, holder.uiState.pendingOutgoingMessages)
+        assertTrue(store.snapshot().sessionsByPeerId.isEmpty())
+    }
+
+    @Test
+    fun hybridTransportControlFallsBackToDecodedPeerHintWhenFrameSenderIsBlank() {
+        val store = InMemoryHybridTransportControlStore()
+        val controlMessage = HybridTransportControlMessage(
+            messageType = HybridTransportControlMessage.MessageType.WIFI_DIRECT_SOCKET_HINT,
+            sessionId = "hybrid-session-processor-2",
+            publicPeerIdHint = "peer-hybrid-fallback",
+            groupOwnerAddress = "192.168.49.1",
+            socketPort = 8988,
+            createdAtMillis = 1_715_500_779L,
+            capabilityFlags = setOf(
+                HybridTransportControlMessage.CapabilityFlag.WIFI_DIRECT_SOCKET_HINT
+            )
+        )
+        val frame = MessageFrame(
+            id = "hybrid-frame-fallback-1",
+            type = MessageFrameType.HYBRID_TRANSPORT_CONTROL,
+            senderId = "   ",
+            createdAtMillis = controlMessage.createdAtMillis,
+            payload = HybridTransportControlCodec.encode(controlMessage)
+        )
+
+        val result = IncomingTransportFrameProcessor.process(
+            frames = emptyList(),
+            sessionMaterialProvider = NoOpIncomingSessionMaterialProvider,
+            ingest = { IncomingMessageIngestionResult.Duplicate(it.frame.id) },
+            hybridControlStore = store,
+            receive = { _, _ ->
+                IncomingTransportReceiveResult.Received(
+                    IncomingTransportMessage(frame = frame)
+                )
+            }
+        )
+
+        assertTrue(result is IncomingTransportFrameProcessingResult.HybridControlHandled)
+        val handled = result as IncomingTransportFrameProcessingResult.HybridControlHandled
+        assertEquals("peer-hybrid-fallback", handled.peerId)
+        assertEquals(
+            controlMessage,
+            store.snapshot().sessionStateFor(
+                peerId = "peer-hybrid-fallback",
+                sessionId = "hybrid-session-processor-2"
+            )?.latestSocketHint
+        )
     }
 
     private fun createHolder(): AuroraStateHolder {

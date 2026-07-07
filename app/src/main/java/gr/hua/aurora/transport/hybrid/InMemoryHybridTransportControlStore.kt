@@ -1,6 +1,6 @@
 package gr.hua.aurora.transport.hybrid
 
-internal class InMemoryHybridTransportControlStore : HybridTransportControlStore {
+class InMemoryHybridTransportControlStore : HybridTransportControlStore {
     private val stateLock = Any()
     private val sessionStatesByPeerId =
         linkedMapOf<String, LinkedHashMap<String, HybridTransportControlSessionState>>()

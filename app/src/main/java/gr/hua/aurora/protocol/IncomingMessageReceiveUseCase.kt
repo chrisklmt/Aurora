@@ -150,8 +150,14 @@ object IncomingMessageReceiveUseCase {
                     )
                 )
             }
+            MessageFrameType.HYBRID_TRANSPORT_CONTROL -> {
+                IncomingTransportReceiveResult.Received(
+                    message = IncomingTransportMessage(
+                        frame = frame
+                    )
+                )
+            }
             MessageFrameType.PRIVATE_TEXT,
-            MessageFrameType.HYBRID_TRANSPORT_CONTROL,
             MessageFrameType.CONTROL -> null
         }
     }

@@ -3,7 +3,7 @@ package gr.hua.aurora.transport.hybrid
 import gr.hua.aurora.protocol.MessageFrame
 import gr.hua.aurora.protocol.MessageFrameType
 
-internal object HybridTransportControlFrameFactory {
+object HybridTransportControlFrameFactory {
     fun create(
         message: HybridTransportControlMessage,
         frameId: String,

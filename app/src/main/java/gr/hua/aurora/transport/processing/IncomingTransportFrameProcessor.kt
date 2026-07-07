@@ -9,12 +9,16 @@ import gr.hua.aurora.protocol.MessageFrameType
 import gr.hua.aurora.protocol.PeerIdentityExchangeHandlingResult
 import gr.hua.aurora.state.AuroraStateHolder
 import gr.hua.aurora.state.IncomingMessageIngestionResult
+import gr.hua.aurora.transport.hybrid.HybridTransportControlFrameFactory
+import gr.hua.aurora.transport.hybrid.HybridTransportControlMessage
+import gr.hua.aurora.transport.hybrid.HybridTransportControlStore
 
 object IncomingTransportFrameProcessor {
     fun process(
         frames: Collection<BleGattTransportFrame>,
         sessionMaterialProvider: IncomingSessionMaterialProvider,
         stateHolder: AuroraStateHolder,
+        hybridControlStore: HybridTransportControlStore? = null,
         handleIdentity: ((IncomingTransportMessage) -> PeerIdentityExchangeHandlingResult)? = null,
         identityHandlingUnavailableReason: String =
             "Local agreement identity material unavailable for incoming identity exchange.",
@@ -27,6 +31,7 @@ object IncomingTransportFrameProcessor {
             frames = frames,
             sessionMaterialProvider = sessionMaterialProvider,
             ingest = stateHolder::ingestIncomingTransportMessage,
+            hybridControlStore = hybridControlStore,
             handleIdentity = handleIdentity,
             identityHandlingUnavailableReason = identityHandlingUnavailableReason,
             receive = receive
@@ -37,6 +42,7 @@ object IncomingTransportFrameProcessor {
         frames: Collection<BleGattTransportFrame>,
         sessionMaterialProvider: IncomingSessionMaterialProvider,
         ingest: (IncomingTransportMessage) -> IncomingMessageIngestionResult,
+        hybridControlStore: HybridTransportControlStore? = null,
         handleIdentity: ((IncomingTransportMessage) -> PeerIdentityExchangeHandlingResult)? = null,
         identityHandlingUnavailableReason: String =
             "Local agreement identity material unavailable for incoming identity exchange.",
@@ -65,6 +71,11 @@ object IncomingTransportFrameProcessor {
                             handlingResult = identityHandler(receiveResult.message)
                         )
                     }
+                } else if (receiveResult.message.frame.type == MessageFrameType.HYBRID_TRANSPORT_CONTROL) {
+                    recordHybridTransportControl(
+                        message = receiveResult.message,
+                        hybridControlStore = hybridControlStore
+                    )
                 } else {
                     IncomingTransportFrameProcessingResult.Received(
                         message = receiveResult.message,
@@ -89,5 +100,44 @@ object IncomingTransportFrameProcessor {
                 )
             }
         }
+    }
+
+    private fun recordHybridTransportControl(
+        message: IncomingTransportMessage,
+        hybridControlStore: HybridTransportControlStore?
+    ): IncomingTransportFrameProcessingResult {
+        val controlMessage = HybridTransportControlFrameFactory.parseOrNull(message.frame)
+            ?: return IncomingTransportFrameProcessingResult.HybridControlIgnored(
+                message = message,
+                reason = "Incoming hybrid transport control payload is invalid."
+            )
+        val store = hybridControlStore
+            ?: return IncomingTransportFrameProcessingResult.HybridControlIgnored(
+                message = message,
+                reason = "Hybrid transport control store is not configured."
+            )
+        val peerId = resolvedHybridControlPeerId(
+            message = message,
+            controlMessage = controlMessage
+        )
+
+        return IncomingTransportFrameProcessingResult.HybridControlHandled(
+            message = message,
+            peerId = peerId,
+            controlMessage = controlMessage,
+            storeResult = store.record(peerId, controlMessage)
+        )
+    }
+
+    private fun resolvedHybridControlPeerId(
+        message: IncomingTransportMessage,
+        controlMessage: HybridTransportControlMessage
+    ): String {
+        val senderId = message.frame.senderId.trim()
+        if (senderId.isNotEmpty()) {
+            return senderId
+        }
+
+        return controlMessage.publicPeerIdHint?.trim().orEmpty()
     }
 }

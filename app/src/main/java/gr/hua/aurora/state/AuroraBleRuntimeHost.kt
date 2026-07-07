@@ -85,6 +85,8 @@ import gr.hua.aurora.protocol.PrivateChatTransportFrameFactory
 import gr.hua.aurora.protocol.SeenMessageIdCache
 import gr.hua.aurora.transport.processing.IncomingTransportFrameProcessor
 import gr.hua.aurora.transport.processing.IncomingTransportFrameProcessingResult
+import gr.hua.aurora.transport.hybrid.HybridTransportControlStore
+import gr.hua.aurora.transport.hybrid.InMemoryHybridTransportControlStore
 import gr.hua.aurora.state.IncomingMessageIngestionResult.Appended
 import gr.hua.aurora.state.IncomingMessageIngestionResult.Duplicate
 import gr.hua.aurora.state.IncomingMessageIngestionResult.UnsupportedThread
@@ -436,15 +438,22 @@ fun rememberAuroraBleRuntimeState(
         )
     }
 
+    val hybridTransportControlStore = remember(
+        stateHolder
+    ) {
+        InMemoryHybridTransportControlStore()
+    }
     val transportFrameReceiver = remember(
         stateHolder,
         incomingSessionMaterialProvider,
+        hybridTransportControlStore,
         handleIdentity,
         identityHandlerStatus
     ) {
         createAuroraBleTransportFrameReceiver(
             stateHolder = stateHolder,
             sessionMaterialProvider = incomingSessionMaterialProvider,
+            hybridControlStore = hybridTransportControlStore,
             handleIdentity = handleIdentity,
             identityHandlingUnavailableReason = identityHandlingUnavailableReason(
                 loadResult = localIdentityMaterialLoadResult,
@@ -546,7 +555,9 @@ fun rememberAuroraBleRuntimeState(
                     }
                 }
                 is IncomingTransportFrameProcessingResult.IdentityHandled,
-                is IncomingTransportFrameProcessingResult.IdentityHandlingUnavailable -> Unit
+                is IncomingTransportFrameProcessingResult.IdentityHandlingUnavailable,
+                is IncomingTransportFrameProcessingResult.HybridControlHandled,
+                is IncomingTransportFrameProcessingResult.HybridControlIgnored -> Unit
             }
         }
         refreshGlobalMeshDiagnostics()
@@ -2094,6 +2105,7 @@ internal fun createAuroraIdentityHandlerOrNull(
 internal fun createAuroraBleTransportFrameReceiver(
     stateHolder: AuroraStateHolder,
     sessionMaterialProvider: IncomingSessionMaterialProvider = NoOpIncomingSessionMaterialProvider,
+    hybridControlStore: HybridTransportControlStore? = null,
     handleIdentity: ((IncomingTransportMessage) -> PeerIdentityExchangeHandlingResult)? = null,
     identityHandlingUnavailableReason: String =
         "Local agreement identity material unavailable for incoming identity exchange."
@@ -2103,6 +2115,7 @@ internal fun createAuroraBleTransportFrameReceiver(
             frames = frames,
             sessionMaterialProvider = sessionMaterialProvider,
             stateHolder = stateHolder,
+            hybridControlStore = hybridControlStore,
             handleIdentity = handleIdentity,
             identityHandlingUnavailableReason = identityHandlingUnavailableReason
         )
@@ -2173,6 +2186,8 @@ internal fun identityExchangeRuntimeStatusText(
                 }
                 is IncomingTransportFrameProcessingResult.IdentityHandlingUnavailable ->
                     processingResult.reason
+                is IncomingTransportFrameProcessingResult.HybridControlHandled,
+                is IncomingTransportFrameProcessingResult.HybridControlIgnored,
                 is IncomingTransportFrameProcessingResult.Received,
                 is IncomingTransportFrameProcessingResult.RelayOnlyEncrypted -> null
             }
@@ -2242,6 +2257,8 @@ internal fun incomingMessageRuntimeStatusText(
                 }
                 is IncomingTransportFrameProcessingResult.IdentityHandled,
                 is IncomingTransportFrameProcessingResult.IdentityHandlingUnavailable,
+                is IncomingTransportFrameProcessingResult.HybridControlHandled,
+                is IncomingTransportFrameProcessingResult.HybridControlIgnored,
                 is IncomingTransportFrameProcessingResult.RelayOnlyEncrypted -> null
             }
         }
@@ -2293,6 +2310,8 @@ private fun logIdentityExchangeReceiveResult(
                         "Incoming IDENTITY_EXCHANGE frame detected but local handler unavailable: sender=${processingResult.message.frame.senderId} reason=${processingResult.reason}"
                     )
                 }
+                is IncomingTransportFrameProcessingResult.HybridControlHandled,
+                is IncomingTransportFrameProcessingResult.HybridControlIgnored,
                 is IncomingTransportFrameProcessingResult.Received,
                 is IncomingTransportFrameProcessingResult.RelayOnlyEncrypted -> Unit
             }

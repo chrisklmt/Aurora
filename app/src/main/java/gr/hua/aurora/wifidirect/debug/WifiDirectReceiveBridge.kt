@@ -329,6 +329,8 @@ private fun wifiDirectReceiveBridgeResultLabel(
                 is IncomingTransportFrameProcessingResult.IdentityHandled -> "identity handled"
                 is IncomingTransportFrameProcessingResult.IdentityHandlingUnavailable ->
                     "identity unavailable"
+                is IncomingTransportFrameProcessingResult.HybridControlHandled -> "hybrid control"
+                is IncomingTransportFrameProcessingResult.HybridControlIgnored -> "hybrid ignored"
                 is IncomingTransportFrameProcessingResult.RelayOnlyEncrypted -> "relay only"
             }
         }
