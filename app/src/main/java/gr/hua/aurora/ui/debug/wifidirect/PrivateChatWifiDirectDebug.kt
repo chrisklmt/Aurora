@@ -7,7 +7,7 @@ import gr.hua.aurora.ui.components.DebugInfoItem
 import gr.hua.aurora.ui.components.DebugInfoSection
 import gr.hua.aurora.ui.screens.privateChatDebugIdentifierValue
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
-import gr.hua.aurora.wifidirect.wifiDirectDiscoveryBlockedReason
+import gr.hua.aurora.wifidirect.controller.wifiDirectDiscoveryBlockedReason
 import gr.hua.aurora.wifidirect.debug.WifiDirectPrivateDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.debug.WifiDirectReceiveBridgeDiagnostics
 import gr.hua.aurora.wifidirect.debug.WifiDirectSendBridgeDiagnostics

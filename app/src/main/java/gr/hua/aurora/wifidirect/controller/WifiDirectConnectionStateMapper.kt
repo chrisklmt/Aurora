@@ -1,7 +1,8 @@
-package gr.hua.aurora.wifidirect
+package gr.hua.aurora.wifidirect.controller
 
 import android.net.wifi.p2p.WifiP2pGroup
 import android.net.wifi.p2p.WifiP2pInfo
+import gr.hua.aurora.wifidirect.*
 
 internal data class WifiDirectConnectionSnapshot(
     val groupFormed: WifiDirectGroupFormedState = WifiDirectGroupFormedState.UNKNOWN,

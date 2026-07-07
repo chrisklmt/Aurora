@@ -67,8 +67,8 @@ import gr.hua.aurora.ui.components.DebugInfoSection
 import gr.hua.aurora.ui.components.buildAuroraAvailabilityUiState
 import gr.hua.aurora.wifidirect.WifiDirectPeer
 import gr.hua.aurora.wifidirect.WifiDirectRolePreference
-import gr.hua.aurora.wifidirect.WifiDirectPermissionStatusReader
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
+import gr.hua.aurora.wifidirect.controller.WifiDirectPermissionStatusReader
 import gr.hua.aurora.wifidirect.socket.RememberedWifiDirectSocketState
 import kotlinx.coroutines.launch
 

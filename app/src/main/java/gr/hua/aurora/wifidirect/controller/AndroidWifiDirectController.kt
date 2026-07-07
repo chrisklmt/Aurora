@@ -1,9 +1,10 @@
-package gr.hua.aurora.wifidirect
+package gr.hua.aurora.wifidirect.controller
 
 import android.content.Context
 import android.net.wifi.p2p.WifiP2pManager
 import android.os.Build
 import android.util.Log
+import gr.hua.aurora.wifidirect.*
 
 private const val androidWifiDirectControllerLogTag = "AndroidWifiDirectController"
 

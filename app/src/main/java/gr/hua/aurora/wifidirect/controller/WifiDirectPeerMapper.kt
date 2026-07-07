@@ -1,7 +1,8 @@
-package gr.hua.aurora.wifidirect
+package gr.hua.aurora.wifidirect.controller
 
 import android.net.wifi.p2p.WifiP2pDevice
 import android.net.wifi.p2p.WifiP2pDeviceList
+import gr.hua.aurora.wifidirect.WifiDirectPeer
 
 internal object WifiDirectPeerMapper {
     fun normalizePeer(

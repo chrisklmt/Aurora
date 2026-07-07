@@ -10,8 +10,8 @@ import gr.hua.aurora.ui.debug.wifidirect.*
 import gr.hua.aurora.ui.components.DebugInfoCardModel
 import gr.hua.aurora.ui.components.DebugInfoItem
 import gr.hua.aurora.ui.components.DebugInfoSection
-import gr.hua.aurora.wifidirect.WifiDirectPermissionStatus
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
+import gr.hua.aurora.wifidirect.controller.WifiDirectPermissionStatus
 import gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterDiagnostics
 import gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterState
 import gr.hua.aurora.wifidirect.debug.WifiDirectPrivateDebugSendDiagnostics

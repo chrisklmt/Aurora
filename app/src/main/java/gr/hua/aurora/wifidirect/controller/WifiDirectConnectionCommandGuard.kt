@@ -1,4 +1,6 @@
-package gr.hua.aurora.wifidirect
+package gr.hua.aurora.wifidirect.controller
+
+import gr.hua.aurora.wifidirect.*
 
 internal sealed interface WifiDirectConnectCommandDecision {
     data class Allowed(

@@ -1,5 +1,8 @@
 package gr.hua.aurora.wifidirect
 
+import gr.hua.aurora.wifidirect.controller.WifiDirectEnabledState
+import gr.hua.aurora.wifidirect.controller.WifiDirectPermissionStatus
+
 private const val wifiDirectFoundationNote = "Wi-Fi Direct transport not wired yet."
 
 enum class WifiDirectDiscoveryState {

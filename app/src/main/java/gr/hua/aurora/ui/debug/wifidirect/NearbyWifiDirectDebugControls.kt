@@ -24,9 +24,9 @@ import gr.hua.aurora.wifidirect.WifiDirectConnectionRole
 import gr.hua.aurora.wifidirect.WifiDirectPeer
 import gr.hua.aurora.wifidirect.WifiDirectRolePreference
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
-import gr.hua.aurora.wifidirect.wifiDirectDiscoveryBlockedReason
 import gr.hua.aurora.wifidirect.wifiDirectConnectRequestDebugText
 import gr.hua.aurora.wifidirect.wifiDirectRolePreferenceSummary
+import gr.hua.aurora.wifidirect.controller.wifiDirectDiscoveryBlockedReason
 import gr.hua.aurora.wifidirect.debug.WifiDirectGlobalDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.debug.WifiDirectPrivateDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.debug.WifiDirectReceiveBridgeDiagnostics
@@ -545,7 +545,7 @@ internal fun nearbyWifiDirectPeerActionState(
     }
 
     val connectionStatus = runtimeStatus.connectionStatus
-    val isTargetPeer = gr.hua.aurora.wifidirect.wifiDirectPeerMatches(connectionStatus.targetPeer, peer)
+    val isTargetPeer = gr.hua.aurora.wifidirect.controller.wifiDirectPeerMatches(connectionStatus.targetPeer, peer)
     return when (connectionStatus.state) {
         WifiDirectConnectionState.CONNECTING -> {
             if (isTargetPeer) {

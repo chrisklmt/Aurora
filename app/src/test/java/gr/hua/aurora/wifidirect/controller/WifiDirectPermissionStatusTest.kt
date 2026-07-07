@@ -1,4 +1,4 @@
-package gr.hua.aurora.wifidirect
+package gr.hua.aurora.wifidirect.controller
 
 import android.Manifest
 import org.junit.Assert.assertEquals

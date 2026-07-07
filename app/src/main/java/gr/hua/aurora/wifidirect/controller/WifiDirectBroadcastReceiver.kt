@@ -1,4 +1,4 @@
-package gr.hua.aurora.wifidirect
+package gr.hua.aurora.wifidirect.controller
 
 import android.content.BroadcastReceiver
 import android.content.Context

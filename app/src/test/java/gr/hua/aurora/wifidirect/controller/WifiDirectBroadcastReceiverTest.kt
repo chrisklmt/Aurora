@@ -1,4 +1,4 @@
-package gr.hua.aurora.wifidirect
+package gr.hua.aurora.wifidirect.controller
 
 import android.net.wifi.WifiManager
 import android.net.wifi.p2p.WifiP2pManager

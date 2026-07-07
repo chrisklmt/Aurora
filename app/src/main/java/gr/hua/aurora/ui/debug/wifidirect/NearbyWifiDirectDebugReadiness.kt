@@ -2,9 +2,9 @@ package gr.hua.aurora.ui.debug.wifidirect
 
 import gr.hua.aurora.wifidirect.WifiDirectConnectionState
 import gr.hua.aurora.wifidirect.WifiDirectConnectionRole
-import gr.hua.aurora.wifidirect.WifiDirectEnabledState
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
-import gr.hua.aurora.wifidirect.wifiDirectDiscoveryBlockedReason
+import gr.hua.aurora.wifidirect.controller.WifiDirectEnabledState
+import gr.hua.aurora.wifidirect.controller.wifiDirectDiscoveryBlockedReason
 import gr.hua.aurora.wifidirect.debug.WifiDirectGlobalDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.debug.WifiDirectPrivateDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.debug.WifiDirectReceiveBridgeDiagnostics

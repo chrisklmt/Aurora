@@ -22,9 +22,9 @@ import gr.hua.aurora.wifidirect.WifiDirectConnectionState
 import gr.hua.aurora.wifidirect.WifiDirectConnectionStatus
 import gr.hua.aurora.wifidirect.WifiDirectGroupFormedState
 import gr.hua.aurora.wifidirect.WifiDirectPeer
-import gr.hua.aurora.wifidirect.WifiDirectPermissionStatus
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
 import gr.hua.aurora.wifidirect.WifiDirectRolePreference
+import gr.hua.aurora.wifidirect.controller.WifiDirectPermissionStatus
 import gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterDiagnostics
 import gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterState
 import gr.hua.aurora.wifidirect.WifiDirectTransportState
