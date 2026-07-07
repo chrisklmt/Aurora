@@ -6,9 +6,9 @@ import gr.hua.aurora.protocol.MessageFrame
 import gr.hua.aurora.protocol.MessageFrameCodec
 import gr.hua.aurora.protocol.OutgoingMessageFrameBuilder
 import gr.hua.aurora.protocol.OutgoingMessageFrameResolver
-import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics
-import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterState
-import gr.hua.aurora.wifidirect.WifiDirectTransportFrame
+import gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterDiagnostics
+import gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterState
+import gr.hua.aurora.wifidirect.frame.WifiDirectTransportFrame
 import java.nio.charset.StandardCharsets.UTF_8
 
 private const val wifiDirectGlobalDebugSendTtl = 10

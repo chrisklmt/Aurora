@@ -7,12 +7,6 @@ import gr.hua.aurora.wifidirect.WifiDirectEnabledState
 import gr.hua.aurora.wifidirect.WifiDirectPeer
 import gr.hua.aurora.wifidirect.WifiDirectRolePreference
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
-import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics
-import gr.hua.aurora.wifidirect.wifiDirectFrameByteSummary
-import gr.hua.aurora.wifidirect.wifiDirectFrameCountSummary
-import gr.hua.aurora.wifidirect.wifiDirectFrameSizeSummary
-import gr.hua.aurora.wifidirect.WifiDirectFrameTransportState
-import gr.hua.aurora.wifidirect.wifiDirectFrameTransportStateSummary
 import gr.hua.aurora.wifidirect.wifiDirectConnectionRoleSummary
 import gr.hua.aurora.wifidirect.wifiDirectConnectionSummary
 import gr.hua.aurora.wifidirect.wifiDirectDiscoveryBlockedReason
@@ -23,9 +17,15 @@ import gr.hua.aurora.wifidirect.wifiDirectMissingPermissionsSummary
 import gr.hua.aurora.wifidirect.wifiDirectPeerMatches
 import gr.hua.aurora.wifidirect.wifiDirectPermissionsSummary
 import gr.hua.aurora.wifidirect.wifiDirectSupportSummary
+import gr.hua.aurora.wifidirect.frame.WifiDirectFrameTransportState
+import gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterDiagnostics
+import gr.hua.aurora.wifidirect.frame.wifiDirectFrameByteSummary
+import gr.hua.aurora.wifidirect.frame.wifiDirectFrameCountSummary
+import gr.hua.aurora.wifidirect.frame.wifiDirectFrameSizeSummary
+import gr.hua.aurora.wifidirect.frame.wifiDirectFrameTransportStateSummary
+import gr.hua.aurora.wifidirect.frame.wifiDirectTransportAdapterByteSummary
+import gr.hua.aurora.wifidirect.frame.wifiDirectTransportAdapterStateSummary
 import gr.hua.aurora.wifidirect.wifiDirectTransportSummary
-import gr.hua.aurora.wifidirect.wifiDirectTransportAdapterByteSummary
-import gr.hua.aurora.wifidirect.wifiDirectTransportAdapterStateSummary
 import gr.hua.aurora.wifidirect.debug.WifiDirectGlobalDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.debug.WifiDirectPrivateDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.debug.WifiDirectReceiveBridgeDiagnostics
@@ -1249,7 +1249,7 @@ internal fun nearbyWifiDirectCompactSummary(
         group = manualReadiness.groupStatus,
         role = wifiDirectConnectionRoleSummary(runtimeStatus.connectionStatus.role),
         socket = if (socketReady) "ready" else "not ready",
-        adapter = if (adapterDiagnostics.state == gr.hua.aurora.wifidirect.WifiDirectTransportAdapterState.READY) {
+        adapter = if (adapterDiagnostics.state == gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterState.READY) {
             "ready"
         } else {
             "not ready"

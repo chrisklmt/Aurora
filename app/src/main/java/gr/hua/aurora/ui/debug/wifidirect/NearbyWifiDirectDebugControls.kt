@@ -21,12 +21,9 @@ import gr.hua.aurora.ui.components.DebugInfoCard
 import gr.hua.aurora.wifidirect.WifiDirectDiscoveryState
 import gr.hua.aurora.wifidirect.WifiDirectConnectionState
 import gr.hua.aurora.wifidirect.WifiDirectConnectionRole
-import gr.hua.aurora.wifidirect.WifiDirectFrameTransportState
 import gr.hua.aurora.wifidirect.WifiDirectPeer
 import gr.hua.aurora.wifidirect.WifiDirectRolePreference
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
-import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics
-import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterState
 import gr.hua.aurora.wifidirect.wifiDirectDiscoveryBlockedReason
 import gr.hua.aurora.wifidirect.wifiDirectConnectRequestDebugText
 import gr.hua.aurora.wifidirect.wifiDirectRolePreferenceSummary
@@ -38,6 +35,9 @@ import gr.hua.aurora.wifidirect.debug.WifiDirectSmokeTestDiagnostics
 import gr.hua.aurora.wifidirect.debug.wifiDirectGlobalDebugSendStateSummary
 import gr.hua.aurora.wifidirect.debug.wifiDirectReceiveBridgeStateSummary
 import gr.hua.aurora.wifidirect.debug.wifiDirectSendBridgeStateSummary
+import gr.hua.aurora.wifidirect.frame.WifiDirectFrameTransportState
+import gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterDiagnostics
+import gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterState
 import gr.hua.aurora.wifidirect.socket.WifiDirectSocketCommand
 import gr.hua.aurora.wifidirect.socket.WifiDirectSocketCommandAvailability
 import gr.hua.aurora.wifidirect.socket.WifiDirectSocketDiagnostics

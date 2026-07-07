@@ -22,6 +22,7 @@ import gr.hua.aurora.state.AuroraStateHolder
 import gr.hua.aurora.state.SampleAuroraState
 import gr.hua.aurora.state.createAuroraBleTransportFrameReceiver
 import gr.hua.aurora.wifidirect.*
+import gr.hua.aurora.wifidirect.frame.*
 import gr.hua.aurora.wifidirect.socket.AndroidWifiDirectSocketController
 import gr.hua.aurora.wifidirect.socket.WifiDirectSocketState
 import org.junit.Assert.assertEquals

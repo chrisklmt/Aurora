@@ -5,7 +5,7 @@ import gr.hua.aurora.ble.transport.BleGattTransportFrame
 import gr.hua.aurora.ble.transport.BleTransportReceiveResult
 import gr.hua.aurora.state.IncomingMessageIngestionResult
 import gr.hua.aurora.state.IncomingTransportFrameProcessingResult
-import gr.hua.aurora.wifidirect.WifiDirectTransportFrame
+import gr.hua.aurora.wifidirect.frame.WifiDirectTransportFrame
 
 private const val wifiDirectReceiveBridgeNote =
     "Debug bridge only; normal send path still uses BLE."

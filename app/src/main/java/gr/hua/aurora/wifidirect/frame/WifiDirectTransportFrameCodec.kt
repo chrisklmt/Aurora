@@ -1,4 +1,4 @@
-package gr.hua.aurora.wifidirect
+package gr.hua.aurora.wifidirect.frame
 
 private val wifiDirectTransportMagic = byteArrayOf(
     0x41,

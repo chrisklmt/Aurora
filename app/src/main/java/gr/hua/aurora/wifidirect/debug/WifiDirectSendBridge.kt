@@ -1,7 +1,7 @@
 package gr.hua.aurora.wifidirect.debug
 
-import gr.hua.aurora.wifidirect.WifiDirectTransportAdapter
-import gr.hua.aurora.wifidirect.WifiDirectTransportFrame
+import gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapter
+import gr.hua.aurora.wifidirect.frame.WifiDirectTransportFrame
 
 private const val wifiDirectSendBridgeNote =
     "Debug send bridge only; normal chat sending still uses BLE."

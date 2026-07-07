@@ -7,11 +7,7 @@ import gr.hua.aurora.ui.components.DebugInfoItem
 import gr.hua.aurora.ui.components.DebugInfoSection
 import gr.hua.aurora.ui.screens.privateChatDebugIdentifierValue
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
-import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics
-import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterState
 import gr.hua.aurora.wifidirect.wifiDirectDiscoveryBlockedReason
-import gr.hua.aurora.wifidirect.wifiDirectTransportAdapterStateSummary
-import gr.hua.aurora.wifidirect.wifiDirectFrameTransportStateSummary
 import gr.hua.aurora.wifidirect.debug.WifiDirectPrivateDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.debug.WifiDirectReceiveBridgeDiagnostics
 import gr.hua.aurora.wifidirect.debug.WifiDirectSendBridgeDiagnostics
@@ -19,6 +15,10 @@ import gr.hua.aurora.wifidirect.debug.wifiDirectPrivateDebugSendModeSummary
 import gr.hua.aurora.wifidirect.debug.wifiDirectPrivateDebugSendStateSummary
 import gr.hua.aurora.wifidirect.debug.wifiDirectReceiveBridgeStateSummary
 import gr.hua.aurora.wifidirect.debug.wifiDirectSendBridgeStateSummary
+import gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterDiagnostics
+import gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterState
+import gr.hua.aurora.wifidirect.frame.wifiDirectFrameTransportStateSummary
+import gr.hua.aurora.wifidirect.frame.wifiDirectTransportAdapterStateSummary
 import gr.hua.aurora.wifidirect.socket.WifiDirectSocketDiagnostics
 import gr.hua.aurora.wifidirect.socket.wifiDirectEffectiveFrameTransportState
 import gr.hua.aurora.wifidirect.socket.wifiDirectSocketFrameReadinessReason
@@ -122,7 +122,7 @@ internal fun privateChatWifiDirectDebugDiagnostics(
         privateDebugSendEnabled = privateDebugSendDiagnostics.enabled,
         socketConnected = socketDiagnostics.isConnected,
         frameReady = wifiDirectEffectiveFrameTransportState(socketDiagnostics) ==
-            gr.hua.aurora.wifidirect.WifiDirectFrameTransportState.READY,
+            gr.hua.aurora.wifidirect.frame.WifiDirectFrameTransportState.READY,
         adapterReady = adapterDiagnostics.state == WifiDirectTransportAdapterState.READY,
         sendBridgeEnabled = sendBridgeDiagnostics.enabled,
         receiveBridgeEnabled = receiveBridgeDiagnostics.enabled,

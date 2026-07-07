@@ -1,7 +1,7 @@
 package gr.hua.aurora.wifidirect.socket
 
 import android.util.Log
-import gr.hua.aurora.wifidirect.WifiDirectFrameTransportState
+import gr.hua.aurora.wifidirect.frame.WifiDirectFrameTransportState
 
 private const val wifiDirectSocketStateMachineLogTag = "WifiDirectSocketStateMachine"
 

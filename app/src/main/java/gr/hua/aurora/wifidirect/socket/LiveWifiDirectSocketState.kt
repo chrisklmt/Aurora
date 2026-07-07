@@ -18,6 +18,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import gr.hua.aurora.model.OutgoingChatMessage
 import gr.hua.aurora.protocol.PreparedPrivateChatTransportFrame
 import gr.hua.aurora.wifidirect.*
+import gr.hua.aurora.wifidirect.frame.*
 import gr.hua.aurora.wifidirect.debug.WifiDirectGlobalDebugSendBridge
 import gr.hua.aurora.wifidirect.debug.WifiDirectGlobalDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.debug.WifiDirectPrivateDebugSendBridge

@@ -12,6 +12,7 @@ import gr.hua.aurora.protocol.PreparedPrivateChatTransportFrame
 import gr.hua.aurora.protocol.PrivateChatMessagePayloadCodec
 import gr.hua.aurora.protocol.PrivateChatTransportFrameFactory
 import gr.hua.aurora.wifidirect.*
+import gr.hua.aurora.wifidirect.frame.*
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

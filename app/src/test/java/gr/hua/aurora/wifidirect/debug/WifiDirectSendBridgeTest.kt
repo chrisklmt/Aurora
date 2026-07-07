@@ -1,6 +1,7 @@
 package gr.hua.aurora.wifidirect.debug
 
 import gr.hua.aurora.wifidirect.*
+import gr.hua.aurora.wifidirect.frame.*
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals

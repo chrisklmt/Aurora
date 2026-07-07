@@ -1,7 +1,7 @@
 package gr.hua.aurora.wifidirect.socket
 
-import gr.hua.aurora.wifidirect.WifiDirectFrame
-import gr.hua.aurora.wifidirect.WifiDirectFrameCodec
+import gr.hua.aurora.wifidirect.frame.WifiDirectFrame
+import gr.hua.aurora.wifidirect.frame.WifiDirectFrameCodec
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.Socket

@@ -1,6 +1,6 @@
 package gr.hua.aurora.wifidirect.socket
 
-import gr.hua.aurora.wifidirect.WifiDirectFrameTransportState
+import gr.hua.aurora.wifidirect.frame.WifiDirectFrameTransportState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull

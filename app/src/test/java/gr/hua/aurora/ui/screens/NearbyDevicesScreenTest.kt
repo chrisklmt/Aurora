@@ -25,8 +25,8 @@ import gr.hua.aurora.wifidirect.WifiDirectPeer
 import gr.hua.aurora.wifidirect.WifiDirectPermissionStatus
 import gr.hua.aurora.wifidirect.WifiDirectRuntimeStatus
 import gr.hua.aurora.wifidirect.WifiDirectRolePreference
-import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics
-import gr.hua.aurora.wifidirect.WifiDirectTransportAdapterState
+import gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterDiagnostics
+import gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterState
 import gr.hua.aurora.wifidirect.WifiDirectTransportState
 import gr.hua.aurora.wifidirect.debug.WifiDirectGlobalDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.debug.WifiDirectPrivateDebugSendDiagnostics
@@ -1136,7 +1136,7 @@ class NearbyDevicesScreenTest {
                 diagnostics = WifiDirectSmokeTestDiagnostics(
                     ready = true,
                     sendBridgeEnabled = true,
-                    adapterState = gr.hua.aurora.wifidirect.WifiDirectTransportAdapterState.READY,
+                    adapterState = gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterState.READY,
                     smokeFramesSent = 1,
                     smokeSendFailures = 1,
                     lastSmokeFrameSize = 96,
@@ -2021,8 +2021,8 @@ class NearbyDevicesScreenTest {
             ),
             buildNearbyWifiDirectFrameDebugSection(
                 diagnostics = WifiDirectSocketDiagnostics(
-                    frameDiagnostics = gr.hua.aurora.wifidirect.WifiDirectFrameDiagnostics(
-                        state = gr.hua.aurora.wifidirect.WifiDirectFrameTransportState.READY,
+                    frameDiagnostics = gr.hua.aurora.wifidirect.frame.WifiDirectFrameDiagnostics(
+                        state = gr.hua.aurora.wifidirect.frame.WifiDirectFrameTransportState.READY,
                         framesSent = 1,
                         framesReceived = 1,
                         bytesSent = 8,
@@ -2042,8 +2042,8 @@ class NearbyDevicesScreenTest {
                 role = WifiDirectSocketRole.SERVER,
                 endpoint = WifiDirectSocketEndpoint(host = "192.168.49.1", port = 8988),
                 isConnected = true,
-                frameDiagnostics = gr.hua.aurora.wifidirect.WifiDirectFrameDiagnostics(
-                    state = gr.hua.aurora.wifidirect.WifiDirectFrameTransportState.IDLE
+                frameDiagnostics = gr.hua.aurora.wifidirect.frame.WifiDirectFrameDiagnostics(
+                    state = gr.hua.aurora.wifidirect.frame.WifiDirectFrameTransportState.IDLE
                 )
             ),
             adapterDiagnostics = WifiDirectTransportAdapterDiagnostics(
@@ -2074,8 +2074,8 @@ class NearbyDevicesScreenTest {
                 )
             ),
             buildNearbyWifiDirectAdapterDebugSection(
-                diagnostics = gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics(
-                    state = gr.hua.aurora.wifidirect.WifiDirectTransportAdapterState.READY,
+                diagnostics = gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterDiagnostics(
+                    state = gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterState.READY,
                     framesSubmitted = 2,
                     framesReceived = 1,
                     bytesSubmitted = 24,
@@ -2308,8 +2308,8 @@ class NearbyDevicesScreenTest {
                     role = WifiDirectSocketRole.CLIENT,
                     isConnected = true
                 ),
-                adapterDiagnostics = gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics(
-                    state = gr.hua.aurora.wifidirect.WifiDirectTransportAdapterState.READY
+                adapterDiagnostics = gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterDiagnostics(
+                    state = gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterState.READY
                 )
             )
         )
@@ -2365,8 +2365,8 @@ class NearbyDevicesScreenTest {
                     role = WifiDirectSocketRole.CLIENT,
                     isConnected = true
                 ),
-                adapterDiagnostics = gr.hua.aurora.wifidirect.WifiDirectTransportAdapterDiagnostics(
-                    state = gr.hua.aurora.wifidirect.WifiDirectTransportAdapterState.READY
+                adapterDiagnostics = gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterDiagnostics(
+                    state = gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterState.READY
                 ),
                 sendBridgeDiagnostics = WifiDirectSendBridgeDiagnostics(
                     enabled = true
@@ -2374,7 +2374,7 @@ class NearbyDevicesScreenTest {
                 smokeTestDiagnostics = WifiDirectSmokeTestDiagnostics(
                     ready = true,
                     sendBridgeEnabled = true,
-                    adapterState = gr.hua.aurora.wifidirect.WifiDirectTransportAdapterState.READY
+                    adapterState = gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterState.READY
                 )
             )
         )
