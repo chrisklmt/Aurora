@@ -2366,6 +2366,22 @@ internal fun hybridBootstrapDiagnosticsAfterReceiveOrNull(
     return HybridBootstrapDiagnosticsFormatter.format(decision)
 }
 
+internal fun hybridBootstrapDiagnosticsRuntimeStatusText(
+    diagnostics: HybridBootstrapDiagnostics
+): String? {
+    return when (diagnostics.selectionStatus) {
+        HybridBootstrapDiagnostics.SelectionStatus.NoCandidates ->
+            "Hybrid bootstrap: no candidates"
+        HybridBootstrapDiagnostics.SelectionStatus.NoSocketReadyCandidates ->
+            "Hybrid bootstrap: candidates available, none socket-ready"
+        HybridBootstrapDiagnostics.SelectionStatus.Selected ->
+            "Hybrid bootstrap: socket-ready peer=${diagnostics.selectedPeerId} " +
+                "session=${diagnostics.selectedSessionId} " +
+                "address=${diagnostics.selectedGroupOwnerAddress} " +
+                "port=${diagnostics.selectedSocketPort}"
+    }
+}
+
 private fun logIdentityExchangeReceiveResult(
     result: BleTransportReceiveResult
 ) {

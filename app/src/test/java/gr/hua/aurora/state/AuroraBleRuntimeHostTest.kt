@@ -1378,6 +1378,26 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun noCandidatesDiagnosticsMapToStableRuntimeStatusText() {
+        val diagnostics = HybridBootstrapDiagnostics(
+            candidateCount = 0,
+            socketReadyCandidateCount = 0,
+            selectionStatus = HybridBootstrapDiagnostics.SelectionStatus.NoCandidates,
+            selectedPeerId = null,
+            selectedSessionId = null,
+            selectedGroupOwnerAddress = null,
+            selectedSocketPort = null,
+            selectedLatestCreatedAtMillis = null,
+            statusText = "No hybrid bootstrap candidates"
+        )
+
+        assertEquals(
+            "Hybrid bootstrap: no candidates",
+            hybridBootstrapDiagnosticsRuntimeStatusText(diagnostics)
+        )
+    }
+
+    @Test
     fun runtimeReceiverRecordsHybridControlFrameAndProviderComputesSocketReadyDecisionFromSameStore() {
         val holder = AuroraStateHolder(
             initialState = SampleAuroraState.create(
@@ -1469,6 +1489,26 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun noSocketReadyCandidatesDiagnosticsMapToStableRuntimeStatusText() {
+        val diagnostics = HybridBootstrapDiagnostics(
+            candidateCount = 2,
+            socketReadyCandidateCount = 0,
+            selectionStatus = HybridBootstrapDiagnostics.SelectionStatus.NoSocketReadyCandidates,
+            selectedPeerId = null,
+            selectedSessionId = null,
+            selectedGroupOwnerAddress = null,
+            selectedSocketPort = null,
+            selectedLatestCreatedAtMillis = null,
+            statusText = "Hybrid bootstrap candidates available, none socket-ready"
+        )
+
+        assertEquals(
+            "Hybrid bootstrap: candidates available, none socket-ready",
+            hybridBootstrapDiagnosticsRuntimeStatusText(diagnostics)
+        )
+    }
+
+    @Test
     fun diagnosticsAfterHybridControlHandledWithSocketReadyStateBecomeSelected() {
         val holder = AuroraStateHolder(
             initialState = SampleAuroraState.create(
@@ -1512,6 +1552,26 @@ class AuroraBleRuntimeHostTest {
         assertEquals("192.168.49.42", diagnostics.selectedGroupOwnerAddress)
         assertEquals(9042, diagnostics.selectedSocketPort)
         assertEquals(1_716_360_002L, diagnostics.selectedLatestCreatedAtMillis)
+    }
+
+    @Test
+    fun selectedDiagnosticsMapToStableRuntimeStatusTextWithPeerSessionAddressAndPort() {
+        val diagnostics = HybridBootstrapDiagnostics(
+            candidateCount = 1,
+            socketReadyCandidateCount = 1,
+            selectionStatus = HybridBootstrapDiagnostics.SelectionStatus.Selected,
+            selectedPeerId = "peer-selected",
+            selectedSessionId = "session-selected",
+            selectedGroupOwnerAddress = "192.168.49.50",
+            selectedSocketPort = 9050,
+            selectedLatestCreatedAtMillis = 1_716_360_050L,
+            statusText = "Hybrid bootstrap candidate ready: peer=peer-selected session=session-selected address=192.168.49.50 port=9050"
+        )
+
+        assertEquals(
+            "Hybrid bootstrap: socket-ready peer=peer-selected session=session-selected address=192.168.49.50 port=9050",
+            hybridBootstrapDiagnosticsRuntimeStatusText(diagnostics)
+        )
     }
 
     @Test
@@ -1648,6 +1708,26 @@ class AuroraBleRuntimeHostTest {
         )
         assertEquals(1, secondDiagnostics.socketReadyCandidateCount)
         assertEquals("peer-hybrid-diagnostics-3", secondDiagnostics.selectedPeerId)
+    }
+
+    @Test
+    fun nullSelectedFieldsInNonSelectedDiagnosticsDoNotCrash() {
+        val diagnostics = HybridBootstrapDiagnostics(
+            candidateCount = 1,
+            socketReadyCandidateCount = 0,
+            selectionStatus = HybridBootstrapDiagnostics.SelectionStatus.NoSocketReadyCandidates,
+            selectedPeerId = null,
+            selectedSessionId = null,
+            selectedGroupOwnerAddress = null,
+            selectedSocketPort = null,
+            selectedLatestCreatedAtMillis = null,
+            statusText = "Hybrid bootstrap candidates available, none socket-ready"
+        )
+
+        assertEquals(
+            "Hybrid bootstrap: candidates available, none socket-ready",
+            hybridBootstrapDiagnosticsRuntimeStatusText(diagnostics)
+        )
     }
 
     @Test
@@ -1800,6 +1880,30 @@ class AuroraBleRuntimeHostTest {
             )
         )
         assertEquals(initialPrivateMessages, holder.uiState.privateMessagesByPeerId)
+    }
+
+    @Test
+    fun runtimeStatusHelperDoesNotMutateDiagnostics() {
+        val diagnostics = HybridBootstrapDiagnostics(
+            candidateCount = 1,
+            socketReadyCandidateCount = 1,
+            selectionStatus = HybridBootstrapDiagnostics.SelectionStatus.Selected,
+            selectedPeerId = "peer-stable",
+            selectedSessionId = "session-stable",
+            selectedGroupOwnerAddress = "192.168.49.60",
+            selectedSocketPort = 9060,
+            selectedLatestCreatedAtMillis = 1_716_360_060L,
+            statusText = "Hybrid bootstrap candidate ready: peer=peer-stable session=session-stable address=192.168.49.60 port=9060"
+        )
+        val before = diagnostics.copy()
+
+        val statusText = hybridBootstrapDiagnosticsRuntimeStatusText(diagnostics)
+
+        assertEquals(
+            "Hybrid bootstrap: socket-ready peer=peer-stable session=session-stable address=192.168.49.60 port=9060",
+            statusText
+        )
+        assertEquals(before, diagnostics)
     }
 
     @Test
