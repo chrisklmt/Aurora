@@ -46,6 +46,7 @@ import gr.hua.aurora.protocol.PeerSessionEstablisher
 import gr.hua.aurora.protocol.SeenMessageIdCache
 import gr.hua.aurora.transport.processing.IncomingTransportFrameProcessingResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCandidateSelection
+import gr.hua.aurora.transport.hybrid.HybridBootstrapDiagnostics
 import gr.hua.aurora.transport.hybrid.HybridBootstrapDecisionProvider
 import gr.hua.aurora.transport.hybrid.HybridTransportControlFrameFactory
 import gr.hua.aurora.transport.hybrid.HybridTransportControlMessage
@@ -1357,6 +1358,26 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun diagnosticsAfterEmptyInitialDecisionAreNoCandidates() {
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+
+        val diagnostics = currentHybridBootstrapDiagnostics(provider)
+
+        assertEquals(0, diagnostics.candidateCount)
+        assertEquals(0, diagnostics.socketReadyCandidateCount)
+        assertEquals(
+            HybridBootstrapDiagnostics.SelectionStatus.NoCandidates,
+            diagnostics.selectionStatus
+        )
+        assertEquals(null, diagnostics.selectedPeerId)
+        assertEquals(null, diagnostics.selectedSessionId)
+        assertEquals(null, diagnostics.selectedGroupOwnerAddress)
+        assertEquals(null, diagnostics.selectedSocketPort)
+        assertEquals(null, diagnostics.selectedLatestCreatedAtMillis)
+    }
+
+    @Test
     fun runtimeReceiverRecordsHybridControlFrameAndProviderComputesSocketReadyDecisionFromSameStore() {
         val holder = AuroraStateHolder(
             initialState = SampleAuroraState.create(
@@ -1403,6 +1424,94 @@ class AuroraBleRuntimeHostTest {
             HybridBootstrapCandidateSelection.Selected(decision.candidates.single()),
             decision.selection
         )
+    }
+
+    @Test
+    fun diagnosticsAfterHybridControlHandledWithOfferOnlyStateBecomeNoSocketReadyCandidates() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+
+        val result = receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridOfferMessage(
+                    sessionId = "hybrid-diagnostics-session-1",
+                    createdAtMillis = 1_716_360_001L
+                ),
+                frameId = "hybrid-diagnostics-offer-only",
+                senderId = "peer-hybrid-diagnostics-1"
+            )
+        )
+        val diagnostics = requireNotNull(
+            hybridBootstrapDiagnosticsAfterReceiveOrNull(
+                result = result,
+                provider = provider
+            )
+        )
+
+        assertEquals(1, diagnostics.candidateCount)
+        assertEquals(0, diagnostics.socketReadyCandidateCount)
+        assertEquals(
+            HybridBootstrapDiagnostics.SelectionStatus.NoSocketReadyCandidates,
+            diagnostics.selectionStatus
+        )
+        assertEquals(null, diagnostics.selectedPeerId)
+    }
+
+    @Test
+    fun diagnosticsAfterHybridControlHandledWithSocketReadyStateBecomeSelected() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+
+        val result = receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridSocketHintMessage(
+                    sessionId = "hybrid-diagnostics-session-2",
+                    createdAtMillis = 1_716_360_002L,
+                    groupOwnerAddress = "192.168.49.42",
+                    socketPort = 9042
+                ),
+                frameId = "hybrid-diagnostics-socket-ready",
+                senderId = "peer-hybrid-diagnostics-2"
+            )
+        )
+        val diagnostics = requireNotNull(
+            hybridBootstrapDiagnosticsAfterReceiveOrNull(
+                result = result,
+                provider = provider
+            )
+        )
+
+        assertEquals(
+            HybridBootstrapDiagnostics.SelectionStatus.Selected,
+            diagnostics.selectionStatus
+        )
+        assertEquals("peer-hybrid-diagnostics-2", diagnostics.selectedPeerId)
+        assertEquals("hybrid-diagnostics-session-2", diagnostics.selectedSessionId)
+        assertEquals("192.168.49.42", diagnostics.selectedGroupOwnerAddress)
+        assertEquals(9042, diagnostics.selectedSocketPort)
+        assertEquals(1_716_360_002L, diagnostics.selectedLatestCreatedAtMillis)
     }
 
     @Test
@@ -1476,6 +1585,72 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun diagnosticsUpdateWhenRepeatedHybridControlFramesUpdateTheDecision() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+
+        val firstResult = receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridOfferMessage(
+                    sessionId = "hybrid-diagnostics-session-3",
+                    createdAtMillis = 1_716_360_010L
+                ),
+                frameId = "hybrid-diagnostics-update-offer",
+                senderId = "peer-hybrid-diagnostics-3"
+            )
+        )
+        val firstDiagnostics = requireNotNull(
+            hybridBootstrapDiagnosticsAfterReceiveOrNull(
+                result = firstResult,
+                provider = provider
+            )
+        )
+
+        assertEquals(
+            HybridBootstrapDiagnostics.SelectionStatus.NoSocketReadyCandidates,
+            firstDiagnostics.selectionStatus
+        )
+
+        val secondResult = receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridSocketHintMessage(
+                    sessionId = "hybrid-diagnostics-session-3",
+                    createdAtMillis = 1_716_360_011L,
+                    groupOwnerAddress = "192.168.49.43",
+                    socketPort = 9043
+                ),
+                frameId = "hybrid-diagnostics-update-socket",
+                senderId = "peer-hybrid-diagnostics-3"
+            )
+        )
+        val secondDiagnostics = requireNotNull(
+            hybridBootstrapDiagnosticsAfterReceiveOrNull(
+                result = secondResult,
+                provider = provider
+            )
+        )
+
+        assertEquals(
+            HybridBootstrapDiagnostics.SelectionStatus.Selected,
+            secondDiagnostics.selectionStatus
+        )
+        assertEquals(1, secondDiagnostics.socketReadyCandidateCount)
+        assertEquals("peer-hybrid-diagnostics-3", secondDiagnostics.selectedPeerId)
+    }
+
+    @Test
     fun decisionComputationAfterHybridControlHandledDoesNotAppendGlobalChatMessage() {
         val holder = AuroraStateHolder(
             initialState = SampleAuroraState.create(
@@ -1505,6 +1680,43 @@ class AuroraBleRuntimeHostTest {
 
         assertNotNull(
             hybridBootstrapDecisionAfterReceiveOrNull(
+                result = result,
+                provider = provider
+            )
+        )
+        assertEquals(initialGlobalMessages, holder.uiState.globalMessages)
+    }
+
+    @Test
+    fun diagnosticsComputationAfterHybridControlHandledDoesNotAppendGlobalChatMessage() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+        val initialGlobalMessages = holder.uiState.globalMessages
+
+        val result = receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridOfferMessage(
+                    sessionId = "hybrid-diagnostics-session-4",
+                    createdAtMillis = 1_716_360_020L
+                ),
+                frameId = "hybrid-diagnostics-no-global-append",
+                senderId = "peer-hybrid-diagnostics-4"
+            )
+        )
+
+        assertNotNull(
+            hybridBootstrapDiagnosticsAfterReceiveOrNull(
                 result = result,
                 provider = provider
             )
@@ -1544,6 +1756,45 @@ class AuroraBleRuntimeHostTest {
 
         assertNotNull(
             hybridBootstrapDecisionAfterReceiveOrNull(
+                result = result,
+                provider = provider
+            )
+        )
+        assertEquals(initialPrivateMessages, holder.uiState.privateMessagesByPeerId)
+    }
+
+    @Test
+    fun diagnosticsComputationAfterHybridControlHandledDoesNotAppendPrivateChatMessage() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+        val initialPrivateMessages = holder.uiState.privateMessagesByPeerId
+
+        val result = receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridSocketHintMessage(
+                    sessionId = "hybrid-diagnostics-session-5",
+                    createdAtMillis = 1_716_360_030L,
+                    groupOwnerAddress = "192.168.49.45",
+                    socketPort = 9045
+                ),
+                frameId = "hybrid-diagnostics-no-private-append",
+                senderId = "peer-hybrid-diagnostics-5"
+            )
+        )
+
+        assertNotNull(
+            hybridBootstrapDiagnosticsAfterReceiveOrNull(
                 result = result,
                 provider = provider
             )

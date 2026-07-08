@@ -86,6 +86,8 @@ import gr.hua.aurora.protocol.SeenMessageIdCache
 import gr.hua.aurora.transport.processing.IncomingTransportFrameProcessor
 import gr.hua.aurora.transport.processing.IncomingTransportFrameProcessingResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapDecision
+import gr.hua.aurora.transport.hybrid.HybridBootstrapDiagnostics
+import gr.hua.aurora.transport.hybrid.HybridBootstrapDiagnosticsFormatter
 import gr.hua.aurora.transport.hybrid.HybridBootstrapDecisionProvider
 import gr.hua.aurora.transport.hybrid.HybridTransportControlStore
 import gr.hua.aurora.transport.hybrid.InMemoryHybridTransportControlStore
@@ -448,11 +450,23 @@ fun rememberAuroraBleRuntimeState(
     val hybridBootstrapDecisionProvider = remember(hybridTransportControlStore) {
         HybridBootstrapDecisionProvider(hybridTransportControlStore)
     }
-    var latestHybridBootstrapDecision by remember(
+    val initialHybridBootstrapDecision = remember(
         runtimeGeneration,
         hybridBootstrapDecisionProvider
     ) {
-        mutableStateOf(hybridBootstrapDecisionProvider.currentDecision())
+        hybridBootstrapDecisionProvider.currentDecision()
+    }
+    var latestHybridBootstrapDecision by remember(
+        runtimeGeneration
+    ) {
+        mutableStateOf(initialHybridBootstrapDecision)
+    }
+    var latestHybridBootstrapDiagnostics by remember(
+        runtimeGeneration
+    ) {
+        mutableStateOf(
+            HybridBootstrapDiagnosticsFormatter.format(initialHybridBootstrapDecision)
+        )
     }
     val transportFrameReceiver = remember(
         stateHolder,
@@ -486,6 +500,7 @@ fun rememberAuroraBleRuntimeState(
             provider = hybridBootstrapDecisionProvider
         )?.let { decision ->
             latestHybridBootstrapDecision = decision
+            latestHybridBootstrapDiagnostics = HybridBootstrapDiagnosticsFormatter.format(decision)
         }
         incomingMessageRuntimeStatusText(result)?.let { statusText ->
             lastIncomingMessageStatus = statusText
@@ -2331,6 +2346,24 @@ internal fun hybridBootstrapDecisionAfterReceiveOrNull(
         is BleTransportReceiveResult.InvalidChunk,
         is BleTransportReceiveResult.ProcessorFailed -> null
     }
+}
+
+internal fun currentHybridBootstrapDiagnostics(
+    provider: HybridBootstrapDecisionProvider
+): HybridBootstrapDiagnostics {
+    return HybridBootstrapDiagnosticsFormatter.format(provider.currentDecision())
+}
+
+internal fun hybridBootstrapDiagnosticsAfterReceiveOrNull(
+    result: BleTransportReceiveResult,
+    provider: HybridBootstrapDecisionProvider
+): HybridBootstrapDiagnostics? {
+    val decision = hybridBootstrapDecisionAfterReceiveOrNull(
+        result = result,
+        provider = provider
+    ) ?: return null
+
+    return HybridBootstrapDiagnosticsFormatter.format(decision)
 }
 
 private fun logIdentityExchangeReceiveResult(
