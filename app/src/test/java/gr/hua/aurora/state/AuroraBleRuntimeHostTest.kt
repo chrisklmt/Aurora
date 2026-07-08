@@ -45,6 +45,11 @@ import gr.hua.aurora.protocol.PrivateChatMessageSendResult
 import gr.hua.aurora.protocol.PeerSessionEstablisher
 import gr.hua.aurora.protocol.SeenMessageIdCache
 import gr.hua.aurora.transport.processing.IncomingTransportFrameProcessingResult
+import gr.hua.aurora.transport.hybrid.HybridBootstrapCandidateSelection
+import gr.hua.aurora.transport.hybrid.HybridBootstrapDecisionProvider
+import gr.hua.aurora.transport.hybrid.HybridTransportControlFrameFactory
+import gr.hua.aurora.transport.hybrid.HybridTransportControlMessage
+import gr.hua.aurora.transport.hybrid.InMemoryHybridTransportControlStore
 import gr.hua.aurora.wifidirect.frame.WifiDirectTransportFrame
 import gr.hua.aurora.wifidirect.transport.WifiDirectTransportSendResult
 import gr.hua.aurora.wifidirect.transport.WifiDirectTransportSender
@@ -1352,6 +1357,201 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun runtimeReceiverRecordsHybridControlFrameAndProviderComputesSocketReadyDecisionFromSameStore() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+
+        val result = receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridSocketHintMessage(
+                    sessionId = "hybrid-session-1",
+                    createdAtMillis = 1_716_350_001L,
+                    groupOwnerAddress = "192.168.49.20",
+                    socketPort = 8988
+                ),
+                frameId = "hybrid-control-runtime-1",
+                senderId = "peer-hybrid"
+            )
+        )
+        val decision = requireNotNull(
+            hybridBootstrapDecisionAfterReceiveOrNull(
+                result = result,
+                provider = provider
+            )
+        )
+
+        assertTrue(result is BleTransportReceiveResult.Processed)
+        val processed = result as BleTransportReceiveResult.Processed
+        assertTrue(
+            processed.processingResult is IncomingTransportFrameProcessingResult.HybridControlHandled
+        )
+        assertEquals(1, decision.candidates.size)
+        assertEquals("peer-hybrid", decision.candidates.single().peerId)
+        assertTrue(decision.candidates.single().socketReady)
+        assertEquals(
+            HybridBootstrapCandidateSelection.Selected(decision.candidates.single()),
+            decision.selection
+        )
+    }
+
+    @Test
+    fun repeatedHybridControlFramesUpdateProviderDecisionThroughExistingStoreSnapshot() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+
+        val firstResult = receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridOfferMessage(
+                    sessionId = "hybrid-session-2",
+                    createdAtMillis = 1_716_350_010L
+                ),
+                frameId = "hybrid-control-runtime-2-offer",
+                senderId = "peer-hybrid-2"
+            )
+        )
+        val firstDecision = requireNotNull(
+            hybridBootstrapDecisionAfterReceiveOrNull(
+                result = firstResult,
+                provider = provider
+            )
+        )
+
+        assertEquals(
+            HybridBootstrapCandidateSelection.NoSocketReadyCandidates,
+            firstDecision.selection
+        )
+        assertEquals(1, firstDecision.candidates.size)
+        assertFalse(firstDecision.candidates.single().socketReady)
+
+        val secondResult = receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridSocketHintMessage(
+                    sessionId = "hybrid-session-2",
+                    createdAtMillis = 1_716_350_011L,
+                    groupOwnerAddress = "192.168.49.21",
+                    socketPort = 8989
+                ),
+                frameId = "hybrid-control-runtime-2-socket",
+                senderId = "peer-hybrid-2"
+            )
+        )
+        val secondDecision = requireNotNull(
+            hybridBootstrapDecisionAfterReceiveOrNull(
+                result = secondResult,
+                provider = provider
+            )
+        )
+
+        assertEquals(1, secondDecision.candidates.size)
+        assertTrue(secondDecision.candidates.single().hasOffer)
+        assertTrue(secondDecision.candidates.single().hasSocketHint)
+        assertTrue(secondDecision.candidates.single().socketReady)
+        assertEquals(
+            HybridBootstrapCandidateSelection.Selected(secondDecision.candidates.single()),
+            secondDecision.selection
+        )
+    }
+
+    @Test
+    fun decisionComputationAfterHybridControlHandledDoesNotAppendGlobalChatMessage() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+        val initialGlobalMessages = holder.uiState.globalMessages
+
+        val result = receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridOfferMessage(
+                    sessionId = "hybrid-session-3",
+                    createdAtMillis = 1_716_350_020L
+                ),
+                frameId = "hybrid-control-runtime-3",
+                senderId = "peer-hybrid-3"
+            )
+        )
+
+        assertNotNull(
+            hybridBootstrapDecisionAfterReceiveOrNull(
+                result = result,
+                provider = provider
+            )
+        )
+        assertEquals(initialGlobalMessages, holder.uiState.globalMessages)
+    }
+
+    @Test
+    fun decisionComputationAfterHybridControlHandledDoesNotAppendPrivateChatMessage() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+        val initialPrivateMessages = holder.uiState.privateMessagesByPeerId
+
+        val result = receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridSocketHintMessage(
+                    sessionId = "hybrid-session-4",
+                    createdAtMillis = 1_716_350_030L,
+                    groupOwnerAddress = "192.168.49.23",
+                    socketPort = 8990
+                ),
+                frameId = "hybrid-control-runtime-4",
+                senderId = "peer-hybrid-4"
+            )
+        )
+
+        assertNotNull(
+            hybridBootstrapDecisionAfterReceiveOrNull(
+                result = result,
+                provider = provider
+            )
+        )
+        assertEquals(initialPrivateMessages, holder.uiState.privateMessagesByPeerId)
+    }
+
+    @Test
     fun runtimeStatusTextReportsIdentityHandlerUnavailable() {
         val result = BleTransportReceiveResult.Processed(
             groupId = 0x42,
@@ -1604,6 +1804,68 @@ class AuroraBleRuntimeHostTest {
             ),
             senderPublicKey = senderPublicKeyBytes()
         )
+    }
+
+    private fun hybridOfferMessage(
+        sessionId: String,
+        createdAtMillis: Long
+    ): HybridTransportControlMessage {
+        return HybridTransportControlMessage(
+            messageType = HybridTransportControlMessage.MessageType.WIFI_DIRECT_OFFER,
+            sessionId = sessionId,
+            publicPeerIdHint = "peer-hybrid-hint",
+            createdAtMillis = createdAtMillis,
+            capabilityFlags = setOf(
+                HybridTransportControlMessage.CapabilityFlag.WIFI_DIRECT_BOOTSTRAP,
+                HybridTransportControlMessage.CapabilityFlag.BLE_FALLBACK
+            )
+        )
+    }
+
+    private fun hybridSocketHintMessage(
+        sessionId: String,
+        createdAtMillis: Long,
+        groupOwnerAddress: String,
+        socketPort: Int
+    ): HybridTransportControlMessage {
+        return HybridTransportControlMessage(
+            messageType = HybridTransportControlMessage.MessageType.WIFI_DIRECT_SOCKET_HINT,
+            sessionId = sessionId,
+            publicPeerIdHint = "peer-hybrid-hint",
+            groupOwnerAddress = groupOwnerAddress,
+            socketPort = socketPort,
+            createdAtMillis = createdAtMillis,
+            capabilityFlags = setOf(
+                HybridTransportControlMessage.CapabilityFlag.WIFI_DIRECT_SOCKET_HINT,
+                HybridTransportControlMessage.CapabilityFlag.BLE_FALLBACK
+            )
+        )
+    }
+
+    private fun hybridControlFrames(
+        message: HybridTransportControlMessage,
+        frameId: String,
+        senderId: String,
+        groupId: Int = 0x5100
+    ): List<BleGattTransportFrame> {
+        val frame = HybridTransportControlFrameFactory.create(
+            message = message,
+            frameId = frameId,
+            senderId = senderId
+        )
+        return BleGattTransportFrameChunker.chunk(
+            encodedEnvelopeBytes = MessageFrameCodec.encode(frame).toByteArray(UTF_8),
+            groupId = groupId
+        )
+    }
+
+    private fun receiveFrames(
+        receiver: gr.hua.aurora.ble.transport.BleTransportFrameReceiver,
+        frames: List<BleGattTransportFrame>
+    ): BleTransportReceiveResult {
+        return frames.fold<BleGattTransportFrame, BleTransportReceiveResult?>(null) { _, frame ->
+            receiver.receive(frame)
+        } ?: error("Expected at least one transport frame.")
     }
 
     private fun deterministicKey(offset: Int): ByteArray {

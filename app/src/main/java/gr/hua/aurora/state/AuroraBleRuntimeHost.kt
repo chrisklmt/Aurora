@@ -85,6 +85,8 @@ import gr.hua.aurora.protocol.PrivateChatTransportFrameFactory
 import gr.hua.aurora.protocol.SeenMessageIdCache
 import gr.hua.aurora.transport.processing.IncomingTransportFrameProcessor
 import gr.hua.aurora.transport.processing.IncomingTransportFrameProcessingResult
+import gr.hua.aurora.transport.hybrid.HybridBootstrapDecision
+import gr.hua.aurora.transport.hybrid.HybridBootstrapDecisionProvider
 import gr.hua.aurora.transport.hybrid.HybridTransportControlStore
 import gr.hua.aurora.transport.hybrid.InMemoryHybridTransportControlStore
 import gr.hua.aurora.state.IncomingMessageIngestionResult.Appended
@@ -443,6 +445,15 @@ fun rememberAuroraBleRuntimeState(
     ) {
         InMemoryHybridTransportControlStore()
     }
+    val hybridBootstrapDecisionProvider = remember(hybridTransportControlStore) {
+        HybridBootstrapDecisionProvider(hybridTransportControlStore)
+    }
+    var latestHybridBootstrapDecision by remember(
+        runtimeGeneration,
+        hybridBootstrapDecisionProvider
+    ) {
+        mutableStateOf(hybridBootstrapDecisionProvider.currentDecision())
+    }
     val transportFrameReceiver = remember(
         stateHolder,
         incomingSessionMaterialProvider,
@@ -469,6 +480,12 @@ fun rememberAuroraBleRuntimeState(
         peerSessionDiagnostics = peerSessionRegistry.diagnosticsSnapshot()
         identityExchangeRuntimeStatusText(result)?.let { statusText ->
             lastIdentityExchangeStatus = statusText
+        }
+        hybridBootstrapDecisionAfterReceiveOrNull(
+            result = result,
+            provider = hybridBootstrapDecisionProvider
+        )?.let { decision ->
+            latestHybridBootstrapDecision = decision
         }
         incomingMessageRuntimeStatusText(result)?.let { statusText ->
             lastIncomingMessageStatus = statusText
@@ -2289,6 +2306,30 @@ internal fun incomingMessageRuntimeStatusText(
             "Incoming transport buffer overflow: ${result.reason}"
         is BleTransportReceiveResult.Buffered,
         is BleTransportReceiveResult.DuplicateChunk -> null
+    }
+}
+
+internal fun hybridBootstrapDecisionAfterReceiveOrNull(
+    result: BleTransportReceiveResult,
+    provider: HybridBootstrapDecisionProvider
+): HybridBootstrapDecision? {
+    return when (result) {
+        is BleTransportReceiveResult.Processed -> {
+            when (result.processingResult) {
+                is IncomingTransportFrameProcessingResult.HybridControlHandled ->
+                    provider.currentDecision()
+                is IncomingTransportFrameProcessingResult.HybridControlIgnored,
+                is IncomingTransportFrameProcessingResult.IdentityHandled,
+                is IncomingTransportFrameProcessingResult.IdentityHandlingUnavailable,
+                is IncomingTransportFrameProcessingResult.Received,
+                is IncomingTransportFrameProcessingResult.RelayOnlyEncrypted -> null
+            }
+        }
+        is BleTransportReceiveResult.Buffered,
+        is BleTransportReceiveResult.BufferOverflow,
+        is BleTransportReceiveResult.DuplicateChunk,
+        is BleTransportReceiveResult.InvalidChunk,
+        is BleTransportReceiveResult.ProcessorFailed -> null
     }
 }
 
