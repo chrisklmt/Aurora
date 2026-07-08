@@ -89,6 +89,8 @@ import gr.hua.aurora.transport.hybrid.HybridBootstrapDecision
 import gr.hua.aurora.transport.hybrid.HybridBootstrapDiagnostics
 import gr.hua.aurora.transport.hybrid.HybridBootstrapDiagnosticsFormatter
 import gr.hua.aurora.transport.hybrid.HybridBootstrapDecisionProvider
+import gr.hua.aurora.transport.hybrid.HybridBootstrapSocketEndpointResolution
+import gr.hua.aurora.transport.hybrid.HybridBootstrapSocketEndpointResolver
 import gr.hua.aurora.transport.hybrid.HybridTransportControlStore
 import gr.hua.aurora.transport.hybrid.InMemoryHybridTransportControlStore
 import gr.hua.aurora.state.IncomingMessageIngestionResult.Appended
@@ -468,6 +470,13 @@ fun rememberAuroraBleRuntimeState(
             HybridBootstrapDiagnosticsFormatter.format(initialHybridBootstrapDecision)
         )
     }
+    var latestHybridBootstrapSocketEndpointResolution by remember(
+        runtimeGeneration
+    ) {
+        mutableStateOf(
+            HybridBootstrapSocketEndpointResolver.resolve(initialHybridBootstrapDecision)
+        )
+    }
     val transportFrameReceiver = remember(
         stateHolder,
         incomingSessionMaterialProvider,
@@ -501,6 +510,8 @@ fun rememberAuroraBleRuntimeState(
         )?.let { decision ->
             latestHybridBootstrapDecision = decision
             latestHybridBootstrapDiagnostics = HybridBootstrapDiagnosticsFormatter.format(decision)
+            latestHybridBootstrapSocketEndpointResolution =
+                HybridBootstrapSocketEndpointResolver.resolve(decision)
         }
         incomingMessageRuntimeStatusText(result)?.let { statusText ->
             lastIncomingMessageStatus = statusText
@@ -2366,6 +2377,24 @@ internal fun hybridBootstrapDiagnosticsAfterReceiveOrNull(
     return HybridBootstrapDiagnosticsFormatter.format(decision)
 }
 
+internal fun currentHybridBootstrapSocketEndpointResolution(
+    provider: HybridBootstrapDecisionProvider
+): HybridBootstrapSocketEndpointResolution {
+    return HybridBootstrapSocketEndpointResolver.resolve(provider.currentDecision())
+}
+
+internal fun hybridBootstrapSocketEndpointResolutionAfterReceiveOrNull(
+    result: BleTransportReceiveResult,
+    provider: HybridBootstrapDecisionProvider
+): HybridBootstrapSocketEndpointResolution? {
+    val decision = hybridBootstrapDecisionAfterReceiveOrNull(
+        result = result,
+        provider = provider
+    ) ?: return null
+
+    return HybridBootstrapSocketEndpointResolver.resolve(decision)
+}
+
 internal fun hybridBootstrapDiagnosticsRuntimeStatusText(
     diagnostics: HybridBootstrapDiagnostics
 ): String? {
@@ -2379,6 +2408,24 @@ internal fun hybridBootstrapDiagnosticsRuntimeStatusText(
                 "session=${diagnostics.selectedSessionId} " +
                 "address=${diagnostics.selectedGroupOwnerAddress} " +
                 "port=${diagnostics.selectedSocketPort}"
+    }
+}
+
+internal fun hybridBootstrapSocketEndpointRuntimeStatusText(
+    resolution: HybridBootstrapSocketEndpointResolution
+): String? {
+    return when (resolution) {
+        HybridBootstrapSocketEndpointResolution.NoCandidates ->
+            "Hybrid bootstrap endpoint: no candidates"
+        HybridBootstrapSocketEndpointResolution.NoSocketReadyCandidate ->
+            "Hybrid bootstrap endpoint: no socket-ready candidate"
+        is HybridBootstrapSocketEndpointResolution.InvalidSelectedCandidate ->
+            "Hybrid bootstrap endpoint: invalid selected candidate: ${resolution.reason}"
+        is HybridBootstrapSocketEndpointResolution.Resolved ->
+            "Hybrid bootstrap endpoint: peer=${resolution.endpoint.peerId} " +
+                "session=${resolution.endpoint.sessionId} " +
+                "address=${resolution.endpoint.groupOwnerAddress} " +
+                "port=${resolution.endpoint.socketPort}"
     }
 }
 
