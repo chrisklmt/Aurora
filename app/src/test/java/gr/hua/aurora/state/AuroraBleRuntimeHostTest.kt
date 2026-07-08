@@ -45,6 +45,8 @@ import gr.hua.aurora.protocol.PrivateChatMessageSendResult
 import gr.hua.aurora.protocol.PeerSessionEstablisher
 import gr.hua.aurora.protocol.SeenMessageIdCache
 import gr.hua.aurora.transport.processing.IncomingTransportFrameProcessingResult
+import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptDecision
+import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptRequest
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCandidateSelection
 import gr.hua.aurora.transport.hybrid.HybridBootstrapDiagnostics
 import gr.hua.aurora.transport.hybrid.HybridBootstrapDecisionProvider
@@ -1393,6 +1395,19 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun initialEmptyDecisionProducesNoCandidatesAttemptDecision() {
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+
+        val decision = currentHybridBootstrapAttemptDecision(
+            provider = provider,
+            requestedAtMillis = 1_716_380_001L
+        )
+
+        assertEquals(HybridBootstrapAttemptDecision.NoCandidates, decision)
+    }
+
+    @Test
     fun noCandidatesDiagnosticsMapToStableRuntimeStatusText() {
         val diagnostics = HybridBootstrapDiagnostics(
             candidateCount = 0,
@@ -1418,6 +1433,16 @@ class AuroraBleRuntimeHostTest {
             "Hybrid bootstrap endpoint: no candidates",
             hybridBootstrapSocketEndpointRuntimeStatusText(
                 HybridBootstrapSocketEndpointResolution.NoCandidates
+            )
+        )
+    }
+
+    @Test
+    fun noCandidatesAttemptDecisionMapsToStableRuntimeStatusText() {
+        assertEquals(
+            "Hybrid bootstrap attempt: no candidates",
+            hybridBootstrapAttemptRuntimeStatusText(
+                HybridBootstrapAttemptDecision.NoCandidates
             )
         )
     }
@@ -1553,6 +1578,46 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun offerOnlyHybridControlStateProducesNoSocketReadyCandidateAttemptDecision() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+
+        val result = receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridOfferMessage(
+                    sessionId = "hybrid-attempt-session-1",
+                    createdAtMillis = 1_716_380_010L
+                ),
+                frameId = "hybrid-attempt-offer-only",
+                senderId = "peer-hybrid-attempt-1"
+            )
+        )
+        val decision = requireNotNull(
+            hybridBootstrapAttemptDecisionAfterReceiveOrNull(
+                result = result,
+                provider = provider,
+                requestedAtMillis = 1_716_380_020L
+            )
+        )
+
+        assertEquals(
+            HybridBootstrapAttemptDecision.NoSocketReadyCandidate,
+            decision
+        )
+    }
+
+    @Test
     fun noSocketReadyCandidatesDiagnosticsMapToStableRuntimeStatusText() {
         val diagnostics = HybridBootstrapDiagnostics(
             candidateCount = 2,
@@ -1578,6 +1643,16 @@ class AuroraBleRuntimeHostTest {
             "Hybrid bootstrap endpoint: no socket-ready candidate",
             hybridBootstrapSocketEndpointRuntimeStatusText(
                 HybridBootstrapSocketEndpointResolution.NoSocketReadyCandidate
+            )
+        )
+    }
+
+    @Test
+    fun noSocketReadyCandidateAttemptDecisionMapsToStableRuntimeStatusText() {
+        assertEquals(
+            "Hybrid bootstrap attempt: no socket-ready candidate",
+            hybridBootstrapAttemptRuntimeStatusText(
+                HybridBootstrapAttemptDecision.NoSocketReadyCandidate
             )
         )
     }
@@ -1679,6 +1754,58 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun socketReadyHybridControlStateProducesAllowedAttemptDecision() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+
+        val result = receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridSocketHintMessage(
+                    sessionId = "hybrid-attempt-session-2",
+                    createdAtMillis = 1_716_380_030L,
+                    groupOwnerAddress = "192.168.49.62",
+                    socketPort = 9062
+                ),
+                frameId = "hybrid-attempt-socket-ready",
+                senderId = "peer-hybrid-attempt-2"
+            )
+        )
+        val decision = requireNotNull(
+            hybridBootstrapAttemptDecisionAfterReceiveOrNull(
+                result = result,
+                provider = provider,
+                requestedAtMillis = 1_716_380_040L
+            )
+        )
+
+        assertEquals(
+            HybridBootstrapAttemptDecision.Allowed(
+                HybridBootstrapAttemptRequest(
+                    peerId = "peer-hybrid-attempt-2",
+                    sessionId = "hybrid-attempt-session-2",
+                    bootstrapIdentifier = "hybrid-attempt-session-2",
+                    groupOwnerAddress = "192.168.49.62",
+                    socketPort = 9062,
+                    latestCreatedAtMillis = 1_716_380_030L,
+                    requestedAtMillis = 1_716_380_040L
+                )
+            ),
+            decision
+        )
+    }
+
+    @Test
     fun selectedDiagnosticsMapToStableRuntimeStatusTextWithPeerSessionAddressAndPort() {
         val diagnostics = HybridBootstrapDiagnostics(
             candidateCount = 1,
@@ -1714,6 +1841,26 @@ class AuroraBleRuntimeHostTest {
         assertEquals(
             "Hybrid bootstrap endpoint: peer=peer-endpoint-selected session=session-endpoint-selected address=192.168.49.53 port=9053",
             hybridBootstrapSocketEndpointRuntimeStatusText(resolution)
+        )
+    }
+
+    @Test
+    fun allowedAttemptDecisionRuntimeStatusTextIsStableAndPreservesPeerSessionAddressAndPort() {
+        val decision = HybridBootstrapAttemptDecision.Allowed(
+            HybridBootstrapAttemptRequest(
+                peerId = "peer-attempt-selected",
+                sessionId = "session-attempt-selected",
+                bootstrapIdentifier = "bootstrap-attempt-selected",
+                groupOwnerAddress = "192.168.49.63",
+                socketPort = 9063,
+                latestCreatedAtMillis = 1_716_380_063L,
+                requestedAtMillis = 1_716_380_064L
+            )
+        )
+
+        assertEquals(
+            "Hybrid bootstrap attempt: allowed peer=peer-attempt-selected session=session-attempt-selected address=192.168.49.63 port=9063",
+            hybridBootstrapAttemptRuntimeStatusText(decision)
         )
     }
 
@@ -1927,6 +2074,82 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun repeatedHybridControlFramesUpdateAttemptDecisionThroughLatestEndpointResolution() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+
+        val firstResult = receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridOfferMessage(
+                    sessionId = "hybrid-attempt-session-3",
+                    createdAtMillis = 1_716_380_050L
+                ),
+                frameId = "hybrid-attempt-update-offer",
+                senderId = "peer-hybrid-attempt-3"
+            )
+        )
+        val firstDecision = requireNotNull(
+            hybridBootstrapAttemptDecisionAfterReceiveOrNull(
+                result = firstResult,
+                provider = provider,
+                requestedAtMillis = 1_716_380_060L
+            )
+        )
+
+        assertEquals(
+            HybridBootstrapAttemptDecision.NoSocketReadyCandidate,
+            firstDecision
+        )
+
+        val secondResult = receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridSocketHintMessage(
+                    sessionId = "hybrid-attempt-session-3",
+                    createdAtMillis = 1_716_380_061L,
+                    groupOwnerAddress = "192.168.49.64",
+                    socketPort = 9064
+                ),
+                frameId = "hybrid-attempt-update-socket",
+                senderId = "peer-hybrid-attempt-3"
+            )
+        )
+        val secondDecision = requireNotNull(
+            hybridBootstrapAttemptDecisionAfterReceiveOrNull(
+                result = secondResult,
+                provider = provider,
+                requestedAtMillis = 1_716_380_071L
+            )
+        )
+
+        assertEquals(
+            HybridBootstrapAttemptDecision.Allowed(
+                HybridBootstrapAttemptRequest(
+                    peerId = "peer-hybrid-attempt-3",
+                    sessionId = "hybrid-attempt-session-3",
+                    bootstrapIdentifier = "hybrid-attempt-session-3",
+                    groupOwnerAddress = "192.168.49.64",
+                    socketPort = 9064,
+                    latestCreatedAtMillis = 1_716_380_061L,
+                    requestedAtMillis = 1_716_380_071L
+                )
+            ),
+            secondDecision
+        )
+    }
+
+    @Test
     fun nullSelectedFieldsInNonSelectedDiagnosticsDoNotCrash() {
         val diagnostics = HybridBootstrapDiagnostics(
             candidateCount = 1,
@@ -1955,6 +2178,31 @@ class AuroraBleRuntimeHostTest {
         assertEquals(
             "Hybrid bootstrap endpoint: invalid selected candidate: Selected hybrid bootstrap candidate socketPort is missing.",
             hybridBootstrapSocketEndpointRuntimeStatusText(resolution)
+        )
+    }
+
+    @Test
+    fun invalidEndpointAttemptDecisionMapsToStableRuntimeStatusText() {
+        val decision = HybridBootstrapAttemptDecision.InvalidEndpoint(
+            reason = "Endpoint timestamp is in the future."
+        )
+
+        assertEquals(
+            "Hybrid bootstrap attempt: invalid endpoint: Endpoint timestamp is in the future.",
+            hybridBootstrapAttemptRuntimeStatusText(decision)
+        )
+    }
+
+    @Test
+    fun endpointTooOldAttemptDecisionMapsToStableRuntimeStatusText() {
+        val decision = HybridBootstrapAttemptDecision.EndpointTooOld(
+            ageMillis = 45_000L,
+            maxAgeMillis = 30_000L
+        )
+
+        assertEquals(
+            "Hybrid bootstrap attempt: endpoint too old age=45000 max=30000",
+            hybridBootstrapAttemptRuntimeStatusText(decision)
         )
     }
 
@@ -2029,6 +2277,46 @@ class AuroraBleRuntimeHostTest {
             hybridBootstrapSocketEndpointResolutionAfterReceiveOrNull(
                 result = result,
                 provider = provider
+            )
+        )
+        assertEquals(initialGlobalMessages, holder.uiState.globalMessages)
+    }
+
+    @Test
+    fun attemptDecisionComputationAfterHybridControlHandledDoesNotAppendGlobalChatMessage() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+        val initialGlobalMessages = holder.uiState.globalMessages
+
+        val result = receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridSocketHintMessage(
+                    sessionId = "hybrid-attempt-session-4",
+                    createdAtMillis = 1_716_380_080L,
+                    groupOwnerAddress = "192.168.49.65",
+                    socketPort = 9065
+                ),
+                frameId = "hybrid-attempt-no-global-append",
+                senderId = "peer-hybrid-attempt-4"
+            )
+        )
+
+        assertNotNull(
+            hybridBootstrapAttemptDecisionAfterReceiveOrNull(
+                result = result,
+                provider = provider,
+                requestedAtMillis = 1_716_380_090L
             )
         )
         assertEquals(initialGlobalMessages, holder.uiState.globalMessages)
@@ -2150,6 +2438,46 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun attemptDecisionComputationAfterHybridControlHandledDoesNotAppendPrivateChatMessage() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+        val initialPrivateMessages = holder.uiState.privateMessagesByPeerId
+
+        val result = receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridSocketHintMessage(
+                    sessionId = "hybrid-attempt-session-5",
+                    createdAtMillis = 1_716_380_100L,
+                    groupOwnerAddress = "192.168.49.66",
+                    socketPort = 9066
+                ),
+                frameId = "hybrid-attempt-no-private-append",
+                senderId = "peer-hybrid-attempt-5"
+            )
+        )
+
+        assertNotNull(
+            hybridBootstrapAttemptDecisionAfterReceiveOrNull(
+                result = result,
+                provider = provider,
+                requestedAtMillis = 1_716_380_110L
+            )
+        )
+        assertEquals(initialPrivateMessages, holder.uiState.privateMessagesByPeerId)
+    }
+
+    @Test
     fun diagnosticsComputationAfterHybridControlHandledDoesNotAppendPrivateChatMessage() {
         val holder = AuroraStateHolder(
             initialState = SampleAuroraState.create(
@@ -2186,6 +2514,32 @@ class AuroraBleRuntimeHostTest {
             )
         )
         assertEquals(initialPrivateMessages, holder.uiState.privateMessagesByPeerId)
+    }
+
+    @Test
+    fun attemptRuntimeStatusHelperDoesNotMutateDecision() {
+        val decision = HybridBootstrapAttemptDecision.Allowed(
+            HybridBootstrapAttemptRequest(
+                peerId = "peer-attempt-stable",
+                sessionId = "session-attempt-stable",
+                bootstrapIdentifier = "bootstrap-attempt-stable",
+                groupOwnerAddress = "192.168.49.67",
+                socketPort = 9067,
+                latestCreatedAtMillis = 1_716_380_120L,
+                requestedAtMillis = 1_716_380_121L
+            )
+        )
+        val before = decision.copy(
+            request = decision.request.copy()
+        )
+
+        val statusText = hybridBootstrapAttemptRuntimeStatusText(decision)
+
+        assertEquals(
+            "Hybrid bootstrap attempt: allowed peer=peer-attempt-stable session=session-attempt-stable address=192.168.49.67 port=9067",
+            statusText
+        )
+        assertEquals(before, decision)
     }
 
     @Test

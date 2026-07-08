@@ -89,6 +89,8 @@ import gr.hua.aurora.transport.hybrid.HybridBootstrapDecision
 import gr.hua.aurora.transport.hybrid.HybridBootstrapDiagnostics
 import gr.hua.aurora.transport.hybrid.HybridBootstrapDiagnosticsFormatter
 import gr.hua.aurora.transport.hybrid.HybridBootstrapDecisionProvider
+import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptDecision
+import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptPolicy
 import gr.hua.aurora.transport.hybrid.HybridBootstrapSocketEndpointResolution
 import gr.hua.aurora.transport.hybrid.HybridBootstrapSocketEndpointResolver
 import gr.hua.aurora.transport.hybrid.HybridTransportControlStore
@@ -477,6 +479,18 @@ fun rememberAuroraBleRuntimeState(
             HybridBootstrapSocketEndpointResolver.resolve(initialHybridBootstrapDecision)
         )
     }
+    val hybridBootstrapRequestedAtMillis = System::currentTimeMillis
+    var latestHybridBootstrapAttemptDecision by remember(
+        runtimeGeneration
+    ) {
+        mutableStateOf(
+            HybridBootstrapAttemptPolicy.decide(
+                resolution = latestHybridBootstrapSocketEndpointResolution,
+                requestedAtMillis = hybridBootstrapRequestedAtMillis(),
+                maxEndpointAgeMillis = HybridBootstrapAttemptPolicy.DEFAULT_MAX_ENDPOINT_AGE_MILLIS
+            )
+        )
+    }
     val transportFrameReceiver = remember(
         stateHolder,
         incomingSessionMaterialProvider,
@@ -512,6 +526,11 @@ fun rememberAuroraBleRuntimeState(
             latestHybridBootstrapDiagnostics = HybridBootstrapDiagnosticsFormatter.format(decision)
             latestHybridBootstrapSocketEndpointResolution =
                 HybridBootstrapSocketEndpointResolver.resolve(decision)
+            latestHybridBootstrapAttemptDecision = HybridBootstrapAttemptPolicy.decide(
+                resolution = latestHybridBootstrapSocketEndpointResolution,
+                requestedAtMillis = hybridBootstrapRequestedAtMillis(),
+                maxEndpointAgeMillis = HybridBootstrapAttemptPolicy.DEFAULT_MAX_ENDPOINT_AGE_MILLIS
+            )
         }
         incomingMessageRuntimeStatusText(result)?.let { statusText ->
             lastIncomingMessageStatus = statusText
@@ -2383,6 +2402,17 @@ internal fun currentHybridBootstrapSocketEndpointResolution(
     return HybridBootstrapSocketEndpointResolver.resolve(provider.currentDecision())
 }
 
+internal fun currentHybridBootstrapAttemptDecision(
+    provider: HybridBootstrapDecisionProvider,
+    requestedAtMillis: Long
+): HybridBootstrapAttemptDecision {
+    return HybridBootstrapAttemptPolicy.decide(
+        resolution = currentHybridBootstrapSocketEndpointResolution(provider),
+        requestedAtMillis = requestedAtMillis,
+        maxEndpointAgeMillis = HybridBootstrapAttemptPolicy.DEFAULT_MAX_ENDPOINT_AGE_MILLIS
+    )
+}
+
 internal fun hybridBootstrapSocketEndpointResolutionAfterReceiveOrNull(
     result: BleTransportReceiveResult,
     provider: HybridBootstrapDecisionProvider
@@ -2393,6 +2423,23 @@ internal fun hybridBootstrapSocketEndpointResolutionAfterReceiveOrNull(
     ) ?: return null
 
     return HybridBootstrapSocketEndpointResolver.resolve(decision)
+}
+
+internal fun hybridBootstrapAttemptDecisionAfterReceiveOrNull(
+    result: BleTransportReceiveResult,
+    provider: HybridBootstrapDecisionProvider,
+    requestedAtMillis: Long
+): HybridBootstrapAttemptDecision? {
+    val resolution = hybridBootstrapSocketEndpointResolutionAfterReceiveOrNull(
+        result = result,
+        provider = provider
+    ) ?: return null
+
+    return HybridBootstrapAttemptPolicy.decide(
+        resolution = resolution,
+        requestedAtMillis = requestedAtMillis,
+        maxEndpointAgeMillis = HybridBootstrapAttemptPolicy.DEFAULT_MAX_ENDPOINT_AGE_MILLIS
+    )
 }
 
 internal fun hybridBootstrapDiagnosticsRuntimeStatusText(
@@ -2408,6 +2455,26 @@ internal fun hybridBootstrapDiagnosticsRuntimeStatusText(
                 "session=${diagnostics.selectedSessionId} " +
                 "address=${diagnostics.selectedGroupOwnerAddress} " +
                 "port=${diagnostics.selectedSocketPort}"
+    }
+}
+
+internal fun hybridBootstrapAttemptRuntimeStatusText(
+    decision: HybridBootstrapAttemptDecision
+): String? {
+    return when (decision) {
+        is HybridBootstrapAttemptDecision.Allowed ->
+            "Hybrid bootstrap attempt: allowed peer=${decision.request.peerId} " +
+                "session=${decision.request.sessionId} " +
+                "address=${decision.request.groupOwnerAddress} " +
+                "port=${decision.request.socketPort}"
+        HybridBootstrapAttemptDecision.NoCandidates ->
+            "Hybrid bootstrap attempt: no candidates"
+        HybridBootstrapAttemptDecision.NoSocketReadyCandidate ->
+            "Hybrid bootstrap attempt: no socket-ready candidate"
+        is HybridBootstrapAttemptDecision.InvalidEndpoint ->
+            "Hybrid bootstrap attempt: invalid endpoint: ${decision.reason}"
+        is HybridBootstrapAttemptDecision.EndpointTooOld ->
+            "Hybrid bootstrap attempt: endpoint too old age=${decision.ageMillis} max=${decision.maxAgeMillis}"
     }
 }
 
