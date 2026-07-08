@@ -46,10 +46,14 @@ import gr.hua.aurora.protocol.PeerSessionEstablisher
 import gr.hua.aurora.protocol.SeenMessageIdCache
 import gr.hua.aurora.transport.processing.IncomingTransportFrameProcessingResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptDecision
+import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommandBuildResult
+import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommand
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptRequest
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCandidateSelection
 import gr.hua.aurora.transport.hybrid.HybridBootstrapDiagnostics
 import gr.hua.aurora.transport.hybrid.HybridBootstrapDecisionProvider
+import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutionResult
+import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutor
 import gr.hua.aurora.transport.hybrid.HybridBootstrapSocketEndpoint
 import gr.hua.aurora.transport.hybrid.HybridBootstrapSocketEndpointResolution
 import gr.hua.aurora.transport.hybrid.HybridTransportControlFrameFactory
@@ -1408,6 +1412,23 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun initialEmptyDecisionProducesNoCandidatesCommandBuildResult() {
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+
+        val result = currentHybridBootstrapAttemptCommandBuildResult(
+            provider = provider,
+            requestedAtMillis = 1_716_390_001L,
+            commandCreatedAtMillis = 1_716_390_002L
+        )
+
+        assertEquals(
+            HybridBootstrapAttemptCommandBuildResult.NoCandidates,
+            result
+        )
+    }
+
+    @Test
     fun noCandidatesDiagnosticsMapToStableRuntimeStatusText() {
         val diagnostics = HybridBootstrapDiagnostics(
             candidateCount = 0,
@@ -1443,6 +1464,16 @@ class AuroraBleRuntimeHostTest {
             "Hybrid bootstrap attempt: no candidates",
             hybridBootstrapAttemptRuntimeStatusText(
                 HybridBootstrapAttemptDecision.NoCandidates
+            )
+        )
+    }
+
+    @Test
+    fun noCandidatesCommandBuildResultMapsToStableRuntimeStatusText() {
+        assertEquals(
+            "Hybrid bootstrap command: no candidates",
+            hybridBootstrapAttemptCommandBuildRuntimeStatusText(
+                HybridBootstrapAttemptCommandBuildResult.NoCandidates
             )
         )
     }
@@ -1618,6 +1649,47 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun offerOnlyHybridControlStateProducesNoSocketReadyCandidateCommandBuildResult() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+
+        val result = receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridOfferMessage(
+                    sessionId = "hybrid-command-session-1",
+                    createdAtMillis = 1_716_390_010L
+                ),
+                frameId = "hybrid-command-offer-only",
+                senderId = "peer-hybrid-command-1"
+            )
+        )
+        val buildResult = requireNotNull(
+            hybridBootstrapAttemptCommandBuildResultAfterReceiveOrNull(
+                result = result,
+                provider = provider,
+                requestedAtMillis = 1_716_390_020L,
+                commandCreatedAtMillis = 1_716_390_021L
+            )
+        )
+
+        assertEquals(
+            HybridBootstrapAttemptCommandBuildResult.NoSocketReadyCandidate,
+            buildResult
+        )
+    }
+
+    @Test
     fun noSocketReadyCandidatesDiagnosticsMapToStableRuntimeStatusText() {
         val diagnostics = HybridBootstrapDiagnostics(
             candidateCount = 2,
@@ -1653,6 +1725,16 @@ class AuroraBleRuntimeHostTest {
             "Hybrid bootstrap attempt: no socket-ready candidate",
             hybridBootstrapAttemptRuntimeStatusText(
                 HybridBootstrapAttemptDecision.NoSocketReadyCandidate
+            )
+        )
+    }
+
+    @Test
+    fun noSocketReadyCandidateCommandBuildResultMapsToStableRuntimeStatusText() {
+        assertEquals(
+            "Hybrid bootstrap command: no socket-ready candidate",
+            hybridBootstrapAttemptCommandBuildRuntimeStatusText(
+                HybridBootstrapAttemptCommandBuildResult.NoSocketReadyCandidate
             )
         )
     }
@@ -1806,6 +1888,60 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun socketReadyHybridControlStateProducesBuiltCommandBuildResult() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+
+        val result = receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridSocketHintMessage(
+                    sessionId = "hybrid-command-session-2",
+                    createdAtMillis = 1_716_390_030L,
+                    groupOwnerAddress = "192.168.49.72",
+                    socketPort = 9072
+                ),
+                frameId = "hybrid-command-socket-ready",
+                senderId = "peer-hybrid-command-2"
+            )
+        )
+        val buildResult = requireNotNull(
+            hybridBootstrapAttemptCommandBuildResultAfterReceiveOrNull(
+                result = result,
+                provider = provider,
+                requestedAtMillis = 1_716_390_040L,
+                commandCreatedAtMillis = 1_716_390_041L
+            )
+        )
+
+        assertEquals(
+            HybridBootstrapAttemptCommandBuildResult.Built(
+                HybridBootstrapAttemptCommand(
+                    peerId = "peer-hybrid-command-2",
+                    sessionId = "hybrid-command-session-2",
+                    bootstrapIdentifier = "hybrid-command-session-2",
+                    groupOwnerAddress = "192.168.49.72",
+                    socketPort = 9072,
+                    latestCreatedAtMillis = 1_716_390_030L,
+                    requestedAtMillis = 1_716_390_040L,
+                    commandCreatedAtMillis = 1_716_390_041L
+                )
+            ),
+            buildResult
+        )
+    }
+
+    @Test
     fun selectedDiagnosticsMapToStableRuntimeStatusTextWithPeerSessionAddressAndPort() {
         val diagnostics = HybridBootstrapDiagnostics(
             candidateCount = 1,
@@ -1861,6 +1997,27 @@ class AuroraBleRuntimeHostTest {
         assertEquals(
             "Hybrid bootstrap attempt: allowed peer=peer-attempt-selected session=session-attempt-selected address=192.168.49.63 port=9063",
             hybridBootstrapAttemptRuntimeStatusText(decision)
+        )
+    }
+
+    @Test
+    fun builtCommandBuildStatusTextIsStableAndPreservesPeerSessionAddressAndPort() {
+        val result = HybridBootstrapAttemptCommandBuildResult.Built(
+            HybridBootstrapAttemptCommand(
+                peerId = "peer-command-selected",
+                sessionId = "session-command-selected",
+                bootstrapIdentifier = "bootstrap-command-selected",
+                groupOwnerAddress = "192.168.49.73",
+                socketPort = 9073,
+                latestCreatedAtMillis = 1_716_390_073L,
+                requestedAtMillis = 1_716_390_074L,
+                commandCreatedAtMillis = 1_716_390_075L
+            )
+        )
+
+        assertEquals(
+            "Hybrid bootstrap command: built peer=peer-command-selected session=session-command-selected address=192.168.49.73 port=9073",
+            hybridBootstrapAttemptCommandBuildRuntimeStatusText(result)
         )
     }
 
@@ -2150,6 +2307,85 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun repeatedHybridControlFramesUpdateCommandBuildResultThroughLatestAttemptDecision() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+
+        val firstResult = receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridOfferMessage(
+                    sessionId = "hybrid-command-session-3",
+                    createdAtMillis = 1_716_390_050L
+                ),
+                frameId = "hybrid-command-update-offer",
+                senderId = "peer-hybrid-command-3"
+            )
+        )
+        val firstBuildResult = requireNotNull(
+            hybridBootstrapAttemptCommandBuildResultAfterReceiveOrNull(
+                result = firstResult,
+                provider = provider,
+                requestedAtMillis = 1_716_390_060L,
+                commandCreatedAtMillis = 1_716_390_061L
+            )
+        )
+
+        assertEquals(
+            HybridBootstrapAttemptCommandBuildResult.NoSocketReadyCandidate,
+            firstBuildResult
+        )
+
+        val secondResult = receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridSocketHintMessage(
+                    sessionId = "hybrid-command-session-3",
+                    createdAtMillis = 1_716_390_062L,
+                    groupOwnerAddress = "192.168.49.74",
+                    socketPort = 9074
+                ),
+                frameId = "hybrid-command-update-socket",
+                senderId = "peer-hybrid-command-3"
+            )
+        )
+        val secondBuildResult = requireNotNull(
+            hybridBootstrapAttemptCommandBuildResultAfterReceiveOrNull(
+                result = secondResult,
+                provider = provider,
+                requestedAtMillis = 1_716_390_072L,
+                commandCreatedAtMillis = 1_716_390_073L
+            )
+        )
+
+        assertEquals(
+            HybridBootstrapAttemptCommandBuildResult.Built(
+                HybridBootstrapAttemptCommand(
+                    peerId = "peer-hybrid-command-3",
+                    sessionId = "hybrid-command-session-3",
+                    bootstrapIdentifier = "hybrid-command-session-3",
+                    groupOwnerAddress = "192.168.49.74",
+                    socketPort = 9074,
+                    latestCreatedAtMillis = 1_716_390_062L,
+                    requestedAtMillis = 1_716_390_072L,
+                    commandCreatedAtMillis = 1_716_390_073L
+                )
+            ),
+            secondBuildResult
+        )
+    }
+
+    @Test
     fun nullSelectedFieldsInNonSelectedDiagnosticsDoNotCrash() {
         val diagnostics = HybridBootstrapDiagnostics(
             candidateCount = 1,
@@ -2203,6 +2439,43 @@ class AuroraBleRuntimeHostTest {
         assertEquals(
             "Hybrid bootstrap attempt: endpoint too old age=45000 max=30000",
             hybridBootstrapAttemptRuntimeStatusText(decision)
+        )
+    }
+
+    @Test
+    fun invalidEndpointCommandBuildStatusTextMapsToStableRuntimeStatusText() {
+        val result = HybridBootstrapAttemptCommandBuildResult.InvalidEndpoint(
+            reason = "Endpoint timestamp is in the future."
+        )
+
+        assertEquals(
+            "Hybrid bootstrap command: invalid endpoint: Endpoint timestamp is in the future.",
+            hybridBootstrapAttemptCommandBuildRuntimeStatusText(result)
+        )
+    }
+
+    @Test
+    fun endpointTooOldCommandBuildStatusTextMapsToStableRuntimeStatusText() {
+        val result = HybridBootstrapAttemptCommandBuildResult.EndpointTooOld(
+            ageMillis = 45_000L,
+            maxAgeMillis = 30_000L
+        )
+
+        assertEquals(
+            "Hybrid bootstrap command: endpoint too old age=45000 max=30000",
+            hybridBootstrapAttemptCommandBuildRuntimeStatusText(result)
+        )
+    }
+
+    @Test
+    fun notAllowedCommandBuildStatusTextMapsToStableRuntimeStatusText() {
+        val result = HybridBootstrapAttemptCommandBuildResult.NotAllowed(
+            reason = "Command creation timestamp is before request timestamp."
+        )
+
+        assertEquals(
+            "Hybrid bootstrap command: not allowed: Command creation timestamp is before request timestamp.",
+            hybridBootstrapAttemptCommandBuildRuntimeStatusText(result)
         )
     }
 
@@ -2514,6 +2787,166 @@ class AuroraBleRuntimeHostTest {
             )
         )
         assertEquals(initialPrivateMessages, holder.uiState.privateMessagesByPeerId)
+    }
+
+    @Test
+    fun commandBuildComputationAfterHybridControlHandledDoesNotAppendGlobalChatMessage() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+        val initialGlobalMessages = holder.uiState.globalMessages
+
+        val result = receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridSocketHintMessage(
+                    sessionId = "hybrid-command-session-4",
+                    createdAtMillis = 1_716_390_080L,
+                    groupOwnerAddress = "192.168.49.84",
+                    socketPort = 9084
+                ),
+                frameId = "hybrid-command-no-global-append",
+                senderId = "peer-hybrid-command-4"
+            )
+        )
+
+        assertNotNull(
+            hybridBootstrapAttemptCommandBuildResultAfterReceiveOrNull(
+                result = result,
+                provider = provider,
+                requestedAtMillis = 1_716_390_090L,
+                commandCreatedAtMillis = 1_716_390_091L
+            )
+        )
+        assertEquals(initialGlobalMessages, holder.uiState.globalMessages)
+    }
+
+    @Test
+    fun commandBuildComputationAfterHybridControlHandledDoesNotAppendPrivateChatMessage() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+        val initialPrivateMessages = holder.uiState.privateMessagesByPeerId
+
+        val result = receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridSocketHintMessage(
+                    sessionId = "hybrid-command-session-5",
+                    createdAtMillis = 1_716_390_100L,
+                    groupOwnerAddress = "192.168.49.85",
+                    socketPort = 9085
+                ),
+                frameId = "hybrid-command-no-private-append",
+                senderId = "peer-hybrid-command-5"
+            )
+        )
+
+        assertNotNull(
+            hybridBootstrapAttemptCommandBuildResultAfterReceiveOrNull(
+                result = result,
+                provider = provider,
+                requestedAtMillis = 1_716_390_110L,
+                commandCreatedAtMillis = 1_716_390_111L
+            )
+        )
+        assertEquals(initialPrivateMessages, holder.uiState.privateMessagesByPeerId)
+    }
+
+    @Test
+    fun commandBuildComputationDoesNotCallHybridBootstrapCommandExecutorExecute() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+        val executor = RecordingHybridBootstrapCommandExecutor(
+            result = HybridBootstrapCommandExecutionResult.Accepted(
+                peerId = "peer-unused",
+                sessionId = "session-unused",
+                bootstrapIdentifier = "bootstrap-unused",
+                groupOwnerAddress = "192.168.49.86",
+                socketPort = 9086,
+                commandCreatedAtMillis = 1_716_390_121L
+            )
+        )
+
+        val result = receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridSocketHintMessage(
+                    sessionId = "hybrid-command-session-6",
+                    createdAtMillis = 1_716_390_120L,
+                    groupOwnerAddress = "192.168.49.86",
+                    socketPort = 9086
+                ),
+                frameId = "hybrid-command-no-execute",
+                senderId = "peer-hybrid-command-6"
+            )
+        )
+
+        assertNotNull(
+            hybridBootstrapAttemptCommandBuildResultAfterReceiveOrNull(
+                result = result,
+                provider = provider,
+                requestedAtMillis = 1_716_390_130L,
+                commandCreatedAtMillis = 1_716_390_131L
+            )
+        )
+        assertEquals(0, executor.executeCallCount)
+        assertTrue(executor.executedCommands.isEmpty())
+    }
+
+    @Test
+    fun commandBuildRuntimeStatusHelperDoesNotMutateResult() {
+        val result = HybridBootstrapAttemptCommandBuildResult.Built(
+            HybridBootstrapAttemptCommand(
+                peerId = "peer-command-stable",
+                sessionId = "session-command-stable",
+                bootstrapIdentifier = "bootstrap-command-stable",
+                groupOwnerAddress = "192.168.49.87",
+                socketPort = 9087,
+                latestCreatedAtMillis = 1_716_390_140L,
+                requestedAtMillis = 1_716_390_141L,
+                commandCreatedAtMillis = 1_716_390_142L
+            )
+        )
+        val before = result.copy(
+            command = result.command.copy()
+        )
+
+        val statusText = hybridBootstrapAttemptCommandBuildRuntimeStatusText(result)
+
+        assertEquals(
+            "Hybrid bootstrap command: built peer=peer-command-stable session=session-command-stable address=192.168.49.87 port=9087",
+            statusText
+        )
+        assertEquals(before, result)
     }
 
     @Test
@@ -2979,6 +3412,25 @@ class AuroraBleRuntimeHostTest {
         ): WifiDirectTransportSendResult {
             sendCallCount += 1
             sentFrames += WifiDirectTransportFrame.fromPayload(frame.payloadBytes())
+            return result
+        }
+    }
+
+    private class RecordingHybridBootstrapCommandExecutor(
+        private val result: HybridBootstrapCommandExecutionResult
+    ) : HybridBootstrapCommandExecutor {
+        private val recordedCommands = mutableListOf<HybridBootstrapAttemptCommand>()
+        var executeCallCount: Int = 0
+            private set
+
+        val executedCommands: List<HybridBootstrapAttemptCommand>
+            get() = recordedCommands.toList()
+
+        override fun execute(
+            command: HybridBootstrapAttemptCommand
+        ): HybridBootstrapCommandExecutionResult {
+            executeCallCount += 1
+            recordedCommands += command.copy()
             return result
         }
     }

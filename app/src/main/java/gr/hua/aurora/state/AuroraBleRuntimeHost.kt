@@ -89,6 +89,8 @@ import gr.hua.aurora.transport.hybrid.HybridBootstrapDecision
 import gr.hua.aurora.transport.hybrid.HybridBootstrapDiagnostics
 import gr.hua.aurora.transport.hybrid.HybridBootstrapDiagnosticsFormatter
 import gr.hua.aurora.transport.hybrid.HybridBootstrapDecisionProvider
+import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommandBuildResult
+import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommandBuilder
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptDecision
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptPolicy
 import gr.hua.aurora.transport.hybrid.HybridBootstrapSocketEndpointResolution
@@ -491,6 +493,17 @@ fun rememberAuroraBleRuntimeState(
             )
         )
     }
+    val hybridBootstrapCommandCreatedAtMillis = System::currentTimeMillis
+    var latestHybridBootstrapAttemptCommandBuildResult by remember(
+        runtimeGeneration
+    ) {
+        mutableStateOf(
+            HybridBootstrapAttemptCommandBuilder.build(
+                decision = latestHybridBootstrapAttemptDecision,
+                commandCreatedAtMillis = hybridBootstrapCommandCreatedAtMillis()
+            )
+        )
+    }
     val transportFrameReceiver = remember(
         stateHolder,
         incomingSessionMaterialProvider,
@@ -531,6 +544,11 @@ fun rememberAuroraBleRuntimeState(
                 requestedAtMillis = hybridBootstrapRequestedAtMillis(),
                 maxEndpointAgeMillis = HybridBootstrapAttemptPolicy.DEFAULT_MAX_ENDPOINT_AGE_MILLIS
             )
+            latestHybridBootstrapAttemptCommandBuildResult =
+                HybridBootstrapAttemptCommandBuilder.build(
+                    decision = latestHybridBootstrapAttemptDecision,
+                    commandCreatedAtMillis = hybridBootstrapCommandCreatedAtMillis()
+                )
         }
         incomingMessageRuntimeStatusText(result)?.let { statusText ->
             lastIncomingMessageStatus = statusText
@@ -2442,6 +2460,38 @@ internal fun hybridBootstrapAttemptDecisionAfterReceiveOrNull(
     )
 }
 
+internal fun currentHybridBootstrapAttemptCommandBuildResult(
+    provider: HybridBootstrapDecisionProvider,
+    requestedAtMillis: Long,
+    commandCreatedAtMillis: Long
+): HybridBootstrapAttemptCommandBuildResult {
+    return HybridBootstrapAttemptCommandBuilder.build(
+        decision = currentHybridBootstrapAttemptDecision(
+            provider = provider,
+            requestedAtMillis = requestedAtMillis
+        ),
+        commandCreatedAtMillis = commandCreatedAtMillis
+    )
+}
+
+internal fun hybridBootstrapAttemptCommandBuildResultAfterReceiveOrNull(
+    result: BleTransportReceiveResult,
+    provider: HybridBootstrapDecisionProvider,
+    requestedAtMillis: Long,
+    commandCreatedAtMillis: Long
+): HybridBootstrapAttemptCommandBuildResult? {
+    val decision = hybridBootstrapAttemptDecisionAfterReceiveOrNull(
+        result = result,
+        provider = provider,
+        requestedAtMillis = requestedAtMillis
+    ) ?: return null
+
+    return HybridBootstrapAttemptCommandBuilder.build(
+        decision = decision,
+        commandCreatedAtMillis = commandCreatedAtMillis
+    )
+}
+
 internal fun hybridBootstrapDiagnosticsRuntimeStatusText(
     diagnostics: HybridBootstrapDiagnostics
 ): String? {
@@ -2475,6 +2525,28 @@ internal fun hybridBootstrapAttemptRuntimeStatusText(
             "Hybrid bootstrap attempt: invalid endpoint: ${decision.reason}"
         is HybridBootstrapAttemptDecision.EndpointTooOld ->
             "Hybrid bootstrap attempt: endpoint too old age=${decision.ageMillis} max=${decision.maxAgeMillis}"
+    }
+}
+
+internal fun hybridBootstrapAttemptCommandBuildRuntimeStatusText(
+    result: HybridBootstrapAttemptCommandBuildResult
+): String? {
+    return when (result) {
+        is HybridBootstrapAttemptCommandBuildResult.Built ->
+            "Hybrid bootstrap command: built peer=${result.command.peerId} " +
+                "session=${result.command.sessionId} " +
+                "address=${result.command.groupOwnerAddress} " +
+                "port=${result.command.socketPort}"
+        HybridBootstrapAttemptCommandBuildResult.NoCandidates ->
+            "Hybrid bootstrap command: no candidates"
+        HybridBootstrapAttemptCommandBuildResult.NoSocketReadyCandidate ->
+            "Hybrid bootstrap command: no socket-ready candidate"
+        is HybridBootstrapAttemptCommandBuildResult.InvalidEndpoint ->
+            "Hybrid bootstrap command: invalid endpoint: ${result.reason}"
+        is HybridBootstrapAttemptCommandBuildResult.EndpointTooOld ->
+            "Hybrid bootstrap command: endpoint too old age=${result.ageMillis} max=${result.maxAgeMillis}"
+        is HybridBootstrapAttemptCommandBuildResult.NotAllowed ->
+            "Hybrid bootstrap command: not allowed: ${result.reason}"
     }
 }
 
