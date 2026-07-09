@@ -7,6 +7,39 @@ import org.junit.Test
 
 class HybridBootstrapCommandExecutorFactoryTest {
     @Test
+    fun factoryCreateWithDefaultConfigReturnsARejectingNoOpExecutor() {
+        val executor = HybridBootstrapCommandExecutorFactory.create()
+
+        val result = executor.execute(command())
+
+        assertEquals(
+            HybridBootstrapCommandExecutionResult.Rejected(
+                reason = "Hybrid bootstrap execution is disabled."
+            ),
+            result
+        )
+    }
+
+    @Test
+    fun factoryCreateWithCustomNoOpConfigPreservesCustomRejectionReason() {
+        val executor = HybridBootstrapCommandExecutorFactory.create(
+            HybridBootstrapCommandExecutorConfig(
+                mode = HybridBootstrapCommandExecutorMode.NO_OP,
+                noOpRejectionReason = "Factory custom rejection."
+            )
+        )
+
+        val result = executor.execute(command())
+
+        assertEquals(
+            HybridBootstrapCommandExecutionResult.Rejected(
+                reason = "Factory custom rejection."
+            ),
+            result
+        )
+    }
+
+    @Test
     fun factoryNoOpReturnsARejectingExecutor() {
         val executor = HybridBootstrapCommandExecutorFactory.noOp()
 
@@ -21,33 +54,15 @@ class HybridBootstrapCommandExecutorFactoryTest {
     }
 
     @Test
-    fun factoryNoOpPreservesCustomRejectionReason() {
-        val executor = HybridBootstrapCommandExecutorFactory.noOp(
-            rejectionReason = "Factory custom rejection."
-        )
+    fun factoryDefaultRuntimeExecutorDelegatesToDefaultConfigBehavior() {
+        val factoryExecutor = HybridBootstrapCommandExecutorFactory.create()
+        val runtimeExecutor = HybridBootstrapCommandExecutorFactory.defaultRuntimeExecutor()
+        val command = command()
 
-        val result = executor.execute(command())
+        val factoryResult = factoryExecutor.execute(command)
+        val runtimeResult = runtimeExecutor.execute(command.copy())
 
-        assertEquals(
-            HybridBootstrapCommandExecutionResult.Rejected(
-                reason = "Factory custom rejection."
-            ),
-            result
-        )
-    }
-
-    @Test
-    fun factoryDefaultRuntimeExecutorReturnsDefaultNoOpRejectionForAValidCommand() {
-        val executor = HybridBootstrapCommandExecutorFactory.defaultRuntimeExecutor()
-
-        val result = executor.execute(command())
-
-        assertEquals(
-            HybridBootstrapCommandExecutionResult.Rejected(
-                reason = "Hybrid bootstrap execution is disabled."
-            ),
-            result
-        )
+        assertEquals(factoryResult, runtimeResult)
     }
 
     @Test
@@ -60,7 +75,7 @@ class HybridBootstrapCommandExecutorFactoryTest {
 
     @Test
     fun factoryConstructionIsPassiveAndDoesNotExposeExecutionHistory() {
-        val executor = HybridBootstrapCommandExecutorFactory.defaultRuntimeExecutor()
+        val executor = HybridBootstrapCommandExecutorFactory.create()
         val methodNames = executor::class.java.methods.map { it.name }
 
         assertFalse(methodNames.contains("getExecutedCommands"))

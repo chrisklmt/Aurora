@@ -1,6 +1,16 @@
 package gr.hua.aurora.transport.hybrid
 
 object HybridBootstrapCommandExecutorFactory {
+    fun create(
+        config: HybridBootstrapCommandExecutorConfig = HybridBootstrapCommandExecutorConfig()
+    ): HybridBootstrapCommandExecutor {
+        return when (config.mode) {
+            HybridBootstrapCommandExecutorMode.NO_OP -> noOp(
+                rejectionReason = config.noOpRejectionReason
+            )
+        }
+    }
+
     fun noOp(
         rejectionReason: String = "Hybrid bootstrap execution is disabled."
     ): HybridBootstrapCommandExecutor {
@@ -10,6 +20,6 @@ object HybridBootstrapCommandExecutorFactory {
     }
 
     fun defaultRuntimeExecutor(): HybridBootstrapCommandExecutor {
-        return noOp()
+        return create(HybridBootstrapCommandExecutorConfig())
     }
 }
