@@ -94,6 +94,8 @@ import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommandBuilder
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptDecision
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptPolicy
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutionResult
+import gr.hua.aurora.transport.hybrid.HybridBootstrapManualTriggerSnapshot
+import gr.hua.aurora.transport.hybrid.HybridBootstrapManualTriggerSnapshotFormatter
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandTriggerController
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandTriggerResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapSocketEndpointResolution
@@ -518,6 +520,16 @@ fun rememberAuroraBleRuntimeState(
     ) {
         mutableStateOf(initialHybridBootstrapCommandTriggerResult())
     }
+    var latestHybridBootstrapManualTriggerSnapshot by remember(
+        runtimeGeneration
+    ) {
+        mutableStateOf(
+            currentHybridBootstrapManualTriggerSnapshot(
+                commandBuildResult = latestHybridBootstrapAttemptCommandBuildResult,
+                latestTriggerResult = latestHybridBootstrapCommandTriggerResult
+            )
+        )
+    }
     @Suppress("UNUSED_VARIABLE")
     val hybridBootstrapManualTriggerAction = remember(
         runtimeGeneration,
@@ -532,6 +544,11 @@ fun rememberAuroraBleRuntimeState(
             },
             recordResult = { result ->
                 latestHybridBootstrapCommandTriggerResult = result
+                latestHybridBootstrapManualTriggerSnapshot =
+                    currentHybridBootstrapManualTriggerSnapshot(
+                        commandBuildResult = latestHybridBootstrapAttemptCommandBuildResult,
+                        latestTriggerResult = result
+                    )
             }
         )
     }
@@ -579,6 +596,11 @@ fun rememberAuroraBleRuntimeState(
                 HybridBootstrapAttemptCommandBuilder.build(
                     decision = latestHybridBootstrapAttemptDecision,
                     commandCreatedAtMillis = hybridBootstrapCommandCreatedAtMillis()
+                )
+            latestHybridBootstrapManualTriggerSnapshot =
+                currentHybridBootstrapManualTriggerSnapshot(
+                    commandBuildResult = latestHybridBootstrapAttemptCommandBuildResult,
+                    latestTriggerResult = latestHybridBootstrapCommandTriggerResult
                 )
         }
         incomingMessageRuntimeStatusText(result)?.let { statusText ->
@@ -2552,6 +2574,16 @@ internal fun createHybridBootstrapManualTriggerAction(
             recordResult = recordResult
         )
     }
+}
+
+internal fun currentHybridBootstrapManualTriggerSnapshot(
+    commandBuildResult: HybridBootstrapAttemptCommandBuildResult,
+    latestTriggerResult: HybridBootstrapCommandTriggerResult?
+): HybridBootstrapManualTriggerSnapshot {
+    return HybridBootstrapManualTriggerSnapshotFormatter.format(
+        commandBuildResult = commandBuildResult,
+        latestTriggerResult = latestTriggerResult
+    )
 }
 
 internal fun hybridBootstrapAttemptCommandBuildResultAfterReceiveOrNull(

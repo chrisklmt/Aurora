@@ -56,6 +56,7 @@ import gr.hua.aurora.transport.hybrid.HybridBootstrapDiagnostics
 import gr.hua.aurora.transport.hybrid.HybridBootstrapDecisionProvider
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutionResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutor
+import gr.hua.aurora.transport.hybrid.HybridBootstrapManualTriggerSnapshot
 import gr.hua.aurora.transport.hybrid.HybridBootstrapSocketEndpoint
 import gr.hua.aurora.transport.hybrid.HybridBootstrapSocketEndpointResolution
 import gr.hua.aurora.transport.hybrid.HybridTransportControlFrameFactory
@@ -1451,6 +1452,37 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun initialRuntimeManualTriggerSnapshotExists() {
+        val snapshot = currentHybridBootstrapManualTriggerSnapshot(
+            commandBuildResult = HybridBootstrapAttemptCommandBuildResult.NoCandidates,
+            latestTriggerResult = initialHybridBootstrapCommandTriggerResult()
+        )
+
+        assertNotNull(snapshot)
+    }
+
+    @Test
+    fun initialRuntimeManualTriggerSnapshotHasLatestTriggerResultNull() {
+        val snapshot = currentHybridBootstrapManualTriggerSnapshot(
+            commandBuildResult = HybridBootstrapAttemptCommandBuildResult.NoCandidates,
+            latestTriggerResult = initialHybridBootstrapCommandTriggerResult()
+        )
+
+        assertNull(snapshot.latestTriggerResult)
+        assertEquals(null, snapshot.triggerStatusText)
+    }
+
+    @Test
+    fun initialRuntimeManualTriggerSnapshotHasCanTriggerNowFalseWhenCommandIsNotBuilt() {
+        val snapshot = currentHybridBootstrapManualTriggerSnapshot(
+            commandBuildResult = HybridBootstrapAttemptCommandBuildResult.NoCandidates,
+            latestTriggerResult = initialHybridBootstrapCommandTriggerResult()
+        )
+
+        assertFalse(snapshot.canTriggerNow)
+    }
+
+    @Test
     fun noCandidatesDiagnosticsMapToStableRuntimeStatusText() {
         val diagnostics = HybridBootstrapDiagnostics(
             candidateCount = 0,
@@ -2659,6 +2691,73 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun hybridControlHandledRefreshesManualTriggerSnapshotFromUpdatedCommandBuildResult() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+        var latestTriggerResult = initialHybridBootstrapCommandTriggerResult()
+
+        val receiveResult = receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridSocketHintMessage(
+                    sessionId = "hybrid-manual-snapshot-socket",
+                    createdAtMillis = 1_733_100_031L,
+                    groupOwnerAddress = "192.168.49.180",
+                    socketPort = 9180
+                ),
+                frameId = "hybrid-manual-snapshot-socket",
+                senderId = "peer-hybrid-manual-snapshot-socket"
+            )
+        )
+        val commandBuildResult = requireNotNull(
+            hybridBootstrapAttemptCommandBuildResultAfterReceiveOrNull(
+                result = receiveResult,
+                provider = provider,
+                requestedAtMillis = 1_733_100_032L,
+                commandCreatedAtMillis = 1_733_100_033L
+            )
+        )
+
+        val snapshot = currentHybridBootstrapManualTriggerSnapshot(
+            commandBuildResult = commandBuildResult,
+            latestTriggerResult = latestTriggerResult
+        )
+
+        assertTrue(snapshot.canTriggerNow)
+        assertEquals(commandBuildResult, snapshot.commandBuildResult)
+        assertEquals(
+            "Hybrid bootstrap command: built peer=peer-hybrid-manual-snapshot-socket session=hybrid-manual-snapshot-socket address=192.168.49.180 port=9180",
+            snapshot.commandStatusText
+        )
+        assertNull(snapshot.latestTriggerResult)
+        assertNull(snapshot.triggerStatusText)
+    }
+
+    @Test
+    fun nonBuiltCommandBuildResultMakesManualTriggerSnapshotCanTriggerNowFalse() {
+        val snapshot = currentHybridBootstrapManualTriggerSnapshot(
+            commandBuildResult = HybridBootstrapAttemptCommandBuildResult.NoSocketReadyCandidate,
+            latestTriggerResult = initialHybridBootstrapCommandTriggerResult()
+        )
+
+        assertFalse(snapshot.canTriggerNow)
+        assertEquals(
+            "Hybrid bootstrap command: no socket-ready candidate",
+            snapshot.commandStatusText
+        )
+    }
+
+    @Test
     fun noOpExecutorWouldRejectIfExplicitlyTriggeredButRuntimeDoesNotTriggerItAutomatically() {
         val controller = currentHybridBootstrapCommandTriggerController()
 
@@ -3192,6 +3291,42 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun recordedManualTriggerResultCanRefreshSnapshotWithRejectedStatus() {
+        var latestTriggerResult: HybridBootstrapCommandTriggerResult? = null
+        var latestSnapshot: HybridBootstrapManualTriggerSnapshot? = null
+        val buildResult = builtHybridBootstrapAttemptCommandResult(
+            peerId = "peer-runtime-snapshot-rejected",
+            sessionId = "session-runtime-snapshot-rejected",
+            bootstrapIdentifier = "bootstrap-runtime-snapshot-rejected",
+            groupOwnerAddress = "192.168.49.184",
+            socketPort = 9184,
+            latestCreatedAtMillis = 1_733_000_148L,
+            requestedAtMillis = 1_733_000_149L,
+            commandCreatedAtMillis = 1_733_000_150L
+        )
+        val action = createHybridBootstrapManualTriggerAction(
+            buildResultProvider = { buildResult },
+            controllerProvider = { currentHybridBootstrapCommandTriggerController() },
+            recordResult = { result ->
+                latestTriggerResult = result
+                latestSnapshot = currentHybridBootstrapManualTriggerSnapshot(
+                    commandBuildResult = buildResult,
+                    latestTriggerResult = result
+                )
+            }
+        )
+
+        val result = action()
+
+        assertEquals(result, latestTriggerResult)
+        assertEquals(result, latestSnapshot?.latestTriggerResult)
+        assertEquals(
+            "Hybrid bootstrap trigger: rejected: Hybrid bootstrap execution is disabled.",
+            latestSnapshot?.triggerStatusText
+        )
+    }
+
+    @Test
     fun manualTriggerActionWithRuntimeNoOpControllerReturnsRejectedAndRecordsIt() {
         var latestTriggerResult: HybridBootstrapCommandTriggerResult? = null
         val action = createHybridBootstrapManualTriggerAction(
@@ -3222,6 +3357,86 @@ class AuroraBleRuntimeHostTest {
             result
         )
         assertEquals(result, latestTriggerResult)
+    }
+
+    @Test
+    fun manualTriggerSnapshotCommandStatusMatchesCommandBuildResultStatus() {
+        val buildResult = builtHybridBootstrapAttemptCommandResult(
+            peerId = "peer-runtime-snapshot-status",
+            sessionId = "session-runtime-snapshot-status",
+            bootstrapIdentifier = "bootstrap-runtime-snapshot-status",
+            groupOwnerAddress = "192.168.49.193",
+            socketPort = 9193,
+            latestCreatedAtMillis = 1_733_000_193L,
+            requestedAtMillis = 1_733_000_194L,
+            commandCreatedAtMillis = 1_733_000_195L
+        )
+
+        val snapshot = currentHybridBootstrapManualTriggerSnapshot(
+            commandBuildResult = buildResult,
+            latestTriggerResult = null
+        )
+
+        assertEquals(
+            hybridBootstrapAttemptCommandBuildRuntimeStatusText(buildResult),
+            snapshot.commandStatusText
+        )
+    }
+
+    @Test
+    fun manualTriggerSnapshotRefreshHelperDoesNotMutateCommandBuildResult() {
+        val buildResult = builtHybridBootstrapAttemptCommandResult(
+            peerId = "peer-runtime-snapshot-stable",
+            sessionId = "session-runtime-snapshot-stable",
+            bootstrapIdentifier = "bootstrap-runtime-snapshot-stable",
+            groupOwnerAddress = "192.168.49.194",
+            socketPort = 9194,
+            latestCreatedAtMillis = 1_733_000_196L,
+            requestedAtMillis = 1_733_000_197L,
+            commandCreatedAtMillis = 1_733_000_198L
+        )
+        val before = buildResult.copy(
+            command = buildResult.command.copy()
+        )
+
+        val snapshot = currentHybridBootstrapManualTriggerSnapshot(
+            commandBuildResult = buildResult,
+            latestTriggerResult = null
+        )
+
+        assertEquals(before, buildResult)
+        assertNotNull(snapshot)
+    }
+
+    @Test
+    fun manualTriggerSnapshotRefreshHelperDoesNotMutateTriggerResult() {
+        val triggerResult = HybridBootstrapCommandTriggerResult.Executed(
+            HybridBootstrapCommandExecutionResult.Rejected(
+                reason = "Hybrid bootstrap execution is disabled."
+            )
+        )
+        val before = triggerResult.copy(
+            executionResult = HybridBootstrapCommandExecutionResult.Rejected(
+                reason = "Hybrid bootstrap execution is disabled."
+            )
+        )
+
+        val snapshot = currentHybridBootstrapManualTriggerSnapshot(
+            commandBuildResult = builtHybridBootstrapAttemptCommandResult(
+                peerId = "peer-runtime-trigger-stable",
+                sessionId = "session-runtime-trigger-stable",
+                bootstrapIdentifier = "bootstrap-runtime-trigger-stable",
+                groupOwnerAddress = "192.168.49.195",
+                socketPort = 9195,
+                latestCreatedAtMillis = 1_733_000_199L,
+                requestedAtMillis = 1_733_000_200L,
+                commandCreatedAtMillis = 1_733_000_201L
+            ),
+            latestTriggerResult = triggerResult
+        )
+
+        assertEquals(before, triggerResult)
+        assertNotNull(snapshot)
     }
 
     @Test
