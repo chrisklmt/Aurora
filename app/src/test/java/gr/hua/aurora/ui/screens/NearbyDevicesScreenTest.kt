@@ -14,6 +14,7 @@ import gr.hua.aurora.protocol.PeerIdentityExchangeSendResult
 import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommand
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommandBuildResult
+import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutionResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandTriggerResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapManualTriggerSnapshot
 import gr.hua.aurora.ui.debug.wifidirect.*
@@ -47,6 +48,7 @@ import gr.hua.aurora.wifidirect.socket.WifiDirectSocketState
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -542,6 +544,125 @@ class NearbyDevicesScreenTest {
             ),
             card.sections.first { it.title == "Identity" }.items
         )
+        assertFalse(
+            card.sections.flatMap { it.items }.any { item ->
+                item.label == "Trigger manual bootstrap"
+            }
+        )
+    }
+
+    @Test
+    fun nearbyHybridBootstrapManualTriggerControlStateUsesTriggerButtonLabel() {
+        val state = nearbyHybridBootstrapManualTriggerControlState(
+            hybridBootstrapManualTriggerSnapshot(canTriggerNow = true)
+        )
+
+        assertEquals("Trigger manual bootstrap", state.label)
+        assertTrue(state.enabled)
+    }
+
+    @Test
+    fun nearbyHybridBootstrapManualTriggerControlStateIsDisabledWhenSnapshotCannotTrigger() {
+        val state = nearbyHybridBootstrapManualTriggerControlState(
+            hybridBootstrapManualTriggerSnapshot(canTriggerNow = false)
+        )
+
+        assertFalse(state.enabled)
+    }
+
+    @Test
+    fun disabledNearbyHybridBootstrapManualTriggerRequestDoesNotInvokeCallback() {
+        var invokeCount = 0
+        val result = requestNearbyHybridBootstrapManualTriggerIfEnabled(
+            controlState = NearbyHybridBootstrapManualTriggerControlState(
+                label = "Trigger manual bootstrap",
+                enabled = false
+            ),
+            onHybridBootstrapManualTriggerRequested = {
+                invokeCount += 1
+                HybridBootstrapCommandTriggerResult.NoCandidates
+            }
+        )
+
+        assertEquals(0, invokeCount)
+        assertNull(result)
+    }
+
+    @Test
+    fun enabledNearbyHybridBootstrapManualTriggerRequestInvokesCallbackExactlyOnce() {
+        var invokeCount = 0
+        val expected = HybridBootstrapCommandTriggerResult.Executed(
+            HybridBootstrapCommandExecutionResult.Rejected(
+                reason = "Hybrid bootstrap execution is disabled."
+            )
+        )
+
+        val result = requestNearbyHybridBootstrapManualTriggerIfEnabled(
+            controlState = NearbyHybridBootstrapManualTriggerControlState(
+                label = "Trigger manual bootstrap",
+                enabled = true
+            ),
+            onHybridBootstrapManualTriggerRequested = {
+                invokeCount += 1
+                expected
+            }
+        )
+
+        assertEquals(1, invokeCount)
+        assertEquals(expected, result)
+    }
+
+    @Test
+    fun buildingNearbyExpandedDiagnosticsDoesNotInvokeHybridBootstrapManualTriggerCallback() {
+        var invokeCount = 0
+        val callback = {
+            invokeCount += 1
+            HybridBootstrapCommandTriggerResult.NoCandidates
+        }
+        val snapshot = hybridBootstrapManualTriggerSnapshot(
+            canTriggerNow = true,
+            commandStatusText = "Hybrid bootstrap command: built peer=peer-legacy session=session-1 address=192.168.49.1 port=8988"
+        )
+
+        val compactCard = buildNearbyDebugCard(
+            showDebugDiagnostics = true,
+            advertiseStatus = BleAdvertiseStatus.ADVERTISING,
+            gattServerStatus = BleGattServerStatus.HOSTING,
+            scanStatus = BleScanStatus.SCANNING,
+            identityHandlerStatus = "Identity handler ready.",
+            hybridBootstrapManualTriggerSnapshot = snapshot,
+            peerSessionDiagnostics = PeerSessionRegistryDiagnostics(
+                establishedPeerIds = emptyList(),
+                canonicalPeerIdByAlias = emptyMap()
+            )
+        )
+        val expandedCard = buildNearbyExpandedDebugCard(
+            showDebugDiagnostics = true,
+            advertiseStatus = BleAdvertiseStatus.ADVERTISING,
+            gattServerStatus = BleGattServerStatus.HOSTING,
+            scanStatus = BleScanStatus.SCANNING,
+            transportSenderSourceLabel = "Android connector-backed",
+            activeTransportPeerId = "peer-legacy",
+            connectionStatus = BleConnectionStatus.CONNECTED,
+            transportReadStatus = NearbyBleTransportReadStatus.IDLE,
+            transportFrameReadStatus = NearbyBleTransportFrameReadStatus.FRAME_AVAILABLE,
+            transportWriteStatus = NearbyBleTransportWriteStatus.ACCEPTED,
+            scanDiagnostics = BleScanDiagnostics(),
+            peerSessionDiagnostics = PeerSessionRegistryDiagnostics(
+                establishedPeerIds = emptyList(),
+                canonicalPeerIdByAlias = emptyMap()
+            ),
+            hybridBootstrapManualTriggerSnapshot = snapshot,
+            selectedSecurePeerId = "peer-legacy",
+            activeSessionPeerId = "peer-legacy",
+            lastIdentityExchangeStatus = null
+        )
+
+        assertNotNull(compactCard)
+        assertNotNull(expandedCard)
+        assertEquals("Trigger manual bootstrap", nearbyHybridBootstrapManualTriggerControlState(snapshot).label)
+        assertNotNull(callback)
+        assertEquals(0, invokeCount)
     }
 
     @Test

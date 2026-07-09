@@ -57,6 +57,7 @@ import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
 import gr.hua.aurora.protocol.PeerSessionPeerId
 import gr.hua.aurora.protocol.hasSessionForPeer
 import gr.hua.aurora.state.AuroraAvailabilityPreference
+import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandTriggerResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapManualTriggerSnapshot
 import gr.hua.aurora.ui.debug.wifidirect.NearbyWifiDirectDebugControls
 import gr.hua.aurora.ui.components.AuroraAvailabilityIndicator
@@ -141,6 +142,7 @@ internal fun NearbyDevicesScreen(
     onDisconnectWifiDirectPeer: () -> Unit,
     identityHandlerStatus: String,
     hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
+    onHybridBootstrapManualTriggerRequested: () -> HybridBootstrapCommandTriggerResult,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
     activeTransportPeerId: String?,
     activeTransportDeviceAddress: String?,
@@ -318,6 +320,8 @@ internal fun NearbyDevicesScreen(
                     showDebugDiagnostics = showDebugDiagnostics,
                     peerSessionDiagnostics = peerSessionDiagnostics,
                     hybridBootstrapManualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot,
+                    onHybridBootstrapManualTriggerRequested =
+                    onHybridBootstrapManualTriggerRequested,
                     isDiscoveryPausedByAvailability = !availabilityState.isOnline,
                     activeConnectionDeviceAddress = bleSessionState.activeConnectionDeviceAddress,
                     selectedSecurePeerId = selectedSecurePeerId,
@@ -591,6 +595,7 @@ private fun DiscoveredBleDevicesCard(
     showDebugDiagnostics: Boolean,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
     hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
+    onHybridBootstrapManualTriggerRequested: () -> HybridBootstrapCommandTriggerResult,
     isDiscoveryPausedByAvailability: Boolean,
     activeConnectionDeviceAddress: String?,
     selectedSecurePeerId: String?,
@@ -631,6 +636,10 @@ private fun DiscoveredBleDevicesCard(
         activeSessionPeerId = activeTransportPeerId,
         lastIdentityExchangeStatus = lastIdentityExchangeStatus
     )
+    val hybridBootstrapManualTriggerControlState =
+        nearbyHybridBootstrapManualTriggerControlState(
+            hybridBootstrapManualTriggerSnapshot
+        )
 
     Card(
         modifier = Modifier.fillMaxWidth()
@@ -751,7 +760,23 @@ private fun DiscoveredBleDevicesCard(
 
             if (showDebugDiagnostics && showDiagnostics) {
                 expandedDebugCard?.let { card ->
-                    DebugInfoCard(card = card)
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        DebugInfoCard(card = card)
+                        Button(
+                            onClick = {
+                                requestNearbyHybridBootstrapManualTriggerIfEnabled(
+                                    controlState = hybridBootstrapManualTriggerControlState,
+                                    onHybridBootstrapManualTriggerRequested =
+                                    onHybridBootstrapManualTriggerRequested
+                                )
+                            },
+                            enabled = hybridBootstrapManualTriggerControlState.enabled
+                        ) {
+                            Text(hybridBootstrapManualTriggerControlState.label)
+                        }
+                    }
                 }
             }
         }
@@ -1757,6 +1782,31 @@ internal fun nearbyHybridBootstrapManualTriggerAvailabilityValue(
     snapshot: HybridBootstrapManualTriggerSnapshot
 ): String {
     return snapshot.canTriggerNow.toString()
+}
+
+internal data class NearbyHybridBootstrapManualTriggerControlState(
+    val label: String,
+    val enabled: Boolean
+)
+
+internal fun nearbyHybridBootstrapManualTriggerControlState(
+    snapshot: HybridBootstrapManualTriggerSnapshot
+): NearbyHybridBootstrapManualTriggerControlState {
+    return NearbyHybridBootstrapManualTriggerControlState(
+        label = "Trigger manual bootstrap",
+        enabled = snapshot.canTriggerNow
+    )
+}
+
+internal fun requestNearbyHybridBootstrapManualTriggerIfEnabled(
+    controlState: NearbyHybridBootstrapManualTriggerControlState,
+    onHybridBootstrapManualTriggerRequested: () -> HybridBootstrapCommandTriggerResult
+): HybridBootstrapCommandTriggerResult? {
+    return if (controlState.enabled) {
+        onHybridBootstrapManualTriggerRequested()
+    } else {
+        null
+    }
 }
 
 internal fun nearbyPeerSessionCompactValue(
