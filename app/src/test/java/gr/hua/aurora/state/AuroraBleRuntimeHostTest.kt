@@ -3440,6 +3440,291 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun guardedManualTriggerHelperInvokesManualTriggerActionWhenSnapshotCanTriggerNowTrue() {
+        val snapshot = currentHybridBootstrapManualTriggerSnapshot(
+            commandBuildResult = builtHybridBootstrapAttemptCommandResult(
+                peerId = "peer-guard-available",
+                sessionId = "session-guard-available",
+                bootstrapIdentifier = "bootstrap-guard-available",
+                groupOwnerAddress = "192.168.49.196",
+                socketPort = 9196,
+                latestCreatedAtMillis = 1_733_000_202L,
+                requestedAtMillis = 1_733_000_203L,
+                commandCreatedAtMillis = 1_733_000_204L
+            ),
+            latestTriggerResult = null
+        )
+        var invokeCount = 0
+
+        triggerHybridBootstrapManuallyIfAvailable(
+            snapshot = snapshot,
+            manualTriggerAction = {
+                invokeCount += 1
+                HybridBootstrapCommandTriggerResult.NoCandidates
+            }
+        )
+
+        assertEquals(1, invokeCount)
+    }
+
+    @Test
+    fun guardedManualTriggerHelperReturnsActionResultWhenAvailable() {
+        val snapshot = currentHybridBootstrapManualTriggerSnapshot(
+            commandBuildResult = builtHybridBootstrapAttemptCommandResult(
+                peerId = "peer-guard-result",
+                sessionId = "session-guard-result",
+                bootstrapIdentifier = "bootstrap-guard-result",
+                groupOwnerAddress = "192.168.49.197",
+                socketPort = 9197,
+                latestCreatedAtMillis = 1_733_000_205L,
+                requestedAtMillis = 1_733_000_206L,
+                commandCreatedAtMillis = 1_733_000_207L
+            ),
+            latestTriggerResult = null
+        )
+        val expected = HybridBootstrapCommandTriggerResult.Executed(
+            HybridBootstrapCommandExecutionResult.Rejected(
+                reason = "Hybrid bootstrap execution is disabled."
+            )
+        )
+
+        val result = triggerHybridBootstrapManuallyIfAvailable(
+            snapshot = snapshot,
+            manualTriggerAction = { expected }
+        )
+
+        assertEquals(expected, result)
+    }
+
+    @Test
+    fun guardedManualTriggerHelperDoesNotInvokeManualTriggerActionWhenSnapshotCanTriggerNowFalse() {
+        val snapshot = currentHybridBootstrapManualTriggerSnapshot(
+            commandBuildResult = HybridBootstrapAttemptCommandBuildResult.NoCandidates,
+            latestTriggerResult = null
+        )
+        var invokeCount = 0
+
+        val result = triggerHybridBootstrapManuallyIfAvailable(
+            snapshot = snapshot,
+            manualTriggerAction = {
+                invokeCount += 1
+                HybridBootstrapCommandTriggerResult.NoCandidates
+            }
+        )
+
+        assertEquals(0, invokeCount)
+        assertEquals(
+            HybridBootstrapCommandTriggerResult.NotAllowed(
+                reason = "Manual hybrid bootstrap trigger is not available."
+            ),
+            result
+        )
+    }
+
+    @Test
+    fun guardedManualTriggerHelperReturnsNotAllowedWhenSnapshotUnavailable() {
+        val snapshot = currentHybridBootstrapManualTriggerSnapshot(
+            commandBuildResult = HybridBootstrapAttemptCommandBuildResult.NoCandidates,
+            latestTriggerResult = null
+        )
+
+        val result = triggerHybridBootstrapManuallyIfAvailable(
+            snapshot = snapshot,
+            manualTriggerAction = { HybridBootstrapCommandTriggerResult.NoCandidates }
+        )
+
+        assertEquals(
+            HybridBootstrapCommandTriggerResult.NotAllowed(
+                reason = "Manual hybrid bootstrap trigger is not available."
+            ),
+            result
+        )
+    }
+
+    @Test
+    fun guardedManualTriggerHelperDoesNotMutateSnapshot() {
+        val snapshot = currentHybridBootstrapManualTriggerSnapshot(
+            commandBuildResult = builtHybridBootstrapAttemptCommandResult(
+                peerId = "peer-guard-stable",
+                sessionId = "session-guard-stable",
+                bootstrapIdentifier = "bootstrap-guard-stable",
+                groupOwnerAddress = "192.168.49.198",
+                socketPort = 9198,
+                latestCreatedAtMillis = 1_733_000_208L,
+                requestedAtMillis = 1_733_000_209L,
+                commandCreatedAtMillis = 1_733_000_210L
+            ),
+            latestTriggerResult = HybridBootstrapCommandTriggerResult.Executed(
+                HybridBootstrapCommandExecutionResult.Rejected(
+                    reason = "Hybrid bootstrap execution is disabled."
+                )
+            )
+        )
+        val before = snapshot.copy(
+            commandBuildResult = builtHybridBootstrapAttemptCommandResult(
+                peerId = "peer-guard-stable",
+                sessionId = "session-guard-stable",
+                bootstrapIdentifier = "bootstrap-guard-stable",
+                groupOwnerAddress = "192.168.49.198",
+                socketPort = 9198,
+                latestCreatedAtMillis = 1_733_000_208L,
+                requestedAtMillis = 1_733_000_209L,
+                commandCreatedAtMillis = 1_733_000_210L
+            ),
+            latestTriggerResult = HybridBootstrapCommandTriggerResult.Executed(
+                HybridBootstrapCommandExecutionResult.Rejected(
+                    reason = "Hybrid bootstrap execution is disabled."
+                )
+            )
+        )
+
+        val result = triggerHybridBootstrapManuallyIfAvailable(
+            snapshot = snapshot,
+            manualTriggerAction = { HybridBootstrapCommandTriggerResult.NoCandidates }
+        )
+
+        assertEquals(before, snapshot)
+        assertEquals(HybridBootstrapCommandTriggerResult.NoCandidates, result)
+    }
+
+    @Test
+    fun builtSnapshotWithRuntimeNoOpActionReturnsRejected() {
+        val snapshot = currentHybridBootstrapManualTriggerSnapshot(
+            commandBuildResult = builtHybridBootstrapAttemptCommandResult(
+                peerId = "peer-guard-no-op",
+                sessionId = "session-guard-no-op",
+                bootstrapIdentifier = "bootstrap-guard-no-op",
+                groupOwnerAddress = "192.168.49.199",
+                socketPort = 9199,
+                latestCreatedAtMillis = 1_733_000_211L,
+                requestedAtMillis = 1_733_000_212L,
+                commandCreatedAtMillis = 1_733_000_213L
+            ),
+            latestTriggerResult = null
+        )
+        val action = createHybridBootstrapManualTriggerAction(
+            buildResultProvider = { snapshot.commandBuildResult },
+            controllerProvider = { currentHybridBootstrapCommandTriggerController() },
+            recordResult = {}
+        )
+
+        val result = triggerHybridBootstrapManuallyIfAvailable(
+            snapshot = snapshot,
+            manualTriggerAction = action
+        )
+
+        assertEquals(
+            HybridBootstrapCommandTriggerResult.Executed(
+                HybridBootstrapCommandExecutionResult.Rejected(
+                    reason = "Hybrid bootstrap execution is disabled."
+                )
+            ),
+            result
+        )
+    }
+
+    @Test
+    fun noCandidatesSnapshotReturnsNotAllowedWithoutInvokingAction() {
+        assertUnavailableManualTriggerSnapshotDoesNotInvokeAction(
+            snapshot = currentHybridBootstrapManualTriggerSnapshot(
+                commandBuildResult = HybridBootstrapAttemptCommandBuildResult.NoCandidates,
+                latestTriggerResult = null
+            )
+        )
+    }
+
+    @Test
+    fun noSocketReadyCandidateSnapshotReturnsNotAllowedWithoutInvokingAction() {
+        assertUnavailableManualTriggerSnapshotDoesNotInvokeAction(
+            snapshot = currentHybridBootstrapManualTriggerSnapshot(
+                commandBuildResult = HybridBootstrapAttemptCommandBuildResult.NoSocketReadyCandidate,
+                latestTriggerResult = null
+            )
+        )
+    }
+
+    @Test
+    fun invalidEndpointSnapshotReturnsNotAllowedWithoutInvokingAction() {
+        assertUnavailableManualTriggerSnapshotDoesNotInvokeAction(
+            snapshot = currentHybridBootstrapManualTriggerSnapshot(
+                commandBuildResult = HybridBootstrapAttemptCommandBuildResult.InvalidEndpoint(
+                    reason = "Endpoint timestamp is in the future."
+                ),
+                latestTriggerResult = null
+            )
+        )
+    }
+
+    @Test
+    fun endpointTooOldSnapshotReturnsNotAllowedWithoutInvokingAction() {
+        assertUnavailableManualTriggerSnapshotDoesNotInvokeAction(
+            snapshot = currentHybridBootstrapManualTriggerSnapshot(
+                commandBuildResult = HybridBootstrapAttemptCommandBuildResult.EndpointTooOld(
+                    ageMillis = 45_000L,
+                    maxAgeMillis = 30_000L
+                ),
+                latestTriggerResult = null
+            )
+        )
+    }
+
+    @Test
+    fun notAllowedCommandBuildSnapshotReturnsNotAllowedWithoutInvokingAction() {
+        assertUnavailableManualTriggerSnapshotDoesNotInvokeAction(
+            snapshot = currentHybridBootstrapManualTriggerSnapshot(
+                commandBuildResult = HybridBootstrapAttemptCommandBuildResult.NotAllowed(
+                    reason = "Command creation timestamp is before request timestamp."
+                ),
+                latestTriggerResult = null
+            )
+        )
+    }
+
+    @Test
+    fun guardedManualTriggerHelperDoesNotAppendGlobalChatMessages() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val initialGlobalMessages = holder.uiState.globalMessages
+        val snapshot = currentHybridBootstrapManualTriggerSnapshot(
+            commandBuildResult = HybridBootstrapAttemptCommandBuildResult.NoCandidates,
+            latestTriggerResult = null
+        )
+
+        triggerHybridBootstrapManuallyIfAvailable(
+            snapshot = snapshot,
+            manualTriggerAction = { HybridBootstrapCommandTriggerResult.NoCandidates }
+        )
+
+        assertEquals(initialGlobalMessages, holder.uiState.globalMessages)
+    }
+
+    @Test
+    fun guardedManualTriggerHelperDoesNotAppendPrivateChatMessages() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val initialPrivateMessages = holder.uiState.privateMessagesByPeerId
+        val snapshot = currentHybridBootstrapManualTriggerSnapshot(
+            commandBuildResult = HybridBootstrapAttemptCommandBuildResult.NoCandidates,
+            latestTriggerResult = null
+        )
+
+        triggerHybridBootstrapManuallyIfAvailable(
+            snapshot = snapshot,
+            manualTriggerAction = { HybridBootstrapCommandTriggerResult.NoCandidates }
+        )
+
+        assertEquals(initialPrivateMessages, holder.uiState.privateMessagesByPeerId)
+    }
+
+    @Test
     fun manualTriggerActionWithNoCandidatesReturnsAndRecordsNoCandidates() {
         val recordedResults = mutableListOf<HybridBootstrapCommandTriggerResult>()
         val action = createHybridBootstrapManualTriggerAction(
@@ -4973,6 +5258,28 @@ class AuroraBleRuntimeHostTest {
                 requestedAtMillis = requestedAtMillis,
                 commandCreatedAtMillis = commandCreatedAtMillis
             )
+        )
+    }
+
+    private fun assertUnavailableManualTriggerSnapshotDoesNotInvokeAction(
+        snapshot: HybridBootstrapManualTriggerSnapshot
+    ) {
+        var invokeCount = 0
+
+        val result = triggerHybridBootstrapManuallyIfAvailable(
+            snapshot = snapshot,
+            manualTriggerAction = {
+                invokeCount += 1
+                HybridBootstrapCommandTriggerResult.NoCandidates
+            }
+        )
+
+        assertEquals(0, invokeCount)
+        assertEquals(
+            HybridBootstrapCommandTriggerResult.NotAllowed(
+                reason = "Manual hybrid bootstrap trigger is not available."
+            ),
+            result
         )
     }
 }

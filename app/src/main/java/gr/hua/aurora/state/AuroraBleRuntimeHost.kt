@@ -2586,6 +2586,19 @@ internal fun currentHybridBootstrapManualTriggerSnapshot(
     )
 }
 
+internal fun triggerHybridBootstrapManuallyIfAvailable(
+    snapshot: HybridBootstrapManualTriggerSnapshot,
+    manualTriggerAction: () -> HybridBootstrapCommandTriggerResult
+): HybridBootstrapCommandTriggerResult {
+    return if (snapshot.canTriggerNow) {
+        manualTriggerAction()
+    } else {
+        HybridBootstrapCommandTriggerResult.NotAllowed(
+            reason = "Manual hybrid bootstrap trigger is not available."
+        )
+    }
+}
+
 internal fun hybridBootstrapAttemptCommandBuildResultAfterReceiveOrNull(
     result: BleTransportReceiveResult,
     provider: HybridBootstrapDecisionProvider,
