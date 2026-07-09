@@ -2937,6 +2937,154 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun triggerAndRecordHelperTriggersRecordsAndReturnsExecuted() {
+        val controller = currentHybridBootstrapCommandTriggerController()
+        val recordedResults = mutableListOf<HybridBootstrapCommandTriggerResult>()
+        val buildResult = HybridBootstrapAttemptCommandBuildResult.Built(
+            HybridBootstrapAttemptCommand(
+                peerId = "peer-trigger-record",
+                sessionId = "session-trigger-record",
+                bootstrapIdentifier = "bootstrap-trigger-record",
+                groupOwnerAddress = "192.168.49.179",
+                socketPort = 9179,
+                latestCreatedAtMillis = 1_733_000_100L,
+                requestedAtMillis = 1_733_000_101L,
+                commandCreatedAtMillis = 1_733_000_102L
+            )
+        )
+
+        val result = triggerAndRecordHybridBootstrapCommandIfExplicitlyRequested(
+            buildResult = buildResult,
+            controller = controller,
+            recordResult = { recordedResults += it }
+        )
+
+        val expected = HybridBootstrapCommandTriggerResult.Executed(
+            HybridBootstrapCommandExecutionResult.Rejected(
+                reason = "Hybrid bootstrap execution is disabled."
+            )
+        )
+        assertEquals(expected, result)
+        assertEquals(listOf(recordExplicitHybridBootstrapTriggerResult(expected)), recordedResults)
+        assertEquals(expected, controller.latestResult)
+        assertEquals(listOf(expected), controller.triggerHistory)
+    }
+
+    @Test
+    fun triggerAndRecordHelperInvokesRecorderExactlyOnce() {
+        val controller = currentHybridBootstrapCommandTriggerController()
+        val recordedResults = mutableListOf<HybridBootstrapCommandTriggerResult>()
+
+        val result = triggerAndRecordHybridBootstrapCommandIfExplicitlyRequested(
+            buildResult = HybridBootstrapAttemptCommandBuildResult.NoCandidates,
+            controller = controller,
+            recordResult = { recordedResults += it }
+        )
+
+        assertEquals(HybridBootstrapCommandTriggerResult.NoCandidates, result)
+        assertEquals(
+            listOf(recordExplicitHybridBootstrapTriggerResult(result)),
+            recordedResults
+        )
+        assertEquals(1, recordedResults.size)
+    }
+
+    @Test
+    fun triggerAndRecordHelperDoesNotMutateBuildResult() {
+        val controller = currentHybridBootstrapCommandTriggerController()
+        val buildResult = HybridBootstrapAttemptCommandBuildResult.Built(
+            HybridBootstrapAttemptCommand(
+                peerId = "peer-trigger-record-stable",
+                sessionId = "session-trigger-record-stable",
+                bootstrapIdentifier = "bootstrap-trigger-record-stable",
+                groupOwnerAddress = "192.168.49.180",
+                socketPort = 9180,
+                latestCreatedAtMillis = 1_733_000_110L,
+                requestedAtMillis = 1_733_000_111L,
+                commandCreatedAtMillis = 1_733_000_112L
+            )
+        )
+        val before = buildResult.copy(
+            command = buildResult.command.copy()
+        )
+        val recordedResults = mutableListOf<HybridBootstrapCommandTriggerResult>()
+
+        val result = triggerAndRecordHybridBootstrapCommandIfExplicitlyRequested(
+            buildResult = buildResult,
+            controller = controller,
+            recordResult = { recordedResults += it }
+        )
+
+        assertTrue(result is HybridBootstrapCommandTriggerResult.Executed)
+        assertEquals(before, buildResult)
+        assertEquals(1, recordedResults.size)
+    }
+
+    @Test
+    fun triggerAndRecordHelperDoesNotAppendGlobalChatMessages() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val initialGlobalMessages = holder.uiState.globalMessages
+        var latestTriggerResult: HybridBootstrapCommandTriggerResult? = null
+
+        triggerAndRecordHybridBootstrapCommandIfExplicitlyRequested(
+            buildResult = HybridBootstrapAttemptCommandBuildResult.Built(
+                HybridBootstrapAttemptCommand(
+                    peerId = "peer-trigger-record-global",
+                    sessionId = "session-trigger-record-global",
+                    bootstrapIdentifier = "bootstrap-trigger-record-global",
+                    groupOwnerAddress = "192.168.49.181",
+                    socketPort = 9181,
+                    latestCreatedAtMillis = 1_733_000_120L,
+                    requestedAtMillis = 1_733_000_121L,
+                    commandCreatedAtMillis = 1_733_000_122L
+                )
+            ),
+            controller = currentHybridBootstrapCommandTriggerController(),
+            recordResult = { latestTriggerResult = it }
+        )
+
+        assertNotNull(latestTriggerResult)
+        assertEquals(initialGlobalMessages, holder.uiState.globalMessages)
+    }
+
+    @Test
+    fun triggerAndRecordHelperDoesNotAppendPrivateChatMessages() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val initialPrivateMessages = holder.uiState.privateMessagesByPeerId
+        var latestTriggerResult: HybridBootstrapCommandTriggerResult? = null
+
+        triggerAndRecordHybridBootstrapCommandIfExplicitlyRequested(
+            buildResult = HybridBootstrapAttemptCommandBuildResult.Built(
+                HybridBootstrapAttemptCommand(
+                    peerId = "peer-trigger-record-private",
+                    sessionId = "session-trigger-record-private",
+                    bootstrapIdentifier = "bootstrap-trigger-record-private",
+                    groupOwnerAddress = "192.168.49.182",
+                    socketPort = 9182,
+                    latestCreatedAtMillis = 1_733_000_130L,
+                    requestedAtMillis = 1_733_000_131L,
+                    commandCreatedAtMillis = 1_733_000_132L
+                )
+            ),
+            controller = currentHybridBootstrapCommandTriggerController(),
+            recordResult = { latestTriggerResult = it }
+        )
+
+        assertNotNull(latestTriggerResult)
+        assertEquals(initialPrivateMessages, holder.uiState.privateMessagesByPeerId)
+    }
+
+    @Test
     fun explicitHelperDoesNotMutateBuildResult() {
         val controller = currentHybridBootstrapCommandTriggerController()
         val buildResult = HybridBootstrapAttemptCommandBuildResult.Built(

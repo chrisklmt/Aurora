@@ -2509,6 +2509,20 @@ internal fun triggerHybridBootstrapCommandIfExplicitlyRequested(
     return controller.trigger(buildResult)
 }
 
+internal fun triggerAndRecordHybridBootstrapCommandIfExplicitlyRequested(
+    buildResult: HybridBootstrapAttemptCommandBuildResult,
+    controller: HybridBootstrapCommandTriggerController,
+    recordResult: (HybridBootstrapCommandTriggerResult) -> Unit
+): HybridBootstrapCommandTriggerResult {
+    val triggerResult = triggerHybridBootstrapCommandIfExplicitlyRequested(
+        buildResult = buildResult,
+        controller = controller
+    )
+    val recordedResult = recordExplicitHybridBootstrapTriggerResult(triggerResult)
+    recordResult(recordedResult)
+    return triggerResult
+}
+
 internal fun hybridBootstrapAttemptCommandBuildResultAfterReceiveOrNull(
     result: BleTransportReceiveResult,
     provider: HybridBootstrapDecisionProvider,
