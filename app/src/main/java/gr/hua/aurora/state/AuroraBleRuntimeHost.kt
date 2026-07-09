@@ -2523,6 +2523,20 @@ internal fun triggerAndRecordHybridBootstrapCommandIfExplicitlyRequested(
     return triggerResult
 }
 
+internal fun createHybridBootstrapManualTriggerAction(
+    buildResultProvider: () -> HybridBootstrapAttemptCommandBuildResult,
+    controllerProvider: () -> HybridBootstrapCommandTriggerController,
+    recordResult: (HybridBootstrapCommandTriggerResult) -> Unit
+): () -> HybridBootstrapCommandTriggerResult {
+    return {
+        triggerAndRecordHybridBootstrapCommandIfExplicitlyRequested(
+            buildResult = buildResultProvider(),
+            controller = controllerProvider(),
+            recordResult = recordResult
+        )
+    }
+}
+
 internal fun hybridBootstrapAttemptCommandBuildResultAfterReceiveOrNull(
     result: BleTransportReceiveResult,
     provider: HybridBootstrapDecisionProvider,

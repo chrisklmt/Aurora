@@ -51,6 +51,7 @@ import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommand
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptRequest
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandTriggerResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCandidateSelection
+import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandTriggerController
 import gr.hua.aurora.transport.hybrid.HybridBootstrapDiagnostics
 import gr.hua.aurora.transport.hybrid.HybridBootstrapDecisionProvider
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutionResult
@@ -2937,6 +2938,331 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun creatingManualTriggerActionDoesNotTriggerControllerOrExecuteExecutor() {
+        val executor = RecordingHybridBootstrapCommandExecutor(
+            result = HybridBootstrapCommandExecutionResult.Accepted(
+                peerId = "peer-manual-create",
+                sessionId = "session-manual-create",
+                bootstrapIdentifier = "bootstrap-manual-create",
+                groupOwnerAddress = "192.168.49.179",
+                socketPort = 9179,
+                commandCreatedAtMillis = 1_733_000_100L
+            )
+        )
+        val controller = HybridBootstrapCommandTriggerController(executor)
+        val recordedResults = mutableListOf<HybridBootstrapCommandTriggerResult>()
+
+        val action = createHybridBootstrapManualTriggerAction(
+            buildResultProvider = {
+                builtHybridBootstrapAttemptCommandResult(
+                    peerId = "peer-manual-create",
+                    sessionId = "session-manual-create",
+                    bootstrapIdentifier = "bootstrap-manual-create",
+                    groupOwnerAddress = "192.168.49.179",
+                    socketPort = 9179,
+                    latestCreatedAtMillis = 1_733_000_098L,
+                    requestedAtMillis = 1_733_000_099L,
+                    commandCreatedAtMillis = 1_733_000_100L
+                )
+            },
+            controllerProvider = { controller },
+            recordResult = { recordedResults += it }
+        )
+
+        assertNotNull(action)
+        assertNull(controller.latestResult)
+        assertTrue(controller.triggerHistory.isEmpty())
+        assertEquals(0, executor.executeCallCount)
+        assertTrue(executor.executedCommands.isEmpty())
+        assertTrue(recordedResults.isEmpty())
+    }
+
+    @Test
+    fun invokingManualTriggerActionTriggersOnceRecordsOnceAndReturnsRecordedResult() {
+        val executor = RecordingHybridBootstrapCommandExecutor(
+            result = HybridBootstrapCommandExecutionResult.Accepted(
+                peerId = "peer-manual-invoke",
+                sessionId = "session-manual-invoke",
+                bootstrapIdentifier = "bootstrap-manual-invoke",
+                groupOwnerAddress = "192.168.49.180",
+                socketPort = 9180,
+                commandCreatedAtMillis = 1_733_000_110L
+            )
+        )
+        val controller = HybridBootstrapCommandTriggerController(executor)
+        val recordedResults = mutableListOf<HybridBootstrapCommandTriggerResult>()
+        val action = createHybridBootstrapManualTriggerAction(
+            buildResultProvider = {
+                builtHybridBootstrapAttemptCommandResult(
+                    peerId = "peer-manual-invoke",
+                    sessionId = "session-manual-invoke",
+                    bootstrapIdentifier = "bootstrap-manual-invoke",
+                    groupOwnerAddress = "192.168.49.180",
+                    socketPort = 9180,
+                    latestCreatedAtMillis = 1_733_000_108L,
+                    requestedAtMillis = 1_733_000_109L,
+                    commandCreatedAtMillis = 1_733_000_110L
+                )
+            },
+            controllerProvider = { controller },
+            recordResult = { recordedResults += it }
+        )
+
+        val result = action()
+
+        val expected = HybridBootstrapCommandTriggerResult.Executed(
+            HybridBootstrapCommandExecutionResult.Accepted(
+                peerId = "peer-manual-invoke",
+                sessionId = "session-manual-invoke",
+                bootstrapIdentifier = "bootstrap-manual-invoke",
+                groupOwnerAddress = "192.168.49.180",
+                socketPort = 9180,
+                commandCreatedAtMillis = 1_733_000_110L
+            )
+        )
+        assertEquals(expected, result)
+        assertEquals(listOf(expected), recordedResults)
+        assertEquals(1, controller.triggerHistory.size)
+        assertEquals(expected, controller.latestResult)
+        assertEquals(1, executor.executeCallCount)
+        assertEquals(1, executor.executedCommands.size)
+    }
+
+    @Test
+    fun manualTriggerActionUsesLatestBuildResultAtInvocationTime() {
+        val executor = RecordingHybridBootstrapCommandExecutor(
+            result = HybridBootstrapCommandExecutionResult.Accepted(
+                peerId = "peer-manual-latest",
+                sessionId = "session-manual-latest",
+                bootstrapIdentifier = "bootstrap-manual-latest",
+                groupOwnerAddress = "192.168.49.181",
+                socketPort = 9181,
+                commandCreatedAtMillis = 1_733_000_120L
+            )
+        )
+        val controller = HybridBootstrapCommandTriggerController(executor)
+        val recordedResults = mutableListOf<HybridBootstrapCommandTriggerResult>()
+        var currentBuildResult: HybridBootstrapAttemptCommandBuildResult =
+            HybridBootstrapAttemptCommandBuildResult.NoCandidates
+        val action = createHybridBootstrapManualTriggerAction(
+            buildResultProvider = { currentBuildResult },
+            controllerProvider = { controller },
+            recordResult = { recordedResults += it }
+        )
+        currentBuildResult = builtHybridBootstrapAttemptCommandResult(
+            peerId = "peer-manual-latest",
+            sessionId = "session-manual-latest",
+            bootstrapIdentifier = "bootstrap-manual-latest",
+            groupOwnerAddress = "192.168.49.181",
+            socketPort = 9181,
+            latestCreatedAtMillis = 1_733_000_118L,
+            requestedAtMillis = 1_733_000_119L,
+            commandCreatedAtMillis = 1_733_000_120L
+        )
+
+        val result = action()
+
+        assertTrue(result is HybridBootstrapCommandTriggerResult.Executed)
+        assertEquals(1, executor.executeCallCount)
+        assertEquals("peer-manual-latest", executor.executedCommands.single().peerId)
+        assertEquals(listOf(result), recordedResults)
+    }
+
+    @Test
+    fun manualTriggerActionUsesLatestControllerAtInvocationTime() {
+        val firstExecutor = RecordingHybridBootstrapCommandExecutor(
+            result = HybridBootstrapCommandExecutionResult.Accepted(
+                peerId = "peer-first-controller",
+                sessionId = "session-first-controller",
+                bootstrapIdentifier = "bootstrap-first-controller",
+                groupOwnerAddress = "192.168.49.182",
+                socketPort = 9182,
+                commandCreatedAtMillis = 1_733_000_130L
+            )
+        )
+        val secondExecutor = RecordingHybridBootstrapCommandExecutor(
+            result = HybridBootstrapCommandExecutionResult.Rejected(
+                reason = "second-controller-used"
+            )
+        )
+        val firstController = HybridBootstrapCommandTriggerController(firstExecutor)
+        val secondController = HybridBootstrapCommandTriggerController(secondExecutor)
+        var currentController = firstController
+        val recordedResults = mutableListOf<HybridBootstrapCommandTriggerResult>()
+        val action = createHybridBootstrapManualTriggerAction(
+            buildResultProvider = {
+                builtHybridBootstrapAttemptCommandResult(
+                    peerId = "peer-second-controller",
+                    sessionId = "session-second-controller",
+                    bootstrapIdentifier = "bootstrap-second-controller",
+                    groupOwnerAddress = "192.168.49.183",
+                    socketPort = 9183,
+                    latestCreatedAtMillis = 1_733_000_138L,
+                    requestedAtMillis = 1_733_000_139L,
+                    commandCreatedAtMillis = 1_733_000_140L
+                )
+            },
+            controllerProvider = { currentController },
+            recordResult = { recordedResults += it }
+        )
+        currentController = secondController
+
+        val result = action()
+
+        assertEquals(
+            HybridBootstrapCommandTriggerResult.Executed(
+                HybridBootstrapCommandExecutionResult.Rejected(
+                    reason = "second-controller-used"
+                )
+            ),
+            result
+        )
+        assertNull(firstController.latestResult)
+        assertTrue(firstController.triggerHistory.isEmpty())
+        assertEquals(0, firstExecutor.executeCallCount)
+        assertEquals(1, secondExecutor.executeCallCount)
+        assertEquals(result, secondController.latestResult)
+        assertEquals(listOf(result), recordedResults)
+    }
+
+    @Test
+    fun manualTriggerActionWithRuntimeNoOpControllerReturnsRejectedAndRecordsIt() {
+        val recordedResults = mutableListOf<HybridBootstrapCommandTriggerResult>()
+        val action = createHybridBootstrapManualTriggerAction(
+            buildResultProvider = {
+                builtHybridBootstrapAttemptCommandResult(
+                    peerId = "peer-no-op-action",
+                    sessionId = "session-no-op-action",
+                    bootstrapIdentifier = "bootstrap-no-op-action",
+                    groupOwnerAddress = "192.168.49.184",
+                    socketPort = 9184,
+                    latestCreatedAtMillis = 1_733_000_148L,
+                    requestedAtMillis = 1_733_000_149L,
+                    commandCreatedAtMillis = 1_733_000_150L
+                )
+            },
+            controllerProvider = { currentHybridBootstrapCommandTriggerController() },
+            recordResult = { recordedResults += it }
+        )
+
+        val result = action()
+
+        assertEquals(
+            HybridBootstrapCommandTriggerResult.Executed(
+                HybridBootstrapCommandExecutionResult.Rejected(
+                    reason = "Hybrid bootstrap execution is disabled."
+                )
+            ),
+            result
+        )
+        assertEquals(listOf(result), recordedResults)
+    }
+
+    @Test
+    fun manualTriggerActionWithNoCandidatesReturnsAndRecordsNoCandidates() {
+        val recordedResults = mutableListOf<HybridBootstrapCommandTriggerResult>()
+        val action = createHybridBootstrapManualTriggerAction(
+            buildResultProvider = { HybridBootstrapAttemptCommandBuildResult.NoCandidates },
+            controllerProvider = { currentHybridBootstrapCommandTriggerController() },
+            recordResult = { recordedResults += it }
+        )
+
+        val result = action()
+
+        assertEquals(HybridBootstrapCommandTriggerResult.NoCandidates, result)
+        assertEquals(listOf(result), recordedResults)
+    }
+
+    @Test
+    fun manualTriggerActionWithNoSocketReadyCandidateReturnsAndRecordsNoSocketReadyCandidate() {
+        val recordedResults = mutableListOf<HybridBootstrapCommandTriggerResult>()
+        val action = createHybridBootstrapManualTriggerAction(
+            buildResultProvider = { HybridBootstrapAttemptCommandBuildResult.NoSocketReadyCandidate },
+            controllerProvider = { currentHybridBootstrapCommandTriggerController() },
+            recordResult = { recordedResults += it }
+        )
+
+        val result = action()
+
+        assertEquals(HybridBootstrapCommandTriggerResult.NoSocketReadyCandidate, result)
+        assertEquals(listOf(result), recordedResults)
+    }
+
+    @Test
+    fun manualTriggerActionWithInvalidEndpointPreservesAndRecordsReason() {
+        val recordedResults = mutableListOf<HybridBootstrapCommandTriggerResult>()
+        val action = createHybridBootstrapManualTriggerAction(
+            buildResultProvider = {
+                HybridBootstrapAttemptCommandBuildResult.InvalidEndpoint(
+                    reason = "Endpoint timestamp is in the future."
+                )
+            },
+            controllerProvider = { currentHybridBootstrapCommandTriggerController() },
+            recordResult = { recordedResults += it }
+        )
+
+        val result = action()
+
+        assertEquals(
+            HybridBootstrapCommandTriggerResult.InvalidEndpoint(
+                reason = "Endpoint timestamp is in the future."
+            ),
+            result
+        )
+        assertEquals(listOf(result), recordedResults)
+    }
+
+    @Test
+    fun manualTriggerActionWithEndpointTooOldPreservesAndRecordsAgeAndMax() {
+        val recordedResults = mutableListOf<HybridBootstrapCommandTriggerResult>()
+        val action = createHybridBootstrapManualTriggerAction(
+            buildResultProvider = {
+                HybridBootstrapAttemptCommandBuildResult.EndpointTooOld(
+                    ageMillis = 45_000L,
+                    maxAgeMillis = 30_000L
+                )
+            },
+            controllerProvider = { currentHybridBootstrapCommandTriggerController() },
+            recordResult = { recordedResults += it }
+        )
+
+        val result = action()
+
+        assertEquals(
+            HybridBootstrapCommandTriggerResult.EndpointTooOld(
+                ageMillis = 45_000L,
+                maxAgeMillis = 30_000L
+            ),
+            result
+        )
+        assertEquals(listOf(result), recordedResults)
+    }
+
+    @Test
+    fun manualTriggerActionWithNotAllowedPreservesAndRecordsReason() {
+        val recordedResults = mutableListOf<HybridBootstrapCommandTriggerResult>()
+        val action = createHybridBootstrapManualTriggerAction(
+            buildResultProvider = {
+                HybridBootstrapAttemptCommandBuildResult.NotAllowed(
+                    reason = "Command creation timestamp is before request timestamp."
+                )
+            },
+            controllerProvider = { currentHybridBootstrapCommandTriggerController() },
+            recordResult = { recordedResults += it }
+        )
+
+        val result = action()
+
+        assertEquals(
+            HybridBootstrapCommandTriggerResult.NotAllowed(
+                reason = "Command creation timestamp is before request timestamp."
+            ),
+            result
+        )
+        assertEquals(listOf(result), recordedResults)
+    }
+
+    @Test
     fun triggerAndRecordHelperTriggersRecordsAndReturnsExecuted() {
         val controller = currentHybridBootstrapCommandTriggerController()
         val recordedResults = mutableListOf<HybridBootstrapCommandTriggerResult>()
@@ -3018,6 +3344,99 @@ class AuroraBleRuntimeHostTest {
         assertTrue(result is HybridBootstrapCommandTriggerResult.Executed)
         assertEquals(before, buildResult)
         assertEquals(1, recordedResults.size)
+    }
+
+    @Test
+    fun manualTriggerActionDoesNotMutateBuildResult() {
+        var buildResult = builtHybridBootstrapAttemptCommandResult(
+            peerId = "peer-manual-stable",
+            sessionId = "session-manual-stable",
+            bootstrapIdentifier = "bootstrap-manual-stable",
+            groupOwnerAddress = "192.168.49.185",
+            socketPort = 9185,
+            latestCreatedAtMillis = 1_733_000_158L,
+            requestedAtMillis = 1_733_000_159L,
+            commandCreatedAtMillis = 1_733_000_160L
+        )
+        val before = buildResult.copy(
+            command = buildResult.command.copy()
+        )
+        val action = createHybridBootstrapManualTriggerAction(
+            buildResultProvider = { buildResult },
+            controllerProvider = { currentHybridBootstrapCommandTriggerController() },
+            recordResult = {}
+        )
+
+        val result = action()
+
+        assertTrue(result is HybridBootstrapCommandTriggerResult.Executed)
+        assertEquals(before, buildResult)
+    }
+
+    @Test
+    fun manualTriggerActionDoesNotAppendGlobalChatMessages() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val initialGlobalMessages = holder.uiState.globalMessages
+        var latestTriggerResult: HybridBootstrapCommandTriggerResult? = null
+        val action = createHybridBootstrapManualTriggerAction(
+            buildResultProvider = {
+                builtHybridBootstrapAttemptCommandResult(
+                    peerId = "peer-manual-global",
+                    sessionId = "session-manual-global",
+                    bootstrapIdentifier = "bootstrap-manual-global",
+                    groupOwnerAddress = "192.168.49.186",
+                    socketPort = 9186,
+                    latestCreatedAtMillis = 1_733_000_168L,
+                    requestedAtMillis = 1_733_000_169L,
+                    commandCreatedAtMillis = 1_733_000_170L
+                )
+            },
+            controllerProvider = { currentHybridBootstrapCommandTriggerController() },
+            recordResult = { latestTriggerResult = it }
+        )
+
+        action()
+
+        assertNotNull(latestTriggerResult)
+        assertEquals(initialGlobalMessages, holder.uiState.globalMessages)
+    }
+
+    @Test
+    fun manualTriggerActionDoesNotAppendPrivateChatMessages() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val initialPrivateMessages = holder.uiState.privateMessagesByPeerId
+        var latestTriggerResult: HybridBootstrapCommandTriggerResult? = null
+        val action = createHybridBootstrapManualTriggerAction(
+            buildResultProvider = {
+                builtHybridBootstrapAttemptCommandResult(
+                    peerId = "peer-manual-private",
+                    sessionId = "session-manual-private",
+                    bootstrapIdentifier = "bootstrap-manual-private",
+                    groupOwnerAddress = "192.168.49.187",
+                    socketPort = 9187,
+                    latestCreatedAtMillis = 1_733_000_178L,
+                    requestedAtMillis = 1_733_000_179L,
+                    commandCreatedAtMillis = 1_733_000_180L
+                )
+            },
+            controllerProvider = { currentHybridBootstrapCommandTriggerController() },
+            recordResult = { latestTriggerResult = it }
+        )
+
+        action()
+
+        assertNotNull(latestTriggerResult)
+        assertEquals(initialPrivateMessages, holder.uiState.privateMessagesByPeerId)
     }
 
     @Test
@@ -4250,5 +4669,29 @@ class AuroraBleRuntimeHostTest {
             recordedCommands += command.copy()
             return result
         }
+    }
+
+    private fun builtHybridBootstrapAttemptCommandResult(
+        peerId: String,
+        sessionId: String,
+        bootstrapIdentifier: String,
+        groupOwnerAddress: String,
+        socketPort: Int,
+        latestCreatedAtMillis: Long,
+        requestedAtMillis: Long,
+        commandCreatedAtMillis: Long
+    ): HybridBootstrapAttemptCommandBuildResult.Built {
+        return HybridBootstrapAttemptCommandBuildResult.Built(
+            HybridBootstrapAttemptCommand(
+                peerId = peerId,
+                sessionId = sessionId,
+                bootstrapIdentifier = bootstrapIdentifier,
+                groupOwnerAddress = groupOwnerAddress,
+                socketPort = socketPort,
+                latestCreatedAtMillis = latestCreatedAtMillis,
+                requestedAtMillis = requestedAtMillis,
+                commandCreatedAtMillis = commandCreatedAtMillis
+            )
+        )
     }
 }
