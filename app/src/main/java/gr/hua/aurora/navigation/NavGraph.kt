@@ -288,6 +288,8 @@ fun NavGraph(
                 onConnectWifiDirectPeer = bleRuntimeState.connectToWifiDirectPeer,
                 onDisconnectWifiDirectPeer = bleRuntimeState.disconnectWifiDirectPeer,
                 identityHandlerStatus = bleRuntimeState.identityHandlerStatus,
+                hybridBootstrapManualTriggerSnapshot =
+                bleRuntimeState.hybridBootstrapManualTriggerSnapshot,
                 peerSessionDiagnostics = bleRuntimeState.peerSessionDiagnostics,
                 activeTransportPeerId = bleRuntimeState.activeTransportPeerId,
                 activeTransportDeviceAddress = bleRuntimeState.activeTransportDeviceAddress,

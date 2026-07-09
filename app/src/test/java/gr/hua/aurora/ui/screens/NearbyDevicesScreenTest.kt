@@ -12,6 +12,10 @@ import gr.hua.aurora.model.AuroraContact
 import gr.hua.aurora.model.PrivateChatIdentity
 import gr.hua.aurora.protocol.PeerIdentityExchangeSendResult
 import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
+import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommand
+import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommandBuildResult
+import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandTriggerResult
+import gr.hua.aurora.transport.hybrid.HybridBootstrapManualTriggerSnapshot
 import gr.hua.aurora.ui.debug.wifidirect.*
 import gr.hua.aurora.ui.components.DebugInfoCardModel
 import gr.hua.aurora.ui.components.DebugInfoItem
@@ -424,6 +428,7 @@ class NearbyDevicesScreenTest {
                 establishedPeerIds = listOf("peer-123"),
                 canonicalPeerIdByAlias = emptyMap()
             ),
+            hybridBootstrapManualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot(),
             selectedSecurePeerId = "peer-123",
             activeSessionPeerId = "peer-123",
             lastIdentityExchangeStatus = "Identity sent."
@@ -484,6 +489,7 @@ class NearbyDevicesScreenTest {
                 gattServerStatus = BleGattServerStatus.HOSTING,
                 scanStatus = BleScanStatus.SCANNING,
                 identityHandlerStatus = "Identity handler ready.",
+                hybridBootstrapManualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot(),
                 peerSessionDiagnostics = PeerSessionRegistryDiagnostics(
                     establishedPeerIds = emptyList(),
                     canonicalPeerIdByAlias = emptyMap()
@@ -505,6 +511,10 @@ class NearbyDevicesScreenTest {
                 gattServerStatus = BleGattServerStatus.HOSTING,
                 scanStatus = BleScanStatus.SCANNING,
                 identityHandlerStatus = "Identity handler ready. Local agreement private key loaded.",
+                hybridBootstrapManualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot(
+                    canTriggerNow = true,
+                    commandStatusText = "Hybrid bootstrap command: built peer=peer-legacy session=session-1 address=192.168.49.1 port=8988"
+                ),
                 peerSessionDiagnostics = diagnostics
             )
         )
@@ -527,7 +537,8 @@ class NearbyDevicesScreenTest {
         assertEquals(
             listOf(
                 DebugInfoItem("Handler", "ready"),
-                DebugInfoItem("Sessions", "1")
+                DebugInfoItem("Sessions", "1"),
+                DebugInfoItem("Manual trigger available", "true")
             ),
             card.sections.first { it.title == "Identity" }.items
         )
@@ -2387,6 +2398,11 @@ class NearbyDevicesScreenTest {
             establishedPeerIds = listOf("peer-canonical"),
             canonicalPeerIdByAlias = mapOf("peer-legacy" to "peer-canonical")
         )
+        val manualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot(
+            canTriggerNow = true,
+            commandStatusText = "Hybrid bootstrap command: built peer=peer-legacy session=session-1 address=192.168.49.1 port=8988",
+            triggerStatusText = "Hybrid bootstrap trigger: rejected: Hybrid bootstrap execution is disabled."
+        )
         val card = buildNearbyExpandedDebugCard(
             showDebugDiagnostics = true,
             advertiseStatus = BleAdvertiseStatus.ADVERTISING,
@@ -2408,6 +2424,7 @@ class NearbyDevicesScreenTest {
                 lastHadAuroraDiscoveryPayload = true
             ),
             peerSessionDiagnostics = diagnostics,
+            hybridBootstrapManualTriggerSnapshot = manualTriggerSnapshot,
             selectedSecurePeerId = "peer-legacy",
             activeSessionPeerId = "peer-legacy",
             lastIdentityExchangeStatus = "Identity sent. Run on both devices."
@@ -2451,6 +2468,17 @@ class NearbyDevicesScreenTest {
                 DebugInfoItem("Active peer", "peer-legacy"),
                 DebugInfoItem("Selected session", "ready"),
                 DebugInfoItem("Active session", "ready"),
+                DebugInfoItem("Manual trigger available", "true"),
+                DebugInfoItem(
+                    "Manual command",
+                    "Hybrid bootstrap command: built peer=peer-legacy session=session-1 address=192.168.49.1 port=8988",
+                    preferFullWidth = true
+                ),
+                DebugInfoItem(
+                    "Last trigger",
+                    "Hybrid bootstrap trigger: rejected: Hybrid bootstrap execution is disabled.",
+                    preferFullWidth = true
+                ),
                 DebugInfoItem("Established", "peer-canonical", preferFullWidth = true),
                 DebugInfoItem("Aliases", "peer-legacy -> peer-canonical", preferFullWidth = true),
                 DebugInfoItem(
@@ -2461,6 +2489,39 @@ class NearbyDevicesScreenTest {
             ),
             card.sections[3].items
         )
+    }
+
+    @Test
+    fun nearbyExpandedDebugCardOmitsLastTriggerWhenManualTriggerStatusIsNull() {
+        val card = requireNotNull(
+            buildNearbyExpandedDebugCard(
+                showDebugDiagnostics = true,
+                advertiseStatus = BleAdvertiseStatus.ADVERTISING,
+                gattServerStatus = BleGattServerStatus.HOSTING,
+                scanStatus = BleScanStatus.SCANNING,
+                transportSenderSourceLabel = "Android connector-backed",
+                activeTransportPeerId = "peer-legacy",
+                connectionStatus = BleConnectionStatus.CONNECTED,
+                transportReadStatus = NearbyBleTransportReadStatus.IDLE,
+                transportFrameReadStatus = NearbyBleTransportFrameReadStatus.FRAME_AVAILABLE,
+                transportWriteStatus = NearbyBleTransportWriteStatus.ACCEPTED,
+                scanDiagnostics = BleScanDiagnostics(),
+                peerSessionDiagnostics = PeerSessionRegistryDiagnostics(
+                    establishedPeerIds = emptyList(),
+                    canonicalPeerIdByAlias = emptyMap()
+                ),
+                hybridBootstrapManualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot(
+                    canTriggerNow = false,
+                    commandStatusText = "Hybrid bootstrap command: no candidates",
+                    triggerStatusText = null
+                ),
+                selectedSecurePeerId = null,
+                activeSessionPeerId = null,
+                lastIdentityExchangeStatus = null
+            )
+        )
+
+        assertFalse(card.sections[3].items.any { it.label == "Last trigger" })
     }
 
     private fun wifiDirectRuntimeStatus(
@@ -2483,6 +2544,37 @@ class NearbyDevicesScreenTest {
             connectionStatus = connectionStatus,
             peers = peers,
             lastError = lastError
+        )
+    }
+
+    private fun hybridBootstrapManualTriggerSnapshot(
+        canTriggerNow: Boolean = false,
+        commandStatusText: String = "Hybrid bootstrap command: no candidates",
+        triggerStatusText: String? = null
+    ): HybridBootstrapManualTriggerSnapshot {
+        return HybridBootstrapManualTriggerSnapshot(
+            commandBuildResult = if (canTriggerNow) {
+                HybridBootstrapAttemptCommandBuildResult.Built(
+                    HybridBootstrapAttemptCommand(
+                        peerId = "peer-legacy",
+                        sessionId = "session-1",
+                        bootstrapIdentifier = "bootstrap-1",
+                        groupOwnerAddress = "192.168.49.1",
+                        socketPort = 8988,
+                        latestCreatedAtMillis = 10L,
+                        requestedAtMillis = 20L,
+                        commandCreatedAtMillis = 30L
+                    )
+                )
+            } else {
+                HybridBootstrapAttemptCommandBuildResult.NoCandidates
+            },
+            latestTriggerResult = triggerStatusText?.let {
+                HybridBootstrapCommandTriggerResult.NotAllowed("test")
+            },
+            canTriggerNow = canTriggerNow,
+            commandStatusText = commandStatusText,
+            triggerStatusText = triggerStatusText
         )
     }
 }

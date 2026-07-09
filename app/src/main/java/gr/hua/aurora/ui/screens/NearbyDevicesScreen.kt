@@ -57,6 +57,7 @@ import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
 import gr.hua.aurora.protocol.PeerSessionPeerId
 import gr.hua.aurora.protocol.hasSessionForPeer
 import gr.hua.aurora.state.AuroraAvailabilityPreference
+import gr.hua.aurora.transport.hybrid.HybridBootstrapManualTriggerSnapshot
 import gr.hua.aurora.ui.debug.wifidirect.NearbyWifiDirectDebugControls
 import gr.hua.aurora.ui.components.AuroraAvailabilityIndicator
 import gr.hua.aurora.ui.components.AuroraTopBarAction
@@ -139,6 +140,7 @@ internal fun NearbyDevicesScreen(
     onConnectWifiDirectPeer: (WifiDirectPeer, WifiDirectRolePreference) -> Unit,
     onDisconnectWifiDirectPeer: () -> Unit,
     identityHandlerStatus: String,
+    hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
     activeTransportPeerId: String?,
     activeTransportDeviceAddress: String?,
@@ -187,6 +189,7 @@ internal fun NearbyDevicesScreen(
         gattServerStatus = bleGattServerStatus,
         scanStatus = bleScanStatus,
         identityHandlerStatus = identityHandlerStatus,
+        hybridBootstrapManualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot,
         peerSessionDiagnostics = peerSessionDiagnostics
     )
     val wifiDirectPermissionLauncher = rememberLauncherForActivityResult(
@@ -314,6 +317,7 @@ internal fun NearbyDevicesScreen(
                     scanDiagnostics = bleSessionState.bleScanDiagnostics,
                     showDebugDiagnostics = showDebugDiagnostics,
                     peerSessionDiagnostics = peerSessionDiagnostics,
+                    hybridBootstrapManualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot,
                     isDiscoveryPausedByAvailability = !availabilityState.isOnline,
                     activeConnectionDeviceAddress = bleSessionState.activeConnectionDeviceAddress,
                     selectedSecurePeerId = selectedSecurePeerId,
@@ -586,6 +590,7 @@ private fun DiscoveredBleDevicesCard(
     scanDiagnostics: BleScanDiagnostics,
     showDebugDiagnostics: Boolean,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
+    hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
     isDiscoveryPausedByAvailability: Boolean,
     activeConnectionDeviceAddress: String?,
     selectedSecurePeerId: String?,
@@ -621,6 +626,7 @@ private fun DiscoveredBleDevicesCard(
         transportWriteStatus = transportWriteStatus,
         scanDiagnostics = scanDiagnostics,
         peerSessionDiagnostics = peerSessionDiagnostics,
+        hybridBootstrapManualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot,
         selectedSecurePeerId = selectedSecurePeerId,
         activeSessionPeerId = activeTransportPeerId,
         lastIdentityExchangeStatus = lastIdentityExchangeStatus
@@ -1464,6 +1470,7 @@ internal fun buildNearbyDebugCard(
     gattServerStatus: BleGattServerStatus,
     scanStatus: BleScanStatus,
     identityHandlerStatus: String,
+    hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics
 ): DebugInfoCardModel? {
     if (!showDebugDiagnostics) {
@@ -1480,6 +1487,7 @@ internal fun buildNearbyDebugCard(
             ),
             buildNearbyIdentityDebugSection(
                 identityHandlerStatus = identityHandlerStatus,
+                hybridBootstrapManualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot,
                 peerSessionDiagnostics = peerSessionDiagnostics
             )
         )
@@ -1506,13 +1514,20 @@ internal fun buildNearbyTransportDebugSection(
 
 internal fun buildNearbyIdentityDebugSection(
     identityHandlerStatus: String,
+    hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics
 ): DebugInfoSection {
     return DebugInfoSection(
         title = "Identity",
         items = listOf(
             DebugInfoItem("Handler", nearbyIdentityHandlerValue(identityHandlerStatus)),
-            DebugInfoItem("Sessions", peerSessionDiagnostics.establishedPeerIds.size.toString())
+            DebugInfoItem("Sessions", peerSessionDiagnostics.establishedPeerIds.size.toString()),
+            DebugInfoItem(
+                "Manual trigger available",
+                nearbyHybridBootstrapManualTriggerAvailabilityValue(
+                    hybridBootstrapManualTriggerSnapshot
+                )
+            )
         )
     )
 }
@@ -1530,6 +1545,7 @@ internal fun buildNearbyExpandedDebugSections(
     transportWriteStatus: NearbyBleTransportWriteStatus,
     scanDiagnostics: BleScanDiagnostics,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
+    hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
     selectedSecurePeerId: String?,
     activeSessionPeerId: String?,
     lastIdentityExchangeStatus: String?
@@ -1604,6 +1620,33 @@ internal fun buildNearbyExpandedDebugSections(
             )
             add(
                 DebugInfoItem(
+                    "Manual trigger available",
+                    nearbyHybridBootstrapManualTriggerAvailabilityValue(
+                        hybridBootstrapManualTriggerSnapshot
+                    )
+                )
+            )
+            add(
+                DebugInfoItem(
+                    "Manual command",
+                    hybridBootstrapManualTriggerSnapshot.commandStatusText,
+                    preferFullWidth = true
+                )
+            )
+            hybridBootstrapManualTriggerSnapshot.triggerStatusText
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?.let { statusText ->
+                    add(
+                        DebugInfoItem(
+                            "Last trigger",
+                            statusText,
+                            preferFullWidth = true
+                        )
+                    )
+                }
+            add(
+                DebugInfoItem(
                     "Established",
                     peerSessionDiagnostics.establishedPeerIds.joinToString().ifBlank { "none" },
                     preferFullWidth = true
@@ -1652,6 +1695,7 @@ internal fun buildNearbyExpandedDebugCard(
     transportWriteStatus: NearbyBleTransportWriteStatus,
     scanDiagnostics: BleScanDiagnostics,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
+    hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
     selectedSecurePeerId: String?,
     activeSessionPeerId: String?,
     lastIdentityExchangeStatus: String?
@@ -1669,6 +1713,7 @@ internal fun buildNearbyExpandedDebugCard(
         transportWriteStatus = transportWriteStatus,
         scanDiagnostics = scanDiagnostics,
         peerSessionDiagnostics = peerSessionDiagnostics,
+        hybridBootstrapManualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot,
         selectedSecurePeerId = selectedSecurePeerId,
         activeSessionPeerId = activeSessionPeerId,
         lastIdentityExchangeStatus = lastIdentityExchangeStatus
@@ -1706,6 +1751,12 @@ internal fun nearbyIdentityHandlerValue(
         status.isEmpty() -> "missing"
         else -> status.removeSuffix(".")
     }
+}
+
+internal fun nearbyHybridBootstrapManualTriggerAvailabilityValue(
+    snapshot: HybridBootstrapManualTriggerSnapshot
+): String {
+    return snapshot.canTriggerNow.toString()
 }
 
 internal fun nearbyPeerSessionCompactValue(
