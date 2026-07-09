@@ -552,6 +552,18 @@ fun rememberAuroraBleRuntimeState(
             }
         )
     }
+    @Suppress("UNUSED_VARIABLE")
+    val guardedHybridBootstrapManualTriggerAction = remember(
+        runtimeGeneration,
+        hybridBootstrapManualTriggerAction
+    ) {
+        {
+            triggerHybridBootstrapManuallyIfAvailable(
+                snapshot = latestHybridBootstrapManualTriggerSnapshot,
+                manualTriggerAction = hybridBootstrapManualTriggerAction
+            )
+        }
+    }
     val transportFrameReceiver = remember(
         stateHolder,
         incomingSessionMaterialProvider,
