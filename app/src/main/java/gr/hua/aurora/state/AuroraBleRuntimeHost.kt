@@ -513,6 +513,11 @@ fun rememberAuroraBleRuntimeState(
     ) {
         currentHybridBootstrapCommandTriggerController()
     }
+    var latestHybridBootstrapCommandTriggerResult by remember(
+        runtimeGeneration
+    ) {
+        mutableStateOf(initialHybridBootstrapCommandTriggerResult())
+    }
     val transportFrameReceiver = remember(
         stateHolder,
         incomingSessionMaterialProvider,
@@ -2487,6 +2492,14 @@ internal fun currentHybridBootstrapCommandTriggerController(): HybridBootstrapCo
     return HybridBootstrapCommandTriggerController(
         executor = NoOpHybridBootstrapCommandExecutor()
     )
+}
+
+internal fun initialHybridBootstrapCommandTriggerResult(): HybridBootstrapCommandTriggerResult? = null
+
+internal fun recordExplicitHybridBootstrapTriggerResult(
+    result: HybridBootstrapCommandTriggerResult
+): HybridBootstrapCommandTriggerResult {
+    return result
 }
 
 internal fun triggerHybridBootstrapCommandIfExplicitlyRequested(

@@ -1438,6 +1438,18 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun latestExplicitTriggerResultIsInitiallyNull() {
+        assertNull(initialHybridBootstrapCommandTriggerResult())
+    }
+
+    @Test
+    fun runtimeInitializationDoesNotSetTriggerResult() {
+        val latestTriggerResult = initialHybridBootstrapCommandTriggerResult()
+
+        assertNull(latestTriggerResult)
+    }
+
+    @Test
     fun noCandidatesDiagnosticsMapToStableRuntimeStatusText() {
         val diagnostics = HybridBootstrapDiagnostics(
             candidateCount = 0,
@@ -2528,6 +2540,36 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun hybridControlHandledDoesNotSetTriggerResult() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+        var latestTriggerResult = initialHybridBootstrapCommandTriggerResult()
+
+        receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridOfferMessage(
+                    sessionId = "hybrid-trigger-state-offer",
+                    createdAtMillis = 1_733_100_020L
+                ),
+                frameId = "hybrid-trigger-state-offer",
+                senderId = "peer-hybrid-trigger-state-offer"
+            )
+        )
+
+        assertNull(latestTriggerResult)
+    }
+
+    @Test
     fun socketReadyCommandBuildResultStillDoesNotTriggerControllerAutomatically() {
         val holder = AuroraStateHolder(
             initialState = SampleAuroraState.create(
@@ -2581,6 +2623,38 @@ class AuroraBleRuntimeHostTest {
         )
         assertNull(controller.latestResult)
         assertTrue(controller.triggerHistory.isEmpty())
+    }
+
+    @Test
+    fun socketReadyCommandBuildResultDoesNotSetTriggerResultAutomatically() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+        var latestTriggerResult = initialHybridBootstrapCommandTriggerResult()
+
+        receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridSocketHintMessage(
+                    sessionId = "hybrid-trigger-state-socket",
+                    createdAtMillis = 1_733_100_030L,
+                    groupOwnerAddress = "192.168.49.179",
+                    socketPort = 9179
+                ),
+                frameId = "hybrid-trigger-state-socket",
+                senderId = "peer-hybrid-trigger-state-socket"
+            )
+        )
+
+        assertNull(latestTriggerResult)
     }
 
     @Test
@@ -2755,6 +2829,110 @@ class AuroraBleRuntimeHostTest {
                 reason = "Command creation timestamp is before request timestamp."
             ),
             result
+        )
+    }
+
+    @Test
+    fun directlyProducedTriggerResultCanBeRecordedByHelper() {
+        val controller = currentHybridBootstrapCommandTriggerController()
+        val producedResult = triggerHybridBootstrapCommandIfExplicitlyRequested(
+            buildResult = HybridBootstrapAttemptCommandBuildResult.NoCandidates,
+            controller = controller
+        )
+
+        val recordedResult = recordExplicitHybridBootstrapTriggerResult(producedResult)
+
+        assertEquals(producedResult, recordedResult)
+    }
+
+    @Test
+    fun recordingExecutedRejectedTriggerResultPreservesReason() {
+        val recordedResult = recordExplicitHybridBootstrapTriggerResult(
+            HybridBootstrapCommandTriggerResult.Executed(
+                HybridBootstrapCommandExecutionResult.Rejected(
+                    reason = "Hybrid bootstrap execution is disabled."
+                )
+            )
+        )
+
+        assertEquals(
+            HybridBootstrapCommandTriggerResult.Executed(
+                HybridBootstrapCommandExecutionResult.Rejected(
+                    reason = "Hybrid bootstrap execution is disabled."
+                )
+            ),
+            recordedResult
+        )
+    }
+
+    @Test
+    fun recordingNoCandidatesPreservesNoCandidates() {
+        val recordedResult = recordExplicitHybridBootstrapTriggerResult(
+            HybridBootstrapCommandTriggerResult.NoCandidates
+        )
+
+        assertEquals(HybridBootstrapCommandTriggerResult.NoCandidates, recordedResult)
+    }
+
+    @Test
+    fun recordingNoSocketReadyCandidatePreservesNoSocketReadyCandidate() {
+        val recordedResult = recordExplicitHybridBootstrapTriggerResult(
+            HybridBootstrapCommandTriggerResult.NoSocketReadyCandidate
+        )
+
+        assertEquals(
+            HybridBootstrapCommandTriggerResult.NoSocketReadyCandidate,
+            recordedResult
+        )
+    }
+
+    @Test
+    fun recordingInvalidEndpointPreservesReason() {
+        val recordedResult = recordExplicitHybridBootstrapTriggerResult(
+            HybridBootstrapCommandTriggerResult.InvalidEndpoint(
+                reason = "Endpoint timestamp is in the future."
+            )
+        )
+
+        assertEquals(
+            HybridBootstrapCommandTriggerResult.InvalidEndpoint(
+                reason = "Endpoint timestamp is in the future."
+            ),
+            recordedResult
+        )
+    }
+
+    @Test
+    fun recordingEndpointTooOldPreservesAgeAndMax() {
+        val recordedResult = recordExplicitHybridBootstrapTriggerResult(
+            HybridBootstrapCommandTriggerResult.EndpointTooOld(
+                ageMillis = 45_000L,
+                maxAgeMillis = 30_000L
+            )
+        )
+
+        assertEquals(
+            HybridBootstrapCommandTriggerResult.EndpointTooOld(
+                ageMillis = 45_000L,
+                maxAgeMillis = 30_000L
+            ),
+            recordedResult
+        )
+    }
+
+    @Test
+    fun recordingNotAllowedPreservesReason() {
+        val recordedResult = recordExplicitHybridBootstrapTriggerResult(
+            HybridBootstrapCommandTriggerResult.NotAllowed(
+                reason = "Command creation timestamp is before request timestamp."
+            )
+        )
+
+        assertEquals(
+            HybridBootstrapCommandTriggerResult.NotAllowed(
+                reason = "Command creation timestamp is before request timestamp."
+            ),
+            recordedResult
         )
     }
 
