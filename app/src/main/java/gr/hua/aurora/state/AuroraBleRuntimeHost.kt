@@ -101,8 +101,8 @@ import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandTriggerResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapSocketEndpointResolution
 import gr.hua.aurora.transport.hybrid.HybridBootstrapSocketEndpointResolver
 import gr.hua.aurora.transport.hybrid.HybridTransportControlStore
+import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutorFactory
 import gr.hua.aurora.transport.hybrid.InMemoryHybridTransportControlStore
-import gr.hua.aurora.transport.hybrid.NoOpHybridBootstrapCommandExecutor
 import gr.hua.aurora.state.IncomingMessageIngestionResult.Appended
 import gr.hua.aurora.state.IncomingMessageIngestionResult.Duplicate
 import gr.hua.aurora.state.IncomingMessageIngestionResult.UnsupportedThread
@@ -2553,7 +2553,7 @@ internal fun currentHybridBootstrapAttemptCommandBuildResult(
 
 internal fun currentHybridBootstrapCommandTriggerController(): HybridBootstrapCommandTriggerController {
     return HybridBootstrapCommandTriggerController(
-        executor = NoOpHybridBootstrapCommandExecutor()
+        executor = HybridBootstrapCommandExecutorFactory.defaultRuntimeExecutor()
     )
 }
 
