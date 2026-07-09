@@ -2587,7 +2587,7 @@ class AuroraBleRuntimeHostTest {
     fun noOpExecutorWouldRejectIfExplicitlyTriggeredButRuntimeDoesNotTriggerItAutomatically() {
         val controller = currentHybridBootstrapCommandTriggerController()
 
-        val result = controller.trigger(
+        val result = triggerHybridBootstrapCommandIfExplicitlyRequested(
             buildResult = HybridBootstrapAttemptCommandBuildResult.Built(
                 HybridBootstrapAttemptCommand(
                     peerId = "peer-explicit-no-op",
@@ -2599,7 +2599,8 @@ class AuroraBleRuntimeHostTest {
                     requestedAtMillis = 1_733_000_041L,
                     commandCreatedAtMillis = 1_733_000_042L
                 )
-            )
+            ),
+            controller = controller
         )
 
         assertEquals(
@@ -2610,6 +2611,237 @@ class AuroraBleRuntimeHostTest {
             ),
             result
         )
+    }
+
+    @Test
+    fun explicitHelperWithBuiltBuildResultTriggersControllerAndReturnsExecuted() {
+        val controller = currentHybridBootstrapCommandTriggerController()
+
+        val result = triggerHybridBootstrapCommandIfExplicitlyRequested(
+            buildResult = HybridBootstrapAttemptCommandBuildResult.Built(
+                HybridBootstrapAttemptCommand(
+                    peerId = "peer-explicit-helper",
+                    sessionId = "session-explicit-helper",
+                    bootstrapIdentifier = "bootstrap-explicit-helper",
+                    groupOwnerAddress = "192.168.49.175",
+                    socketPort = 9175,
+                    latestCreatedAtMillis = 1_733_000_060L,
+                    requestedAtMillis = 1_733_000_061L,
+                    commandCreatedAtMillis = 1_733_000_062L
+                )
+            ),
+            controller = controller
+        )
+
+        assertEquals(
+            HybridBootstrapCommandTriggerResult.Executed(
+                HybridBootstrapCommandExecutionResult.Rejected(
+                    reason = "Hybrid bootstrap execution is disabled."
+                )
+            ),
+            result
+        )
+    }
+
+    @Test
+    fun explicitHelperRecordsLatestResultInController() {
+        val controller = currentHybridBootstrapCommandTriggerController()
+        val expected = HybridBootstrapCommandTriggerResult.NoCandidates
+
+        val result = triggerHybridBootstrapCommandIfExplicitlyRequested(
+            buildResult = HybridBootstrapAttemptCommandBuildResult.NoCandidates,
+            controller = controller
+        )
+
+        assertEquals(expected, result)
+        assertEquals(expected, controller.latestResult)
+    }
+
+    @Test
+    fun explicitHelperRecordsTriggerHistoryInController() {
+        val controller = currentHybridBootstrapCommandTriggerController()
+        val first = triggerHybridBootstrapCommandIfExplicitlyRequested(
+            buildResult = HybridBootstrapAttemptCommandBuildResult.NoCandidates,
+            controller = controller
+        )
+        val second = triggerHybridBootstrapCommandIfExplicitlyRequested(
+            buildResult = HybridBootstrapAttemptCommandBuildResult.NoSocketReadyCandidate,
+            controller = controller
+        )
+
+        assertEquals(listOf(first, second), controller.triggerHistory)
+    }
+
+    @Test
+    fun explicitHelperWithNoCandidatesReturnsNoCandidates() {
+        val controller = currentHybridBootstrapCommandTriggerController()
+
+        val result = triggerHybridBootstrapCommandIfExplicitlyRequested(
+            buildResult = HybridBootstrapAttemptCommandBuildResult.NoCandidates,
+            controller = controller
+        )
+
+        assertEquals(HybridBootstrapCommandTriggerResult.NoCandidates, result)
+    }
+
+    @Test
+    fun explicitHelperWithNoSocketReadyCandidateReturnsNoSocketReadyCandidate() {
+        val controller = currentHybridBootstrapCommandTriggerController()
+
+        val result = triggerHybridBootstrapCommandIfExplicitlyRequested(
+            buildResult = HybridBootstrapAttemptCommandBuildResult.NoSocketReadyCandidate,
+            controller = controller
+        )
+
+        assertEquals(
+            HybridBootstrapCommandTriggerResult.NoSocketReadyCandidate,
+            result
+        )
+    }
+
+    @Test
+    fun explicitHelperWithInvalidEndpointPreservesReason() {
+        val controller = currentHybridBootstrapCommandTriggerController()
+
+        val result = triggerHybridBootstrapCommandIfExplicitlyRequested(
+            buildResult = HybridBootstrapAttemptCommandBuildResult.InvalidEndpoint(
+                reason = "Endpoint timestamp is in the future."
+            ),
+            controller = controller
+        )
+
+        assertEquals(
+            HybridBootstrapCommandTriggerResult.InvalidEndpoint(
+                reason = "Endpoint timestamp is in the future."
+            ),
+            result
+        )
+    }
+
+    @Test
+    fun explicitHelperWithEndpointTooOldPreservesAgeAndMax() {
+        val controller = currentHybridBootstrapCommandTriggerController()
+
+        val result = triggerHybridBootstrapCommandIfExplicitlyRequested(
+            buildResult = HybridBootstrapAttemptCommandBuildResult.EndpointTooOld(
+                ageMillis = 45_000L,
+                maxAgeMillis = 30_000L
+            ),
+            controller = controller
+        )
+
+        assertEquals(
+            HybridBootstrapCommandTriggerResult.EndpointTooOld(
+                ageMillis = 45_000L,
+                maxAgeMillis = 30_000L
+            ),
+            result
+        )
+    }
+
+    @Test
+    fun explicitHelperWithNotAllowedPreservesReason() {
+        val controller = currentHybridBootstrapCommandTriggerController()
+
+        val result = triggerHybridBootstrapCommandIfExplicitlyRequested(
+            buildResult = HybridBootstrapAttemptCommandBuildResult.NotAllowed(
+                reason = "Command creation timestamp is before request timestamp."
+            ),
+            controller = controller
+        )
+
+        assertEquals(
+            HybridBootstrapCommandTriggerResult.NotAllowed(
+                reason = "Command creation timestamp is before request timestamp."
+            ),
+            result
+        )
+    }
+
+    @Test
+    fun explicitHelperDoesNotMutateBuildResult() {
+        val controller = currentHybridBootstrapCommandTriggerController()
+        val buildResult = HybridBootstrapAttemptCommandBuildResult.Built(
+            HybridBootstrapAttemptCommand(
+                peerId = "peer-explicit-stable",
+                sessionId = "session-explicit-stable",
+                bootstrapIdentifier = "bootstrap-explicit-stable",
+                groupOwnerAddress = "192.168.49.176",
+                socketPort = 9176,
+                latestCreatedAtMillis = 1_733_000_070L,
+                requestedAtMillis = 1_733_000_071L,
+                commandCreatedAtMillis = 1_733_000_072L
+            )
+        )
+        val before = buildResult.copy(
+            command = buildResult.command.copy()
+        )
+
+        val result = triggerHybridBootstrapCommandIfExplicitlyRequested(
+            buildResult = buildResult,
+            controller = controller
+        )
+
+        assertTrue(result is HybridBootstrapCommandTriggerResult.Executed)
+        assertEquals(before, buildResult)
+    }
+
+    @Test
+    fun explicitHelperDoesNotAppendGlobalChatMessages() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val initialGlobalMessages = holder.uiState.globalMessages
+
+        triggerHybridBootstrapCommandIfExplicitlyRequested(
+            buildResult = HybridBootstrapAttemptCommandBuildResult.Built(
+                HybridBootstrapAttemptCommand(
+                    peerId = "peer-explicit-global",
+                    sessionId = "session-explicit-global",
+                    bootstrapIdentifier = "bootstrap-explicit-global",
+                    groupOwnerAddress = "192.168.49.177",
+                    socketPort = 9177,
+                    latestCreatedAtMillis = 1_733_000_080L,
+                    requestedAtMillis = 1_733_000_081L,
+                    commandCreatedAtMillis = 1_733_000_082L
+                )
+            ),
+            controller = currentHybridBootstrapCommandTriggerController()
+        )
+
+        assertEquals(initialGlobalMessages, holder.uiState.globalMessages)
+    }
+
+    @Test
+    fun explicitHelperDoesNotAppendPrivateChatMessages() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val initialPrivateMessages = holder.uiState.privateMessagesByPeerId
+
+        triggerHybridBootstrapCommandIfExplicitlyRequested(
+            buildResult = HybridBootstrapAttemptCommandBuildResult.Built(
+                HybridBootstrapAttemptCommand(
+                    peerId = "peer-explicit-private",
+                    sessionId = "session-explicit-private",
+                    bootstrapIdentifier = "bootstrap-explicit-private",
+                    groupOwnerAddress = "192.168.49.178",
+                    socketPort = 9178,
+                    latestCreatedAtMillis = 1_733_000_090L,
+                    requestedAtMillis = 1_733_000_091L,
+                    commandCreatedAtMillis = 1_733_000_092L
+                )
+            ),
+            controller = currentHybridBootstrapCommandTriggerController()
+        )
+
+        assertEquals(initialPrivateMessages, holder.uiState.privateMessagesByPeerId)
     }
 
     @Test

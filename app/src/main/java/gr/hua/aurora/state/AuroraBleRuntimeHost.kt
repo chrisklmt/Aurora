@@ -2489,6 +2489,13 @@ internal fun currentHybridBootstrapCommandTriggerController(): HybridBootstrapCo
     )
 }
 
+internal fun triggerHybridBootstrapCommandIfExplicitlyRequested(
+    buildResult: HybridBootstrapAttemptCommandBuildResult,
+    controller: HybridBootstrapCommandTriggerController
+): HybridBootstrapCommandTriggerResult {
+    return controller.trigger(buildResult)
+}
+
 internal fun hybridBootstrapAttemptCommandBuildResultAfterReceiveOrNull(
     result: BleTransportReceiveResult,
     provider: HybridBootstrapDecisionProvider,
