@@ -152,6 +152,7 @@ data class AuroraBleRuntimeState(
     val lastConnectOnSendStatus: String?,
     val lastGlobalMeshStatus: String?,
     val hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
+    val onHybridBootstrapManualTriggerRequested: () -> HybridBootstrapCommandTriggerResult,
     val submitGlobalMeshMessage: suspend (OutgoingChatMessage, String) -> GlobalMeshDeliveryResult,
     val submitPrivateChatMessage: suspend (OutgoingChatMessage, String, String) -> PrivateChatTransportSubmission,
     val exchangeIdentityWithPeer: suspend (BleDiscoveredDevice, String?) -> PeerIdentityExchangeSendResult,
@@ -564,6 +565,14 @@ fun rememberAuroraBleRuntimeState(
                 manualTriggerAction = hybridBootstrapManualTriggerAction
             )
         }
+    }
+    val onHybridBootstrapManualTriggerRequested = remember(
+        runtimeGeneration,
+        guardedHybridBootstrapManualTriggerAction
+    ) {
+        createHybridBootstrapManualTriggerRequestCallback(
+            guardedManualTriggerAction = guardedHybridBootstrapManualTriggerAction
+        )
     }
     val transportFrameReceiver = remember(
         stateHolder,
@@ -1089,6 +1098,7 @@ fun rememberAuroraBleRuntimeState(
         lastConnectOnSendStatus = lastConnectOnSendStatus,
         lastGlobalMeshStatus = lastGlobalMeshStatus,
         hybridBootstrapManualTriggerSnapshot = latestHybridBootstrapManualTriggerSnapshot,
+        onHybridBootstrapManualTriggerRequested = onHybridBootstrapManualTriggerRequested,
         submitGlobalMeshMessage = submitGlobalMeshMessage,
         submitPrivateChatMessage = submitPrivateChatMessage,
         exchangeIdentityWithPeer = exchangeIdentityWithPeer,
@@ -2610,6 +2620,14 @@ internal fun triggerHybridBootstrapManuallyIfAvailable(
         HybridBootstrapCommandTriggerResult.NotAllowed(
             reason = "Manual hybrid bootstrap trigger is not available."
         )
+    }
+}
+
+internal fun createHybridBootstrapManualTriggerRequestCallback(
+    guardedManualTriggerAction: () -> HybridBootstrapCommandTriggerResult
+): () -> HybridBootstrapCommandTriggerResult {
+    return {
+        guardedManualTriggerAction()
     }
 }
 
