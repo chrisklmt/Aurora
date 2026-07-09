@@ -518,6 +518,23 @@ fun rememberAuroraBleRuntimeState(
     ) {
         mutableStateOf(initialHybridBootstrapCommandTriggerResult())
     }
+    @Suppress("UNUSED_VARIABLE")
+    val hybridBootstrapManualTriggerAction = remember(
+        runtimeGeneration,
+        hybridBootstrapCommandTriggerController
+    ) {
+        createHybridBootstrapManualTriggerAction(
+            buildResultProvider = {
+                latestHybridBootstrapAttemptCommandBuildResult
+            },
+            controllerProvider = {
+                hybridBootstrapCommandTriggerController
+            },
+            recordResult = { result ->
+                latestHybridBootstrapCommandTriggerResult = result
+            }
+        )
+    }
     val transportFrameReceiver = remember(
         stateHolder,
         incomingSessionMaterialProvider,

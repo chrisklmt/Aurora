@@ -2978,6 +2978,47 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun creatingRuntimeStyleManualTriggerActionDoesNotSetLatestTriggerResultOrExecute() {
+        val executor = RecordingHybridBootstrapCommandExecutor(
+            result = HybridBootstrapCommandExecutionResult.Accepted(
+                peerId = "peer-runtime-manual-create",
+                sessionId = "session-runtime-manual-create",
+                bootstrapIdentifier = "bootstrap-runtime-manual-create",
+                groupOwnerAddress = "192.168.49.188",
+                socketPort = 9188,
+                commandCreatedAtMillis = 1_733_000_190L
+            )
+        )
+        val controller = HybridBootstrapCommandTriggerController(executor)
+        var latestBuildResult: HybridBootstrapAttemptCommandBuildResult =
+            builtHybridBootstrapAttemptCommandResult(
+                peerId = "peer-runtime-manual-create",
+                sessionId = "session-runtime-manual-create",
+                bootstrapIdentifier = "bootstrap-runtime-manual-create",
+                groupOwnerAddress = "192.168.49.188",
+                socketPort = 9188,
+                latestCreatedAtMillis = 1_733_000_188L,
+                requestedAtMillis = 1_733_000_189L,
+                commandCreatedAtMillis = 1_733_000_190L
+            )
+        var latestTriggerResult: HybridBootstrapCommandTriggerResult? =
+            initialHybridBootstrapCommandTriggerResult()
+
+        val action = createHybridBootstrapManualTriggerAction(
+            buildResultProvider = { latestBuildResult },
+            controllerProvider = { controller },
+            recordResult = { latestTriggerResult = it }
+        )
+
+        assertNotNull(action)
+        assertNull(latestTriggerResult)
+        assertNull(controller.latestResult)
+        assertTrue(controller.triggerHistory.isEmpty())
+        assertEquals(0, executor.executeCallCount)
+        assertTrue(executor.executedCommands.isEmpty())
+    }
+
+    @Test
     fun invokingManualTriggerActionTriggersOnceRecordsOnceAndReturnsRecordedResult() {
         val executor = RecordingHybridBootstrapCommandExecutor(
             result = HybridBootstrapCommandExecutionResult.Accepted(
@@ -3126,8 +3167,33 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun directInvocationOfRuntimeStyleManualTriggerActionUpdatesLatestResultVariable() {
+        var latestTriggerResult: HybridBootstrapCommandTriggerResult? = null
+        val action = createHybridBootstrapManualTriggerAction(
+            buildResultProvider = {
+                builtHybridBootstrapAttemptCommandResult(
+                    peerId = "peer-runtime-latest-result",
+                    sessionId = "session-runtime-latest-result",
+                    bootstrapIdentifier = "bootstrap-runtime-latest-result",
+                    groupOwnerAddress = "192.168.49.184",
+                    socketPort = 9184,
+                    latestCreatedAtMillis = 1_733_000_148L,
+                    requestedAtMillis = 1_733_000_149L,
+                    commandCreatedAtMillis = 1_733_000_150L
+                )
+            },
+            controllerProvider = { currentHybridBootstrapCommandTriggerController() },
+            recordResult = { latestTriggerResult = it }
+        )
+
+        val result = action()
+
+        assertEquals(result, latestTriggerResult)
+    }
+
+    @Test
     fun manualTriggerActionWithRuntimeNoOpControllerReturnsRejectedAndRecordsIt() {
-        val recordedResults = mutableListOf<HybridBootstrapCommandTriggerResult>()
+        var latestTriggerResult: HybridBootstrapCommandTriggerResult? = null
         val action = createHybridBootstrapManualTriggerAction(
             buildResultProvider = {
                 builtHybridBootstrapAttemptCommandResult(
@@ -3142,7 +3208,7 @@ class AuroraBleRuntimeHostTest {
                 )
             },
             controllerProvider = { currentHybridBootstrapCommandTriggerController() },
-            recordResult = { recordedResults += it }
+            recordResult = { latestTriggerResult = it }
         )
 
         val result = action()
@@ -3155,7 +3221,7 @@ class AuroraBleRuntimeHostTest {
             ),
             result
         )
-        assertEquals(listOf(result), recordedResults)
+        assertEquals(result, latestTriggerResult)
     }
 
     @Test
