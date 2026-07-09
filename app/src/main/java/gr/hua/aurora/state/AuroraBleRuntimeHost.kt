@@ -93,10 +93,14 @@ import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommandBuildResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommandBuilder
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptDecision
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptPolicy
+import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutionResult
+import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandTriggerController
+import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandTriggerResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapSocketEndpointResolution
 import gr.hua.aurora.transport.hybrid.HybridBootstrapSocketEndpointResolver
 import gr.hua.aurora.transport.hybrid.HybridTransportControlStore
 import gr.hua.aurora.transport.hybrid.InMemoryHybridTransportControlStore
+import gr.hua.aurora.transport.hybrid.NoOpHybridBootstrapCommandExecutor
 import gr.hua.aurora.state.IncomingMessageIngestionResult.Appended
 import gr.hua.aurora.state.IncomingMessageIngestionResult.Duplicate
 import gr.hua.aurora.state.IncomingMessageIngestionResult.UnsupportedThread
@@ -503,6 +507,11 @@ fun rememberAuroraBleRuntimeState(
                 commandCreatedAtMillis = hybridBootstrapCommandCreatedAtMillis()
             )
         )
+    }
+    val hybridBootstrapCommandTriggerController = remember(
+        runtimeGeneration
+    ) {
+        currentHybridBootstrapCommandTriggerController()
     }
     val transportFrameReceiver = remember(
         stateHolder,
@@ -2474,6 +2483,12 @@ internal fun currentHybridBootstrapAttemptCommandBuildResult(
     )
 }
 
+internal fun currentHybridBootstrapCommandTriggerController(): HybridBootstrapCommandTriggerController {
+    return HybridBootstrapCommandTriggerController(
+        executor = NoOpHybridBootstrapCommandExecutor()
+    )
+}
+
 internal fun hybridBootstrapAttemptCommandBuildResultAfterReceiveOrNull(
     result: BleTransportReceiveResult,
     provider: HybridBootstrapDecisionProvider,
@@ -2547,6 +2562,33 @@ internal fun hybridBootstrapAttemptCommandBuildRuntimeStatusText(
             "Hybrid bootstrap command: endpoint too old age=${result.ageMillis} max=${result.maxAgeMillis}"
         is HybridBootstrapAttemptCommandBuildResult.NotAllowed ->
             "Hybrid bootstrap command: not allowed: ${result.reason}"
+    }
+}
+
+internal fun hybridBootstrapCommandTriggerRuntimeStatusText(
+    result: HybridBootstrapCommandTriggerResult
+): String? {
+    return when (result) {
+        is HybridBootstrapCommandTriggerResult.Executed ->
+            when (val executionResult = result.executionResult) {
+                is HybridBootstrapCommandExecutionResult.Accepted ->
+                    "Hybrid bootstrap trigger: accepted peer=${executionResult.peerId} " +
+                        "session=${executionResult.sessionId} " +
+                        "address=${executionResult.groupOwnerAddress} " +
+                        "port=${executionResult.socketPort}"
+                is HybridBootstrapCommandExecutionResult.Rejected ->
+                    "Hybrid bootstrap trigger: rejected: ${executionResult.reason}"
+            }
+        HybridBootstrapCommandTriggerResult.NoCandidates ->
+            "Hybrid bootstrap trigger: no candidates"
+        HybridBootstrapCommandTriggerResult.NoSocketReadyCandidate ->
+            "Hybrid bootstrap trigger: no socket-ready candidate"
+        is HybridBootstrapCommandTriggerResult.InvalidEndpoint ->
+            "Hybrid bootstrap trigger: invalid endpoint: ${result.reason}"
+        is HybridBootstrapCommandTriggerResult.EndpointTooOld ->
+            "Hybrid bootstrap trigger: endpoint too old age=${result.ageMillis} max=${result.maxAgeMillis}"
+        is HybridBootstrapCommandTriggerResult.NotAllowed ->
+            "Hybrid bootstrap trigger: not allowed: ${result.reason}"
     }
 }
 

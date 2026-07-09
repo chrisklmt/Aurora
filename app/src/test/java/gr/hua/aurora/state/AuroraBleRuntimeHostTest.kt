@@ -49,6 +49,7 @@ import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptDecision
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommandBuildResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommand
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptRequest
+import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandTriggerResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCandidateSelection
 import gr.hua.aurora.transport.hybrid.HybridBootstrapDiagnostics
 import gr.hua.aurora.transport.hybrid.HybridBootstrapDecisionProvider
@@ -1429,6 +1430,14 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun runtimeWiringCreatesNoOpTriggerControllerWithoutTriggeringIt() {
+        val controller = currentHybridBootstrapCommandTriggerController()
+
+        assertNull(controller.latestResult)
+        assertTrue(controller.triggerHistory.isEmpty())
+    }
+
+    @Test
     fun noCandidatesDiagnosticsMapToStableRuntimeStatusText() {
         val diagnostics = HybridBootstrapDiagnostics(
             candidateCount = 0,
@@ -2022,6 +2031,96 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun acceptedTriggerStatusTextIsStable() {
+        val result = HybridBootstrapCommandTriggerResult.Executed(
+            executionResult = HybridBootstrapCommandExecutionResult.Accepted(
+                peerId = "peer-trigger-accepted",
+                sessionId = "session-trigger-accepted",
+                bootstrapIdentifier = "bootstrap-trigger-accepted",
+                groupOwnerAddress = "192.168.49.171",
+                socketPort = 9171,
+                commandCreatedAtMillis = 1_733_000_010L
+            )
+        )
+
+        assertEquals(
+            "Hybrid bootstrap trigger: accepted peer=peer-trigger-accepted session=session-trigger-accepted address=192.168.49.171 port=9171",
+            hybridBootstrapCommandTriggerRuntimeStatusText(result)
+        )
+    }
+
+    @Test
+    fun rejectedTriggerStatusTextIsStable() {
+        val result = HybridBootstrapCommandTriggerResult.Executed(
+            executionResult = HybridBootstrapCommandExecutionResult.Rejected(
+                reason = "Hybrid bootstrap execution is disabled."
+            )
+        )
+
+        assertEquals(
+            "Hybrid bootstrap trigger: rejected: Hybrid bootstrap execution is disabled.",
+            hybridBootstrapCommandTriggerRuntimeStatusText(result)
+        )
+    }
+
+    @Test
+    fun noCandidatesTriggerStatusTextIsStable() {
+        assertEquals(
+            "Hybrid bootstrap trigger: no candidates",
+            hybridBootstrapCommandTriggerRuntimeStatusText(
+                HybridBootstrapCommandTriggerResult.NoCandidates
+            )
+        )
+    }
+
+    @Test
+    fun noSocketReadyCandidateTriggerStatusTextIsStable() {
+        assertEquals(
+            "Hybrid bootstrap trigger: no socket-ready candidate",
+            hybridBootstrapCommandTriggerRuntimeStatusText(
+                HybridBootstrapCommandTriggerResult.NoSocketReadyCandidate
+            )
+        )
+    }
+
+    @Test
+    fun invalidEndpointTriggerStatusTextIsStable() {
+        val result = HybridBootstrapCommandTriggerResult.InvalidEndpoint(
+            reason = "Endpoint timestamp is in the future."
+        )
+
+        assertEquals(
+            "Hybrid bootstrap trigger: invalid endpoint: Endpoint timestamp is in the future.",
+            hybridBootstrapCommandTriggerRuntimeStatusText(result)
+        )
+    }
+
+    @Test
+    fun endpointTooOldTriggerStatusTextIsStable() {
+        val result = HybridBootstrapCommandTriggerResult.EndpointTooOld(
+            ageMillis = 45_000L,
+            maxAgeMillis = 30_000L
+        )
+
+        assertEquals(
+            "Hybrid bootstrap trigger: endpoint too old age=45000 max=30000",
+            hybridBootstrapCommandTriggerRuntimeStatusText(result)
+        )
+    }
+
+    @Test
+    fun notAllowedTriggerStatusTextIsStable() {
+        val result = HybridBootstrapCommandTriggerResult.NotAllowed(
+            reason = "Command creation timestamp is before request timestamp."
+        )
+
+        assertEquals(
+            "Hybrid bootstrap trigger: not allowed: Command creation timestamp is before request timestamp.",
+            hybridBootstrapCommandTriggerRuntimeStatusText(result)
+        )
+    }
+
+    @Test
     fun repeatedHybridControlFramesUpdateProviderDecisionThroughExistingStoreSnapshot() {
         val holder = AuroraStateHolder(
             initialState = SampleAuroraState.create(
@@ -2382,6 +2481,134 @@ class AuroraBleRuntimeHostTest {
                 )
             ),
             secondBuildResult
+        )
+    }
+
+    @Test
+    fun hybridControlHandledUpdatesCommandBuildResultButDoesNotTriggerController() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val controller = currentHybridBootstrapCommandTriggerController()
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+
+        val result = receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridOfferMessage(
+                    sessionId = "hybrid-command-no-trigger-1",
+                    createdAtMillis = 1_733_000_020L
+                ),
+                frameId = "hybrid-command-no-trigger-offer",
+                senderId = "peer-hybrid-command-no-trigger-1"
+            )
+        )
+
+        assertEquals(
+            HybridBootstrapAttemptCommandBuildResult.NoSocketReadyCandidate,
+            requireNotNull(
+                hybridBootstrapAttemptCommandBuildResultAfterReceiveOrNull(
+                    result = result,
+                    provider = provider,
+                    requestedAtMillis = 1_733_000_021L,
+                    commandCreatedAtMillis = 1_733_000_022L
+                )
+            )
+        )
+        assertNull(controller.latestResult)
+        assertTrue(controller.triggerHistory.isEmpty())
+    }
+
+    @Test
+    fun socketReadyCommandBuildResultStillDoesNotTriggerControllerAutomatically() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val controller = currentHybridBootstrapCommandTriggerController()
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+
+        val result = receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridSocketHintMessage(
+                    sessionId = "hybrid-command-no-trigger-2",
+                    createdAtMillis = 1_733_000_030L,
+                    groupOwnerAddress = "192.168.49.172",
+                    socketPort = 9172
+                ),
+                frameId = "hybrid-command-no-trigger-socket",
+                senderId = "peer-hybrid-command-no-trigger-2"
+            )
+        )
+
+        assertEquals(
+            HybridBootstrapAttemptCommandBuildResult.Built(
+                HybridBootstrapAttemptCommand(
+                    peerId = "peer-hybrid-command-no-trigger-2",
+                    sessionId = "hybrid-command-no-trigger-2",
+                    bootstrapIdentifier = "hybrid-command-no-trigger-2",
+                    groupOwnerAddress = "192.168.49.172",
+                    socketPort = 9172,
+                    latestCreatedAtMillis = 1_733_000_030L,
+                    requestedAtMillis = 1_733_000_031L,
+                    commandCreatedAtMillis = 1_733_000_032L
+                )
+            ),
+            requireNotNull(
+                hybridBootstrapAttemptCommandBuildResultAfterReceiveOrNull(
+                    result = result,
+                    provider = provider,
+                    requestedAtMillis = 1_733_000_031L,
+                    commandCreatedAtMillis = 1_733_000_032L
+                )
+            )
+        )
+        assertNull(controller.latestResult)
+        assertTrue(controller.triggerHistory.isEmpty())
+    }
+
+    @Test
+    fun noOpExecutorWouldRejectIfExplicitlyTriggeredButRuntimeDoesNotTriggerItAutomatically() {
+        val controller = currentHybridBootstrapCommandTriggerController()
+
+        val result = controller.trigger(
+            buildResult = HybridBootstrapAttemptCommandBuildResult.Built(
+                HybridBootstrapAttemptCommand(
+                    peerId = "peer-explicit-no-op",
+                    sessionId = "session-explicit-no-op",
+                    bootstrapIdentifier = "bootstrap-explicit-no-op",
+                    groupOwnerAddress = "192.168.49.173",
+                    socketPort = 9173,
+                    latestCreatedAtMillis = 1_733_000_040L,
+                    requestedAtMillis = 1_733_000_041L,
+                    commandCreatedAtMillis = 1_733_000_042L
+                )
+            )
+        )
+
+        assertEquals(
+            HybridBootstrapCommandTriggerResult.Executed(
+                HybridBootstrapCommandExecutionResult.Rejected(
+                    reason = "Hybrid bootstrap execution is disabled."
+                )
+            ),
+            result
         )
     }
 
@@ -2944,6 +3171,38 @@ class AuroraBleRuntimeHostTest {
 
         assertEquals(
             "Hybrid bootstrap command: built peer=peer-command-stable session=session-command-stable address=192.168.49.87 port=9087",
+            statusText
+        )
+        assertEquals(before, result)
+    }
+
+    @Test
+    fun triggerRuntimeStatusHelperDoesNotMutateResult() {
+        val result = HybridBootstrapCommandTriggerResult.Executed(
+            HybridBootstrapCommandExecutionResult.Accepted(
+                peerId = "peer-trigger-stable",
+                sessionId = "session-trigger-stable",
+                bootstrapIdentifier = "bootstrap-trigger-stable",
+                groupOwnerAddress = "192.168.49.174",
+                socketPort = 9174,
+                commandCreatedAtMillis = 1_733_000_050L
+            )
+        )
+        val before = result.copy(
+            executionResult = HybridBootstrapCommandExecutionResult.Accepted(
+                peerId = "peer-trigger-stable",
+                sessionId = "session-trigger-stable",
+                bootstrapIdentifier = "bootstrap-trigger-stable",
+                groupOwnerAddress = "192.168.49.174",
+                socketPort = 9174,
+                commandCreatedAtMillis = 1_733_000_050L
+            )
+        )
+
+        val statusText = hybridBootstrapCommandTriggerRuntimeStatusText(result)
+
+        assertEquals(
+            "Hybrid bootstrap trigger: accepted peer=peer-trigger-stable session=session-trigger-stable address=192.168.49.174 port=9174",
             statusText
         )
         assertEquals(before, result)
