@@ -1443,10 +1443,10 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
-    fun runtimeExecutorConfigExistsAndIsNoOp() {
+    fun runtimeExecutorConfigExistsAndIsSocketPlanDisabled() {
         val config = currentHybridBootstrapCommandExecutorConfig()
 
-        assertEquals(HybridBootstrapCommandExecutorMode.NO_OP, config.mode)
+        assertEquals(HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED, config.mode)
     }
 
     @Test
@@ -1470,10 +1470,15 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
-    fun runtimeExecutorConfigMatchesDefaultFactoryConfig() {
+    fun runtimeExecutorConfigMatchesExplicitSocketPlanDisabledFactoryConfig() {
         val config = currentHybridBootstrapCommandExecutorConfig()
 
-        assertEquals(HybridBootstrapCommandExecutorConfig(), config)
+        assertEquals(
+            HybridBootstrapCommandExecutorConfig(
+                mode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED
+            ),
+            config
+        )
     }
 
     @Test
@@ -2903,7 +2908,7 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
-    fun noOpExecutorWouldRejectIfExplicitlyTriggeredButRuntimeDoesNotTriggerItAutomatically() {
+    fun disabledSocketExecutorWouldRejectIfExplicitlyTriggeredButRuntimeDoesNotTriggerItAutomatically() {
         val controller = currentHybridBootstrapCommandTriggerController()
 
         val result = triggerHybridBootstrapCommandIfExplicitlyRequested(
@@ -2925,7 +2930,7 @@ class AuroraBleRuntimeHostTest {
         assertEquals(
             HybridBootstrapCommandTriggerResult.Executed(
                 HybridBootstrapCommandExecutionResult.Rejected(
-                    reason = "Hybrid bootstrap execution is disabled."
+                    reason = "Hybrid bootstrap socket connector is disabled."
                 )
             ),
             result
@@ -2955,7 +2960,7 @@ class AuroraBleRuntimeHostTest {
         assertEquals(
             HybridBootstrapCommandTriggerResult.Executed(
                 HybridBootstrapCommandExecutionResult.Rejected(
-                    reason = "Hybrid bootstrap execution is disabled."
+                    reason = "Hybrid bootstrap socket connector is disabled."
                 )
             ),
             result
@@ -3500,13 +3505,13 @@ class AuroraBleRuntimeHostTest {
         assertEquals(result, latestTriggerResult)
         assertEquals(result, latestSnapshot?.latestTriggerResult)
         assertEquals(
-            "Hybrid bootstrap trigger: rejected: Hybrid bootstrap execution is disabled.",
+            "Hybrid bootstrap trigger: rejected: Hybrid bootstrap socket connector is disabled.",
             latestSnapshot?.triggerStatusText
         )
     }
 
     @Test
-    fun manualTriggerActionWithRuntimeNoOpControllerReturnsRejectedAndRecordsIt() {
+    fun manualTriggerActionWithRuntimeSocketPlanDisabledControllerReturnsRejectedAndRecordsIt() {
         var latestTriggerResult: HybridBootstrapCommandTriggerResult? = null
         val action = createHybridBootstrapManualTriggerAction(
             buildResultProvider = {
@@ -3530,7 +3535,7 @@ class AuroraBleRuntimeHostTest {
         assertEquals(
             HybridBootstrapCommandTriggerResult.Executed(
                 HybridBootstrapCommandExecutionResult.Rejected(
-                    reason = "Hybrid bootstrap execution is disabled."
+                    reason = "Hybrid bootstrap socket connector is disabled."
                 )
             ),
             result
@@ -3591,12 +3596,12 @@ class AuroraBleRuntimeHostTest {
     fun manualTriggerSnapshotRefreshHelperDoesNotMutateTriggerResult() {
         val triggerResult = HybridBootstrapCommandTriggerResult.Executed(
             HybridBootstrapCommandExecutionResult.Rejected(
-                reason = "Hybrid bootstrap execution is disabled."
+                reason = "Hybrid bootstrap socket connector is disabled."
             )
         )
         val before = triggerResult.copy(
             executionResult = HybridBootstrapCommandExecutionResult.Rejected(
-                reason = "Hybrid bootstrap execution is disabled."
+                reason = "Hybrid bootstrap socket connector is disabled."
             )
         )
 
@@ -3663,7 +3668,7 @@ class AuroraBleRuntimeHostTest {
         )
         val expected = HybridBootstrapCommandTriggerResult.Executed(
             HybridBootstrapCommandExecutionResult.Rejected(
-                reason = "Hybrid bootstrap execution is disabled."
+                reason = "Hybrid bootstrap socket connector is disabled."
             )
         )
 
@@ -3735,7 +3740,7 @@ class AuroraBleRuntimeHostTest {
             ),
             latestTriggerResult = HybridBootstrapCommandTriggerResult.Executed(
                 HybridBootstrapCommandExecutionResult.Rejected(
-                    reason = "Hybrid bootstrap execution is disabled."
+                    reason = "Hybrid bootstrap socket connector is disabled."
                 )
             )
         )
@@ -3752,7 +3757,7 @@ class AuroraBleRuntimeHostTest {
             ),
             latestTriggerResult = HybridBootstrapCommandTriggerResult.Executed(
                 HybridBootstrapCommandExecutionResult.Rejected(
-                    reason = "Hybrid bootstrap execution is disabled."
+                    reason = "Hybrid bootstrap socket connector is disabled."
                 )
             )
         )
@@ -3795,7 +3800,7 @@ class AuroraBleRuntimeHostTest {
         assertEquals(
             HybridBootstrapCommandTriggerResult.Executed(
                 HybridBootstrapCommandExecutionResult.Rejected(
-                    reason = "Hybrid bootstrap execution is disabled."
+                    reason = "Hybrid bootstrap socket connector is disabled."
                 )
             ),
             result
@@ -4016,7 +4021,7 @@ class AuroraBleRuntimeHostTest {
         assertEquals(
             HybridBootstrapCommandTriggerResult.Executed(
                 HybridBootstrapCommandExecutionResult.Rejected(
-                    reason = "Hybrid bootstrap execution is disabled."
+                    reason = "Hybrid bootstrap socket connector is disabled."
                 )
             ),
             result
@@ -4137,14 +4142,14 @@ class AuroraBleRuntimeHostTest {
         assertEquals(
             HybridBootstrapCommandTriggerResult.Executed(
                 HybridBootstrapCommandExecutionResult.Rejected(
-                    reason = "Hybrid bootstrap execution is disabled."
+                    reason = "Hybrid bootstrap socket connector is disabled."
                 )
             ),
             result
         )
         assertEquals(result, latestTriggerResult)
         assertEquals(
-            "Hybrid bootstrap trigger: rejected: Hybrid bootstrap execution is disabled.",
+            "Hybrid bootstrap trigger: rejected: Hybrid bootstrap socket connector is disabled.",
             latestSnapshot.triggerStatusText
         )
     }
@@ -4405,7 +4410,7 @@ class AuroraBleRuntimeHostTest {
 
         val expected = HybridBootstrapCommandTriggerResult.Executed(
             HybridBootstrapCommandExecutionResult.Rejected(
-                reason = "Hybrid bootstrap execution is disabled."
+                reason = "Hybrid bootstrap socket connector is disabled."
             )
         )
         assertEquals(expected, result)

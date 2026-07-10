@@ -2555,7 +2555,7 @@ internal fun currentHybridBootstrapAttemptCommandBuildResult(
 
 internal fun currentHybridBootstrapCommandExecutorConfig(): HybridBootstrapCommandExecutorConfig {
     return HybridBootstrapCommandExecutorConfig(
-        mode = HybridBootstrapCommandExecutorMode.NO_OP
+        mode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED
     )
 }
 
