@@ -83,6 +83,82 @@ class HybridBootstrapCommandExecutorFactoryTest {
         assertFalse(methodNames.contains("getLatestResult"))
     }
 
+    @Test
+    fun socketPlanDisabledConfigReturnsRejectedDisabledSocketReasonForValidCommand() {
+        val executor = HybridBootstrapCommandExecutorFactory.create(
+            HybridBootstrapCommandExecutorConfig(
+                mode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED
+            )
+        )
+
+        val result = executor.execute(command())
+
+        assertEquals(
+            HybridBootstrapCommandExecutionResult.Rejected(
+                reason = "Hybrid bootstrap socket connector is disabled."
+            ),
+            result
+        )
+    }
+
+    @Test
+    fun socketPlanDisabledConfigPreservesCustomDisabledSocketFailureReason() {
+        val executor = HybridBootstrapCommandExecutorFactory.create(
+            HybridBootstrapCommandExecutorConfig(
+                mode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED,
+                disabledSocketConnectorFailureReason = "Factory disabled socket rejection."
+            )
+        )
+
+        val result = executor.execute(command())
+
+        assertEquals(
+            HybridBootstrapCommandExecutionResult.Rejected(
+                reason = "Factory disabled socket rejection."
+            ),
+            result
+        )
+    }
+
+    @Test
+    fun socketPlanDisabledDoesNotReturnFakeExecutor() {
+        val executor = HybridBootstrapCommandExecutorFactory.create(
+            HybridBootstrapCommandExecutorConfig(
+                mode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED
+            )
+        )
+
+        assertFalse(executor is FakeHybridBootstrapCommandExecutor)
+    }
+
+    @Test
+    fun socketPlanDisabledDoesNotReturnNoOpBehaviorReason() {
+        val executor = HybridBootstrapCommandExecutorFactory.create(
+            HybridBootstrapCommandExecutorConfig(
+                mode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED
+            )
+        )
+
+        val result = executor.execute(command())
+
+        assertFalse(
+            result == HybridBootstrapCommandExecutionResult.Rejected(
+                reason = "Hybrid bootstrap execution is disabled."
+            )
+        )
+    }
+
+    @Test
+    fun socketPlanDisabledUsesSocketPlanExecutorType() {
+        val executor = HybridBootstrapCommandExecutorFactory.create(
+            HybridBootstrapCommandExecutorConfig(
+                mode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED
+            )
+        )
+
+        assertTrue(executor is HybridBootstrapSocketPlanCommandExecutor)
+    }
+
     private fun command(
         peerId: String = "peer-factory",
         sessionId: String = "session-factory",

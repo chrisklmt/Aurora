@@ -8,6 +8,13 @@ object HybridBootstrapCommandExecutorFactory {
             HybridBootstrapCommandExecutorMode.NO_OP -> noOp(
                 rejectionReason = config.noOpRejectionReason
             )
+            HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED -> {
+                HybridBootstrapSocketPlanCommandExecutor(
+                    connector = DisabledHybridBootstrapSocketConnector(
+                        failureReason = config.disabledSocketConnectorFailureReason
+                    )
+                )
+            }
         }
     }
 

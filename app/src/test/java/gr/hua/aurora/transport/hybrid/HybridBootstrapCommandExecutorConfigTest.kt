@@ -20,4 +20,14 @@ class HybridBootstrapCommandExecutorConfigTest {
             config.noOpRejectionReason
         )
     }
+
+    @Test
+    fun defaultDisabledSocketConnectorFailureReasonIsExact() {
+        val config = HybridBootstrapCommandExecutorConfig()
+
+        assertEquals(
+            "Hybrid bootstrap socket connector is disabled.",
+            config.disabledSocketConnectorFailureReason
+        )
+    }
 }
