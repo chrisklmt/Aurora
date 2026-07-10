@@ -153,6 +153,7 @@ data class AuroraBleRuntimeState(
     val lastIncomingMessageStatus: String?,
     val lastConnectOnSendStatus: String?,
     val lastGlobalMeshStatus: String?,
+    val hybridBootstrapCommandExecutorMode: HybridBootstrapCommandExecutorMode,
     val hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
     val onHybridBootstrapManualTriggerRequested: () -> HybridBootstrapCommandTriggerResult,
     val submitGlobalMeshMessage: suspend (OutgoingChatMessage, String) -> GlobalMeshDeliveryResult,
@@ -463,6 +464,9 @@ fun rememberAuroraBleRuntimeState(
     ) {
         InMemoryHybridTransportControlStore()
     }
+    val hybridBootstrapCommandExecutorConfig = remember(runtimeGeneration) {
+        currentHybridBootstrapCommandExecutorConfig()
+    }
     val hybridBootstrapDecisionProvider = remember(hybridTransportControlStore) {
         HybridBootstrapDecisionProvider(hybridTransportControlStore)
     }
@@ -515,9 +519,14 @@ fun rememberAuroraBleRuntimeState(
         )
     }
     val hybridBootstrapCommandTriggerController = remember(
-        runtimeGeneration
+        runtimeGeneration,
+        hybridBootstrapCommandExecutorConfig
     ) {
-        currentHybridBootstrapCommandTriggerController()
+        HybridBootstrapCommandTriggerController(
+            executor = HybridBootstrapCommandExecutorFactory.create(
+                hybridBootstrapCommandExecutorConfig
+            )
+        )
     }
     var latestHybridBootstrapCommandTriggerResult by remember(
         runtimeGeneration
@@ -1099,6 +1108,7 @@ fun rememberAuroraBleRuntimeState(
         lastIncomingMessageStatus = lastIncomingMessageStatus,
         lastConnectOnSendStatus = lastConnectOnSendStatus,
         lastGlobalMeshStatus = lastGlobalMeshStatus,
+        hybridBootstrapCommandExecutorMode = hybridBootstrapCommandExecutorConfig.mode,
         hybridBootstrapManualTriggerSnapshot = latestHybridBootstrapManualTriggerSnapshot,
         onHybridBootstrapManualTriggerRequested = onHybridBootstrapManualTriggerRequested,
         submitGlobalMeshMessage = submitGlobalMeshMessage,

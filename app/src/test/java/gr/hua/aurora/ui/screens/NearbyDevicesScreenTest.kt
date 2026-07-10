@@ -14,6 +14,7 @@ import gr.hua.aurora.protocol.PeerIdentityExchangeSendResult
 import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommand
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommandBuildResult
+import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutorMode
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutionResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandTriggerResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapManualTriggerSnapshot
@@ -430,6 +431,7 @@ class NearbyDevicesScreenTest {
                 establishedPeerIds = listOf("peer-123"),
                 canonicalPeerIdByAlias = emptyMap()
             ),
+            hybridBootstrapCommandExecutorMode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED,
             hybridBootstrapManualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot(),
             selectedSecurePeerId = "peer-123",
             activeSessionPeerId = "peer-123",
@@ -652,6 +654,7 @@ class NearbyDevicesScreenTest {
                 establishedPeerIds = emptyList(),
                 canonicalPeerIdByAlias = emptyMap()
             ),
+            hybridBootstrapCommandExecutorMode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED,
             hybridBootstrapManualTriggerSnapshot = snapshot,
             selectedSecurePeerId = "peer-legacy",
             activeSessionPeerId = "peer-legacy",
@@ -2545,6 +2548,7 @@ class NearbyDevicesScreenTest {
                 lastHadAuroraDiscoveryPayload = true
             ),
             peerSessionDiagnostics = diagnostics,
+            hybridBootstrapCommandExecutorMode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED,
             hybridBootstrapManualTriggerSnapshot = manualTriggerSnapshot,
             selectedSecurePeerId = "peer-legacy",
             activeSessionPeerId = "peer-legacy",
@@ -2589,6 +2593,7 @@ class NearbyDevicesScreenTest {
                 DebugInfoItem("Active peer", "peer-legacy"),
                 DebugInfoItem("Selected session", "ready"),
                 DebugInfoItem("Active session", "ready"),
+                DebugInfoItem("Executor mode", "SOCKET_PLAN_DISABLED"),
                 DebugInfoItem("Manual trigger available", "true"),
                 DebugInfoItem(
                     "Manual command",
@@ -2631,6 +2636,7 @@ class NearbyDevicesScreenTest {
                     establishedPeerIds = emptyList(),
                     canonicalPeerIdByAlias = emptyMap()
                 ),
+                hybridBootstrapCommandExecutorMode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED,
                 hybridBootstrapManualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot(
                     canTriggerNow = false,
                     commandStatusText = "Hybrid bootstrap command: no candidates",

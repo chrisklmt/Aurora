@@ -76,6 +76,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.lang.reflect.Modifier
 import java.nio.charset.StandardCharsets.UTF_8
 import java.security.KeyPair
 import java.security.KeyPairGenerator
@@ -1447,6 +1448,16 @@ class AuroraBleRuntimeHostTest {
         val config = currentHybridBootstrapCommandExecutorConfig()
 
         assertEquals(HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED, config.mode)
+    }
+
+    @Test
+    fun runtimeStateExposesReadOnlyHybridBootstrapExecutorModeField() {
+        val field = AuroraBleRuntimeState::class.java.getDeclaredField(
+            "hybridBootstrapCommandExecutorMode"
+        )
+
+        assertEquals(HybridBootstrapCommandExecutorMode::class.java, field.type)
+        assertTrue(Modifier.isFinal(field.modifiers))
     }
 
     @Test

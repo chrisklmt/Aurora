@@ -57,6 +57,7 @@ import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
 import gr.hua.aurora.protocol.PeerSessionPeerId
 import gr.hua.aurora.protocol.hasSessionForPeer
 import gr.hua.aurora.state.AuroraAvailabilityPreference
+import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutorMode
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandTriggerResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapManualTriggerSnapshot
 import gr.hua.aurora.ui.debug.wifidirect.NearbyWifiDirectDebugControls
@@ -141,6 +142,7 @@ internal fun NearbyDevicesScreen(
     onConnectWifiDirectPeer: (WifiDirectPeer, WifiDirectRolePreference) -> Unit,
     onDisconnectWifiDirectPeer: () -> Unit,
     identityHandlerStatus: String,
+    hybridBootstrapCommandExecutorMode: HybridBootstrapCommandExecutorMode,
     hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
     onHybridBootstrapManualTriggerRequested: () -> HybridBootstrapCommandTriggerResult,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
@@ -319,6 +321,7 @@ internal fun NearbyDevicesScreen(
                     scanDiagnostics = bleSessionState.bleScanDiagnostics,
                     showDebugDiagnostics = showDebugDiagnostics,
                     peerSessionDiagnostics = peerSessionDiagnostics,
+                    hybridBootstrapCommandExecutorMode = hybridBootstrapCommandExecutorMode,
                     hybridBootstrapManualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot,
                     onHybridBootstrapManualTriggerRequested =
                     onHybridBootstrapManualTriggerRequested,
@@ -594,6 +597,7 @@ private fun DiscoveredBleDevicesCard(
     scanDiagnostics: BleScanDiagnostics,
     showDebugDiagnostics: Boolean,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
+    hybridBootstrapCommandExecutorMode: HybridBootstrapCommandExecutorMode,
     hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
     onHybridBootstrapManualTriggerRequested: () -> HybridBootstrapCommandTriggerResult,
     isDiscoveryPausedByAvailability: Boolean,
@@ -631,6 +635,7 @@ private fun DiscoveredBleDevicesCard(
         transportWriteStatus = transportWriteStatus,
         scanDiagnostics = scanDiagnostics,
         peerSessionDiagnostics = peerSessionDiagnostics,
+        hybridBootstrapCommandExecutorMode = hybridBootstrapCommandExecutorMode,
         hybridBootstrapManualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot,
         selectedSecurePeerId = selectedSecurePeerId,
         activeSessionPeerId = activeTransportPeerId,
@@ -1570,6 +1575,7 @@ internal fun buildNearbyExpandedDebugSections(
     transportWriteStatus: NearbyBleTransportWriteStatus,
     scanDiagnostics: BleScanDiagnostics,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
+    hybridBootstrapCommandExecutorMode: HybridBootstrapCommandExecutorMode,
     hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
     selectedSecurePeerId: String?,
     activeSessionPeerId: String?,
@@ -1641,6 +1647,12 @@ internal fun buildNearbyExpandedDebugSections(
                         peerId = activeSessionPeerId,
                         diagnostics = peerSessionDiagnostics
                     )
+                )
+            )
+            add(
+                DebugInfoItem(
+                    "Executor mode",
+                    hybridBootstrapCommandExecutorMode.name
                 )
             )
             add(
@@ -1720,6 +1732,7 @@ internal fun buildNearbyExpandedDebugCard(
     transportWriteStatus: NearbyBleTransportWriteStatus,
     scanDiagnostics: BleScanDiagnostics,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
+    hybridBootstrapCommandExecutorMode: HybridBootstrapCommandExecutorMode,
     hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
     selectedSecurePeerId: String?,
     activeSessionPeerId: String?,
@@ -1738,6 +1751,7 @@ internal fun buildNearbyExpandedDebugCard(
         transportWriteStatus = transportWriteStatus,
         scanDiagnostics = scanDiagnostics,
         peerSessionDiagnostics = peerSessionDiagnostics,
+        hybridBootstrapCommandExecutorMode = hybridBootstrapCommandExecutorMode,
         hybridBootstrapManualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot,
         selectedSecurePeerId = selectedSecurePeerId,
         activeSessionPeerId = activeSessionPeerId,
