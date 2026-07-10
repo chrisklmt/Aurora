@@ -10,7 +10,7 @@ object HybridBootstrapCommandExecutorFactory {
             )
             HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED -> {
                 HybridBootstrapSocketPlanCommandExecutor(
-                    connector = DisabledHybridBootstrapSocketConnector(
+                    connector = HybridBootstrapSocketConnectorFactory.disabled(
                         failureReason = config.disabledSocketConnectorFailureReason
                     )
                 )

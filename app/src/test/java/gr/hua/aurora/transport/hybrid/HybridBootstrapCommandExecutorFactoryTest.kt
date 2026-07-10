@@ -1,5 +1,8 @@
 package gr.hua.aurora.transport.hybrid
 
+import java.nio.charset.StandardCharsets.UTF_8
+import java.nio.file.Files
+import java.nio.file.Path
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -159,6 +162,85 @@ class HybridBootstrapCommandExecutorFactoryTest {
         assertTrue(executor is HybridBootstrapSocketPlanCommandExecutor)
     }
 
+    @Test
+    fun socketPlanDisabledUsesConnectorFactoryDisabledBehaviorIndirectly() {
+        val source = sourceText(
+            "app/src/main/java/gr/hua/aurora/transport/hybrid/HybridBootstrapCommandExecutorFactory.kt"
+        )
+
+        assertTrue(source.contains("HybridBootstrapSocketConnectorFactory.disabled("))
+    }
+
+    @Test
+    fun factoryDoesNotCallConnectorConnectDuringConstruction() {
+        val executor = HybridBootstrapCommandExecutorFactory.create(
+            HybridBootstrapCommandExecutorConfig(
+                mode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED
+            )
+        )
+
+        assertTrue(executor is HybridBootstrapSocketPlanCommandExecutor)
+    }
+
+    @Test
+    fun factoryDoesNotCallDialerDialDuringConstruction() {
+        val executor = HybridBootstrapCommandExecutorFactory.create(
+            HybridBootstrapCommandExecutorConfig(
+                mode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED
+            )
+        )
+
+        assertTrue(executor is HybridBootstrapSocketPlanCommandExecutor)
+    }
+
+    @Test
+    fun factoryDoesNotImportJavaNetSocket() {
+        val source = sourceText(
+            "app/src/main/java/gr/hua/aurora/transport/hybrid/HybridBootstrapCommandExecutorFactory.kt"
+        )
+
+        assertFalse(source.contains("import java.net.Socket"))
+    }
+
+    @Test
+    fun socketImportRemainsIsolatedToJavaNetHybridBootstrapSocketDialer() {
+        val executorFactorySource = sourceText(
+            "app/src/main/java/gr/hua/aurora/transport/hybrid/HybridBootstrapCommandExecutorFactory.kt"
+        )
+        val javaNetSource = sourceText(
+            "app/src/main/java/gr/hua/aurora/transport/hybrid/JavaNetHybridBootstrapSocketDialer.kt"
+        )
+
+        assertFalse(executorFactorySource.contains("import java.net.Socket"))
+        assertTrue(javaNetSource.contains("import java.net.Socket"))
+    }
+
+    @Test
+    fun noServerSocketAppearsInChangedFactoryFiles() {
+        changedMainSourcePaths().forEach { path ->
+            assertFalse(sourceText(path).contains("ServerSocket"))
+        }
+    }
+
+    @Test
+    fun noWifiP2pApisAppearInChangedFactoryFiles() {
+        changedMainSourcePaths().forEach { path ->
+            val source = sourceText(path)
+
+            assertFalse(source.contains("WifiP2pManager"))
+            assertFalse(source.contains("WifiP2pConfig"))
+        }
+    }
+
+    @Test
+    fun socketPlanDisabledFactoryDoesNotCallJavaNetConnectorFactory() {
+        val source = sourceText(
+            "app/src/main/java/gr/hua/aurora/transport/hybrid/HybridBootstrapCommandExecutorFactory.kt"
+        )
+
+        assertFalse(source.contains("HybridBootstrapSocketConnectorFactory.javaNet("))
+    }
+
     private fun command(
         peerId: String = "peer-factory",
         sessionId: String = "session-factory",
@@ -178,6 +260,41 @@ class HybridBootstrapCommandExecutorFactoryTest {
             latestCreatedAtMillis = latestCreatedAtMillis,
             requestedAtMillis = requestedAtMillis,
             commandCreatedAtMillis = commandCreatedAtMillis
+        )
+    }
+
+    private fun changedMainSourcePaths(): List<String> {
+        return listOf(
+            "app/src/main/java/gr/hua/aurora/transport/hybrid/HybridBootstrapCommandExecutorFactory.kt"
+        )
+    }
+
+    private fun sourceText(relativePath: String): String {
+        val sourcePath = resolveSourcePath(relativePath)
+        return String(
+            Files.readAllBytes(sourcePath),
+            UTF_8
+        )
+    }
+
+    private fun resolveSourcePath(relativePath: String): Path {
+        val direct = Path.of(relativePath)
+        if (Files.exists(direct)) {
+            return direct
+        }
+
+        val parent = Path.of("..").resolve(relativePath).normalize()
+        if (Files.exists(parent)) {
+            return parent
+        }
+
+        val grandParent = Path.of("..", "..").resolve(relativePath).normalize()
+        if (Files.exists(grandParent)) {
+            return grandParent
+        }
+
+        error(
+            "Missing source file: $relativePath (user.dir=${System.getProperty("user.dir")})"
         )
     }
 }
