@@ -93,7 +93,9 @@ import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommandBuildResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommandBuilder
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptDecision
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptPolicy
+import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutorConfig
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutionResult
+import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutorMode
 import gr.hua.aurora.transport.hybrid.HybridBootstrapManualTriggerSnapshot
 import gr.hua.aurora.transport.hybrid.HybridBootstrapManualTriggerSnapshotFormatter
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandTriggerController
@@ -2551,9 +2553,17 @@ internal fun currentHybridBootstrapAttemptCommandBuildResult(
     )
 }
 
+internal fun currentHybridBootstrapCommandExecutorConfig(): HybridBootstrapCommandExecutorConfig {
+    return HybridBootstrapCommandExecutorConfig(
+        mode = HybridBootstrapCommandExecutorMode.NO_OP
+    )
+}
+
 internal fun currentHybridBootstrapCommandTriggerController(): HybridBootstrapCommandTriggerController {
     return HybridBootstrapCommandTriggerController(
-        executor = HybridBootstrapCommandExecutorFactory.defaultRuntimeExecutor()
+        executor = HybridBootstrapCommandExecutorFactory.create(
+            currentHybridBootstrapCommandExecutorConfig()
+        )
     )
 }
 

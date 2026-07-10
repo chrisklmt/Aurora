@@ -49,6 +49,9 @@ import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptDecision
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommandBuildResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommand
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptRequest
+import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutorConfig
+import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutorFactory
+import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutorMode
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandTriggerResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCandidateSelection
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandTriggerController
@@ -1437,6 +1440,66 @@ class AuroraBleRuntimeHostTest {
 
         assertNull(controller.latestResult)
         assertTrue(controller.triggerHistory.isEmpty())
+    }
+
+    @Test
+    fun runtimeExecutorConfigExistsAndIsNoOp() {
+        val config = currentHybridBootstrapCommandExecutorConfig()
+
+        assertEquals(HybridBootstrapCommandExecutorMode.NO_OP, config.mode)
+    }
+
+    @Test
+    fun runtimeExecutorConfigDefaultRejectionReasonIsHybridBootstrapExecutionIsDisabled() {
+        val config = currentHybridBootstrapCommandExecutorConfig()
+
+        assertEquals(
+            "Hybrid bootstrap execution is disabled.",
+            config.noOpRejectionReason
+        )
+    }
+
+    @Test
+    fun runtimeExecutorConfigDefaultDisabledSocketConnectorReasonIsPreserved() {
+        val config = currentHybridBootstrapCommandExecutorConfig()
+
+        assertEquals(
+            "Hybrid bootstrap socket connector is disabled.",
+            config.disabledSocketConnectorFailureReason
+        )
+    }
+
+    @Test
+    fun runtimeExecutorConfigMatchesDefaultFactoryConfig() {
+        val config = currentHybridBootstrapCommandExecutorConfig()
+
+        assertEquals(HybridBootstrapCommandExecutorConfig(), config)
+    }
+
+    @Test
+    fun runtimeTriggerControllerMatchesFactoryCreateWithRuntimeConfigBehavior() {
+        val controller = currentHybridBootstrapCommandTriggerController()
+        val buildResult = HybridBootstrapAttemptCommandBuildResult.Built(
+            HybridBootstrapAttemptCommand(
+                peerId = "peer-runtime-config",
+                sessionId = "session-runtime-config",
+                bootstrapIdentifier = "bootstrap-runtime-config",
+                groupOwnerAddress = "192.168.49.230",
+                socketPort = 9230,
+                latestCreatedAtMillis = 1_739_000_000L,
+                requestedAtMillis = 1_739_000_001L,
+                commandCreatedAtMillis = 1_739_000_002L
+            )
+        )
+        val expected = HybridBootstrapCommandTriggerResult.Executed(
+            executionResult = HybridBootstrapCommandExecutorFactory.create(
+                currentHybridBootstrapCommandExecutorConfig()
+            ).execute(buildResult.command)
+        )
+
+        val result = controller.trigger(buildResult)
+
+        assertEquals(expected, result)
     }
 
     @Test
