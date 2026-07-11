@@ -431,6 +431,7 @@ class NearbyDevicesScreenTest {
                 establishedPeerIds = listOf("peer-123"),
                 canonicalPeerIdByAlias = emptyMap()
             ),
+            hybridBootstrapJavaNetRuntimeEnabled = false,
             hybridBootstrapCommandExecutorMode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED,
             hybridBootstrapManualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot(),
             selectedSecurePeerId = "peer-123",
@@ -654,6 +655,7 @@ class NearbyDevicesScreenTest {
                 establishedPeerIds = emptyList(),
                 canonicalPeerIdByAlias = emptyMap()
             ),
+            hybridBootstrapJavaNetRuntimeEnabled = false,
             hybridBootstrapCommandExecutorMode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED,
             hybridBootstrapManualTriggerSnapshot = snapshot,
             selectedSecurePeerId = "peer-legacy",
@@ -2548,6 +2550,7 @@ class NearbyDevicesScreenTest {
                 lastHadAuroraDiscoveryPayload = true
             ),
             peerSessionDiagnostics = diagnostics,
+            hybridBootstrapJavaNetRuntimeEnabled = false,
             hybridBootstrapCommandExecutorMode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED,
             hybridBootstrapManualTriggerSnapshot = manualTriggerSnapshot,
             selectedSecurePeerId = "peer-legacy",
@@ -2593,6 +2596,7 @@ class NearbyDevicesScreenTest {
                 DebugInfoItem("Active peer", "peer-legacy"),
                 DebugInfoItem("Selected session", "ready"),
                 DebugInfoItem("Active session", "ready"),
+                DebugInfoItem("JavaNet runtime enabled", "false"),
                 DebugInfoItem("Executor mode", "SOCKET_PLAN_DISABLED"),
                 DebugInfoItem("Manual trigger available", "true"),
                 DebugInfoItem(
@@ -2636,6 +2640,7 @@ class NearbyDevicesScreenTest {
                     establishedPeerIds = emptyList(),
                     canonicalPeerIdByAlias = emptyMap()
                 ),
+                hybridBootstrapJavaNetRuntimeEnabled = false,
                 hybridBootstrapCommandExecutorMode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED,
                 hybridBootstrapManualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot(
                     canTriggerNow = false,

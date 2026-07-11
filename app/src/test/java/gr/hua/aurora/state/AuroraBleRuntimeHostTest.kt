@@ -1474,6 +1474,16 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun runtimeStateExposesReadOnlyHybridBootstrapJavaNetRuntimeEnabledField() {
+        val field = AuroraBleRuntimeState::class.java.getDeclaredField(
+            "hybridBootstrapJavaNetRuntimeEnabled"
+        )
+
+        assertEquals(Boolean::class.javaPrimitiveType, field.type)
+        assertTrue(Modifier.isFinal(field.modifiers))
+    }
+
+    @Test
     fun runtimeExecutorConfigDefaultRejectionReasonIsHybridBootstrapExecutionIsDisabled() {
         val config = currentHybridBootstrapCommandExecutorConfig()
 

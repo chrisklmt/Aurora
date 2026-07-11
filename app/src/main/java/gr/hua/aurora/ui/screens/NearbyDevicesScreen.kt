@@ -142,6 +142,7 @@ internal fun NearbyDevicesScreen(
     onConnectWifiDirectPeer: (WifiDirectPeer, WifiDirectRolePreference) -> Unit,
     onDisconnectWifiDirectPeer: () -> Unit,
     identityHandlerStatus: String,
+    hybridBootstrapJavaNetRuntimeEnabled: Boolean,
     hybridBootstrapCommandExecutorMode: HybridBootstrapCommandExecutorMode,
     hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
     onHybridBootstrapManualTriggerRequested: () -> HybridBootstrapCommandTriggerResult,
@@ -321,6 +322,8 @@ internal fun NearbyDevicesScreen(
                     scanDiagnostics = bleSessionState.bleScanDiagnostics,
                     showDebugDiagnostics = showDebugDiagnostics,
                     peerSessionDiagnostics = peerSessionDiagnostics,
+                    hybridBootstrapJavaNetRuntimeEnabled =
+                    hybridBootstrapJavaNetRuntimeEnabled,
                     hybridBootstrapCommandExecutorMode = hybridBootstrapCommandExecutorMode,
                     hybridBootstrapManualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot,
                     onHybridBootstrapManualTriggerRequested =
@@ -597,6 +600,7 @@ private fun DiscoveredBleDevicesCard(
     scanDiagnostics: BleScanDiagnostics,
     showDebugDiagnostics: Boolean,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
+    hybridBootstrapJavaNetRuntimeEnabled: Boolean,
     hybridBootstrapCommandExecutorMode: HybridBootstrapCommandExecutorMode,
     hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
     onHybridBootstrapManualTriggerRequested: () -> HybridBootstrapCommandTriggerResult,
@@ -635,6 +639,7 @@ private fun DiscoveredBleDevicesCard(
         transportWriteStatus = transportWriteStatus,
         scanDiagnostics = scanDiagnostics,
         peerSessionDiagnostics = peerSessionDiagnostics,
+        hybridBootstrapJavaNetRuntimeEnabled = hybridBootstrapJavaNetRuntimeEnabled,
         hybridBootstrapCommandExecutorMode = hybridBootstrapCommandExecutorMode,
         hybridBootstrapManualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot,
         selectedSecurePeerId = selectedSecurePeerId,
@@ -1575,6 +1580,7 @@ internal fun buildNearbyExpandedDebugSections(
     transportWriteStatus: NearbyBleTransportWriteStatus,
     scanDiagnostics: BleScanDiagnostics,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
+    hybridBootstrapJavaNetRuntimeEnabled: Boolean,
     hybridBootstrapCommandExecutorMode: HybridBootstrapCommandExecutorMode,
     hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
     selectedSecurePeerId: String?,
@@ -1647,6 +1653,12 @@ internal fun buildNearbyExpandedDebugSections(
                         peerId = activeSessionPeerId,
                         diagnostics = peerSessionDiagnostics
                     )
+                )
+            )
+            add(
+                DebugInfoItem(
+                    "JavaNet runtime enabled",
+                    hybridBootstrapJavaNetRuntimeEnabled.toString()
                 )
             )
             add(
@@ -1732,6 +1744,7 @@ internal fun buildNearbyExpandedDebugCard(
     transportWriteStatus: NearbyBleTransportWriteStatus,
     scanDiagnostics: BleScanDiagnostics,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
+    hybridBootstrapJavaNetRuntimeEnabled: Boolean,
     hybridBootstrapCommandExecutorMode: HybridBootstrapCommandExecutorMode,
     hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
     selectedSecurePeerId: String?,
@@ -1751,6 +1764,7 @@ internal fun buildNearbyExpandedDebugCard(
         transportWriteStatus = transportWriteStatus,
         scanDiagnostics = scanDiagnostics,
         peerSessionDiagnostics = peerSessionDiagnostics,
+        hybridBootstrapJavaNetRuntimeEnabled = hybridBootstrapJavaNetRuntimeEnabled,
         hybridBootstrapCommandExecutorMode = hybridBootstrapCommandExecutorMode,
         hybridBootstrapManualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot,
         selectedSecurePeerId = selectedSecurePeerId,
