@@ -225,12 +225,12 @@ class HybridBootstrapSocketConnectorFactoryTest {
     }
 
     @Test
-    fun hybridBootstrapCommandExecutorFactoryDoesNotUseJavaNetConnectorFactory() {
+    fun hybridBootstrapCommandExecutorFactoryExposesJavaNetOnlyAsExplicitBranch() {
         val source = sourceText(
             "app/src/main/java/gr/hua/aurora/transport/hybrid/HybridBootstrapCommandExecutorFactory.kt"
         )
 
-        assertFalse(source.contains("HybridBootstrapSocketConnectorFactory.javaNet("))
+        assertTrue(source.contains("HybridBootstrapSocketConnectorFactory.javaNet("))
     }
 
     @Test

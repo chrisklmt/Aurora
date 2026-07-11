@@ -5,6 +5,14 @@ import org.junit.Test
 
 class HybridBootstrapCommandExecutorConfigTest {
     @Test
+    fun socketPlanJavaNetModeExists() {
+        assertEquals(
+            HybridBootstrapCommandExecutorMode.SOCKET_PLAN_JAVANET,
+            HybridBootstrapCommandExecutorMode.valueOf("SOCKET_PLAN_JAVANET")
+        )
+    }
+
+    @Test
     fun defaultConfigModeIsNoOp() {
         val config = HybridBootstrapCommandExecutorConfig()
 

@@ -163,12 +163,57 @@ class HybridBootstrapCommandExecutorFactoryTest {
     }
 
     @Test
+    fun socketPlanJavaNetConfigConstructsSocketPlanExecutorWithoutThrowing() {
+        val executor = HybridBootstrapCommandExecutorFactory.create(
+            HybridBootstrapCommandExecutorConfig(
+                mode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_JAVANET
+            )
+        )
+
+        assertTrue(executor is HybridBootstrapSocketPlanCommandExecutor)
+    }
+
+    @Test
+    fun socketPlanJavaNetConstructionDoesNotExecuteACommand() {
+        val executor = HybridBootstrapCommandExecutorFactory.create(
+            HybridBootstrapCommandExecutorConfig(
+                mode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_JAVANET
+            )
+        )
+        val methodNames = executor::class.java.methods.map { it.name }
+
+        assertFalse(methodNames.contains("getExecutedCommands"))
+        assertFalse(methodNames.contains("getTriggerHistory"))
+        assertFalse(methodNames.contains("getLatestResult"))
+    }
+
+    @Test
+    fun socketPlanJavaNetUsesSocketPlanExecutorType() {
+        val executor = HybridBootstrapCommandExecutorFactory.create(
+            HybridBootstrapCommandExecutorConfig(
+                mode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_JAVANET
+            )
+        )
+
+        assertTrue(executor is HybridBootstrapSocketPlanCommandExecutor)
+    }
+
+    @Test
     fun socketPlanDisabledUsesConnectorFactoryDisabledBehaviorIndirectly() {
         val source = sourceText(
             "app/src/main/java/gr/hua/aurora/transport/hybrid/HybridBootstrapCommandExecutorFactory.kt"
         )
 
         assertTrue(source.contains("HybridBootstrapSocketConnectorFactory.disabled("))
+    }
+
+    @Test
+    fun socketPlanJavaNetUsesConnectorFactoryJavaNetBehaviorIndirectly() {
+        val source = sourceText(
+            "app/src/main/java/gr/hua/aurora/transport/hybrid/HybridBootstrapCommandExecutorFactory.kt"
+        )
+
+        assertTrue(source.contains("HybridBootstrapSocketConnectorFactory.javaNet("))
     }
 
     @Test
@@ -183,10 +228,32 @@ class HybridBootstrapCommandExecutorFactoryTest {
     }
 
     @Test
+    fun socketPlanJavaNetFactoryDoesNotCallConnectorConnectDuringConstruction() {
+        val executor = HybridBootstrapCommandExecutorFactory.create(
+            HybridBootstrapCommandExecutorConfig(
+                mode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_JAVANET
+            )
+        )
+
+        assertTrue(executor is HybridBootstrapSocketPlanCommandExecutor)
+    }
+
+    @Test
     fun factoryDoesNotCallDialerDialDuringConstruction() {
         val executor = HybridBootstrapCommandExecutorFactory.create(
             HybridBootstrapCommandExecutorConfig(
                 mode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED
+            )
+        )
+
+        assertTrue(executor is HybridBootstrapSocketPlanCommandExecutor)
+    }
+
+    @Test
+    fun socketPlanJavaNetFactoryDoesNotCallDialerDialDuringConstruction() {
+        val executor = HybridBootstrapCommandExecutorFactory.create(
+            HybridBootstrapCommandExecutorConfig(
+                mode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_JAVANET
             )
         )
 
@@ -233,12 +300,12 @@ class HybridBootstrapCommandExecutorFactoryTest {
     }
 
     @Test
-    fun socketPlanDisabledFactoryDoesNotCallJavaNetConnectorFactory() {
+    fun socketPlanJavaNetFactoryBranchExistsInSource() {
         val source = sourceText(
             "app/src/main/java/gr/hua/aurora/transport/hybrid/HybridBootstrapCommandExecutorFactory.kt"
         )
 
-        assertFalse(source.contains("HybridBootstrapSocketConnectorFactory.javaNet("))
+        assertTrue(source.contains("HybridBootstrapSocketConnectorFactory.javaNet("))
     }
 
     private fun command(

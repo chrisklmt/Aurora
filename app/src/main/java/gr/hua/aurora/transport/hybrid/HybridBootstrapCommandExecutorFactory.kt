@@ -15,6 +15,11 @@ object HybridBootstrapCommandExecutorFactory {
                     )
                 )
             }
+            HybridBootstrapCommandExecutorMode.SOCKET_PLAN_JAVANET -> {
+                HybridBootstrapSocketPlanCommandExecutor(
+                    connector = HybridBootstrapSocketConnectorFactory.javaNet()
+                )
+            }
         }
     }
 
