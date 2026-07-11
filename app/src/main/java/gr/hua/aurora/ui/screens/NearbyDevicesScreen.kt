@@ -73,7 +73,9 @@ import gr.hua.aurora.wifidirect.controller.WifiDirectPermissionStatusReader
 import gr.hua.aurora.wifidirect.runtime.WifiDirectRolePreference
 import gr.hua.aurora.wifidirect.runtime.WifiDirectRuntimeStatus
 import gr.hua.aurora.wifidirect.socket.RememberedWifiDirectSocketState
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private const val nearbyDevicesLogTag = "NearbyDevicesScreen"
 
@@ -626,6 +628,10 @@ private fun DiscoveredBleDevicesCard(
     var showDiagnostics by remember(showDebugDiagnostics) {
         mutableStateOf(false)
     }
+    val coroutineScope = rememberCoroutineScope()
+    val manualTriggerRequestState = remember {
+        NearbyHybridBootstrapManualTriggerRequestState()
+    }
     val expandedDebugCard = buildNearbyExpandedDebugCard(
         showDebugDiagnostics = showDebugDiagnostics,
         advertiseStatus = advertiseStatus,
@@ -648,7 +654,8 @@ private fun DiscoveredBleDevicesCard(
     )
     val hybridBootstrapManualTriggerControlState =
         nearbyHybridBootstrapManualTriggerControlState(
-            hybridBootstrapManualTriggerSnapshot
+            hybridBootstrapManualTriggerSnapshot,
+            manualTriggerRequestState.inProgress
         )
 
     Card(
@@ -776,11 +783,25 @@ private fun DiscoveredBleDevicesCard(
                         DebugInfoCard(card = card)
                         Button(
                             onClick = {
-                                requestNearbyHybridBootstrapManualTriggerIfEnabled(
-                                    controlState = hybridBootstrapManualTriggerControlState,
-                                    onHybridBootstrapManualTriggerRequested =
-                                    onHybridBootstrapManualTriggerRequested
-                                )
+                                coroutineScope.launch {
+                                    try {
+                                        requestNearbyHybridBootstrapManualTriggerIfEnabled(
+                                            requestState = manualTriggerRequestState,
+                                            snapshot = hybridBootstrapManualTriggerSnapshot,
+                                            onHybridBootstrapManualTriggerRequested = {
+                                                withContext(Dispatchers.IO) {
+                                                    onHybridBootstrapManualTriggerRequested()
+                                                }
+                                            }
+                                        )
+                                    } catch (error: Throwable) {
+                                        Log.w(
+                                            nearbyDevicesLogTag,
+                                            "Manual hybrid bootstrap trigger failed before runtime snapshot update",
+                                            error
+                                        )
+                                    }
+                                }
                             },
                             enabled = hybridBootstrapManualTriggerControlState.enabled
                         ) {
@@ -1817,23 +1838,49 @@ internal data class NearbyHybridBootstrapManualTriggerControlState(
     val enabled: Boolean
 )
 
+internal class NearbyHybridBootstrapManualTriggerRequestState(
+    initialInProgress: Boolean = false
+) {
+    var inProgress by mutableStateOf(initialInProgress)
+        private set
+
+    fun tryStart(snapshot: HybridBootstrapManualTriggerSnapshot): Boolean {
+        if (!snapshot.canTriggerNow || inProgress) {
+            return false
+        }
+
+        inProgress = true
+        return true
+    }
+
+    fun finish() {
+        inProgress = false
+    }
+}
+
 internal fun nearbyHybridBootstrapManualTriggerControlState(
-    snapshot: HybridBootstrapManualTriggerSnapshot
+    snapshot: HybridBootstrapManualTriggerSnapshot,
+    manualTriggerInProgress: Boolean = false
 ): NearbyHybridBootstrapManualTriggerControlState {
     return NearbyHybridBootstrapManualTriggerControlState(
         label = "Trigger manual bootstrap",
-        enabled = snapshot.canTriggerNow
+        enabled = snapshot.canTriggerNow && !manualTriggerInProgress
     )
 }
 
-internal fun requestNearbyHybridBootstrapManualTriggerIfEnabled(
-    controlState: NearbyHybridBootstrapManualTriggerControlState,
-    onHybridBootstrapManualTriggerRequested: () -> HybridBootstrapCommandTriggerResult
+internal suspend fun requestNearbyHybridBootstrapManualTriggerIfEnabled(
+    requestState: NearbyHybridBootstrapManualTriggerRequestState,
+    snapshot: HybridBootstrapManualTriggerSnapshot,
+    onHybridBootstrapManualTriggerRequested: suspend () -> HybridBootstrapCommandTriggerResult
 ): HybridBootstrapCommandTriggerResult? {
-    return if (controlState.enabled) {
+    if (!requestState.tryStart(snapshot)) {
+        return null
+    }
+
+    return try {
         onHybridBootstrapManualTriggerRequested()
-    } else {
-        null
+    } finally {
+        requestState.finish()
     }
 }
 

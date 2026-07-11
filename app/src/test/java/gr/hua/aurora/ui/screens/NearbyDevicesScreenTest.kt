@@ -53,6 +53,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlinx.coroutines.runBlocking
 
 class NearbyDevicesScreenTest {
     @Test
@@ -574,21 +575,33 @@ class NearbyDevicesScreenTest {
     }
 
     @Test
+    fun nearbyHybridBootstrapManualTriggerControlStateIsDisabledWhileRequestIsInProgress() {
+        val state = nearbyHybridBootstrapManualTriggerControlState(
+            snapshot = hybridBootstrapManualTriggerSnapshot(canTriggerNow = true),
+            manualTriggerInProgress = true
+        )
+
+        assertFalse(state.enabled)
+    }
+
+    @Test
     fun disabledNearbyHybridBootstrapManualTriggerRequestDoesNotInvokeCallback() {
         var invokeCount = 0
-        val result = requestNearbyHybridBootstrapManualTriggerIfEnabled(
-            controlState = NearbyHybridBootstrapManualTriggerControlState(
-                label = "Trigger manual bootstrap",
-                enabled = false
-            ),
-            onHybridBootstrapManualTriggerRequested = {
-                invokeCount += 1
-                HybridBootstrapCommandTriggerResult.NoCandidates
-            }
-        )
+        val requestState = NearbyHybridBootstrapManualTriggerRequestState()
+        val result = runBlocking {
+            requestNearbyHybridBootstrapManualTriggerIfEnabled(
+                requestState = requestState,
+                snapshot = hybridBootstrapManualTriggerSnapshot(canTriggerNow = false),
+                onHybridBootstrapManualTriggerRequested = {
+                    invokeCount += 1
+                    HybridBootstrapCommandTriggerResult.NoCandidates
+                }
+            )
+        }
 
         assertEquals(0, invokeCount)
         assertNull(result)
+        assertFalse(requestState.inProgress)
     }
 
     @Test
@@ -599,20 +612,84 @@ class NearbyDevicesScreenTest {
                 reason = "Hybrid bootstrap execution is disabled."
             )
         )
+        val requestState = NearbyHybridBootstrapManualTriggerRequestState()
 
-        val result = requestNearbyHybridBootstrapManualTriggerIfEnabled(
-            controlState = NearbyHybridBootstrapManualTriggerControlState(
-                label = "Trigger manual bootstrap",
-                enabled = true
-            ),
-            onHybridBootstrapManualTriggerRequested = {
-                invokeCount += 1
-                expected
-            }
-        )
+        val result = runBlocking {
+            requestNearbyHybridBootstrapManualTriggerIfEnabled(
+                requestState = requestState,
+                snapshot = hybridBootstrapManualTriggerSnapshot(canTriggerNow = true),
+                onHybridBootstrapManualTriggerRequested = {
+                    invokeCount += 1
+                    expected
+                }
+            )
+        }
 
         assertEquals(1, invokeCount)
         assertEquals(expected, result)
+        assertFalse(requestState.inProgress)
+    }
+
+    @Test
+    fun inProgressNearbyHybridBootstrapManualTriggerRequestDoesNotInvokeCallbackAgain() {
+        var invokeCount = 0
+        val requestState = NearbyHybridBootstrapManualTriggerRequestState(initialInProgress = true)
+
+        val result = runBlocking {
+            requestNearbyHybridBootstrapManualTriggerIfEnabled(
+                requestState = requestState,
+                snapshot = hybridBootstrapManualTriggerSnapshot(canTriggerNow = true),
+                onHybridBootstrapManualTriggerRequested = {
+                    invokeCount += 1
+                    HybridBootstrapCommandTriggerResult.NoCandidates
+                }
+            )
+        }
+
+        assertEquals(0, invokeCount)
+        assertNull(result)
+        assertTrue(requestState.inProgress)
+    }
+
+    @Test
+    fun nearbyHybridBootstrapManualTriggerRequestResetsInProgressAfterCompletion() {
+        val requestState = NearbyHybridBootstrapManualTriggerRequestState()
+
+        runBlocking {
+            requestNearbyHybridBootstrapManualTriggerIfEnabled(
+                requestState = requestState,
+                snapshot = hybridBootstrapManualTriggerSnapshot(canTriggerNow = true),
+                onHybridBootstrapManualTriggerRequested = {
+                    assertTrue(requestState.inProgress)
+                    HybridBootstrapCommandTriggerResult.NoCandidates
+                }
+            )
+        }
+
+        assertFalse(requestState.inProgress)
+    }
+
+    @Test
+    fun nearbyHybridBootstrapManualTriggerRequestResetsInProgressAfterFailure() {
+        val requestState = NearbyHybridBootstrapManualTriggerRequestState()
+
+        try {
+            runBlocking {
+                requestNearbyHybridBootstrapManualTriggerIfEnabled(
+                    requestState = requestState,
+                    snapshot = hybridBootstrapManualTriggerSnapshot(canTriggerNow = true),
+                    onHybridBootstrapManualTriggerRequested = {
+                        assertTrue(requestState.inProgress)
+                        throw IllegalStateException("boom")
+                    }
+                )
+            }
+            throw AssertionError("Expected manual trigger request to rethrow the callback failure.")
+        } catch (expected: IllegalStateException) {
+            assertEquals("boom", expected.message)
+        }
+
+        assertFalse(requestState.inProgress)
     }
 
     @Test
