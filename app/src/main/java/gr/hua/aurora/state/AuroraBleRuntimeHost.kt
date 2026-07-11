@@ -2565,7 +2565,7 @@ internal fun currentHybridBootstrapAttemptCommandBuildResult(
     )
 }
 
-internal fun hybridBootstrapJavaNetRuntimeEnabled(): Boolean = false
+internal fun hybridBootstrapJavaNetRuntimeEnabled(): Boolean = true
 
 internal fun currentHybridBootstrapRuntimeExecutorMode(): HybridBootstrapCommandExecutorMode {
     return if (hybridBootstrapJavaNetRuntimeEnabled()) {

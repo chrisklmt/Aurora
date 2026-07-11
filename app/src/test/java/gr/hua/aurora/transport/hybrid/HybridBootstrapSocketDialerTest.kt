@@ -444,19 +444,14 @@ class HybridBootstrapSocketDialerTest {
     }
 
     @Test
-    fun runtimeStillUsesSocketPlanDisabledWithDisabledConnectorBehavior() {
+    fun runtimeUsesSocketPlanJavaNetModeWithoutExecutingValidDial() {
+        val config = currentHybridBootstrapCommandExecutorConfig()
         val executor = HybridBootstrapCommandExecutorFactory.create(
-            currentHybridBootstrapCommandExecutorConfig()
+            config
         )
 
-        val result = executor.execute(validCommand())
-
-        assertEquals(
-            HybridBootstrapCommandExecutionResult.Rejected(
-                reason = "Hybrid bootstrap socket connector is disabled."
-            ),
-            result
-        )
+        assertEquals(HybridBootstrapCommandExecutorMode.SOCKET_PLAN_JAVANET, config.mode)
+        assertTrue(executor is HybridBootstrapSocketPlanCommandExecutor)
     }
 
     private fun validCommand(): HybridBootstrapAttemptCommand {

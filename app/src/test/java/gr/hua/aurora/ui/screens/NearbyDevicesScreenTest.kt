@@ -431,8 +431,8 @@ class NearbyDevicesScreenTest {
                 establishedPeerIds = listOf("peer-123"),
                 canonicalPeerIdByAlias = emptyMap()
             ),
-            hybridBootstrapJavaNetRuntimeEnabled = false,
-            hybridBootstrapCommandExecutorMode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED,
+            hybridBootstrapJavaNetRuntimeEnabled = true,
+            hybridBootstrapCommandExecutorMode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_JAVANET,
             hybridBootstrapManualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot(),
             selectedSecurePeerId = "peer-123",
             activeSessionPeerId = "peer-123",
@@ -655,8 +655,8 @@ class NearbyDevicesScreenTest {
                 establishedPeerIds = emptyList(),
                 canonicalPeerIdByAlias = emptyMap()
             ),
-            hybridBootstrapJavaNetRuntimeEnabled = false,
-            hybridBootstrapCommandExecutorMode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED,
+            hybridBootstrapJavaNetRuntimeEnabled = true,
+            hybridBootstrapCommandExecutorMode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_JAVANET,
             hybridBootstrapManualTriggerSnapshot = snapshot,
             selectedSecurePeerId = "peer-legacy",
             activeSessionPeerId = "peer-legacy",
@@ -2550,8 +2550,8 @@ class NearbyDevicesScreenTest {
                 lastHadAuroraDiscoveryPayload = true
             ),
             peerSessionDiagnostics = diagnostics,
-            hybridBootstrapJavaNetRuntimeEnabled = false,
-            hybridBootstrapCommandExecutorMode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED,
+            hybridBootstrapJavaNetRuntimeEnabled = true,
+            hybridBootstrapCommandExecutorMode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_JAVANET,
             hybridBootstrapManualTriggerSnapshot = manualTriggerSnapshot,
             selectedSecurePeerId = "peer-legacy",
             activeSessionPeerId = "peer-legacy",
@@ -2596,8 +2596,8 @@ class NearbyDevicesScreenTest {
                 DebugInfoItem("Active peer", "peer-legacy"),
                 DebugInfoItem("Selected session", "ready"),
                 DebugInfoItem("Active session", "ready"),
-                DebugInfoItem("JavaNet runtime enabled", "false"),
-                DebugInfoItem("Executor mode", "SOCKET_PLAN_DISABLED"),
+                DebugInfoItem("JavaNet runtime enabled", "true"),
+                DebugInfoItem("Executor mode", "SOCKET_PLAN_JAVANET"),
                 DebugInfoItem("Manual trigger available", "true"),
                 DebugInfoItem(
                     "Manual command",
@@ -2640,8 +2640,8 @@ class NearbyDevicesScreenTest {
                     establishedPeerIds = emptyList(),
                     canonicalPeerIdByAlias = emptyMap()
                 ),
-                hybridBootstrapJavaNetRuntimeEnabled = false,
-                hybridBootstrapCommandExecutorMode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED,
+                hybridBootstrapJavaNetRuntimeEnabled = true,
+                hybridBootstrapCommandExecutorMode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_JAVANET,
                 hybridBootstrapManualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot(
                     canTriggerNow = false,
                     commandStatusText = "Hybrid bootstrap command: no candidates",

@@ -1436,7 +1436,7 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
-    fun runtimeWiringCreatesNoOpTriggerControllerWithoutTriggeringIt() {
+    fun runtimeWiringCreatesTriggerControllerWithoutTriggeringIt() {
         val controller = currentHybridBootstrapCommandTriggerController()
 
         assertNull(controller.latestResult)
@@ -1444,23 +1444,23 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
-    fun runtimeJavaNetHybridBootstrapGuardIsDisabled() {
-        assertFalse(hybridBootstrapJavaNetRuntimeEnabled())
+    fun runtimeJavaNetHybridBootstrapGuardIsEnabled() {
+        assertTrue(hybridBootstrapJavaNetRuntimeEnabled())
     }
 
     @Test
-    fun runtimeExecutorModeResolvesToSocketPlanDisabledWhileJavaNetGuardIsOff() {
+    fun runtimeExecutorModeResolvesToSocketPlanJavaNetWhileJavaNetGuardIsOn() {
         assertEquals(
-            HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED,
+            HybridBootstrapCommandExecutorMode.SOCKET_PLAN_JAVANET,
             currentHybridBootstrapRuntimeExecutorMode()
         )
     }
 
     @Test
-    fun runtimeExecutorConfigExistsAndIsSocketPlanDisabled() {
+    fun runtimeExecutorConfigExistsAndIsSocketPlanJavaNet() {
         val config = currentHybridBootstrapCommandExecutorConfig()
 
-        assertEquals(HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED, config.mode)
+        assertEquals(HybridBootstrapCommandExecutorMode.SOCKET_PLAN_JAVANET, config.mode)
     }
 
     @Test
@@ -1504,41 +1504,23 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
-    fun runtimeExecutorConfigMatchesExplicitSocketPlanDisabledFactoryConfig() {
+    fun runtimeExecutorConfigMatchesExplicitSocketPlanJavaNetFactoryConfig() {
         val config = currentHybridBootstrapCommandExecutorConfig()
 
         assertEquals(
             HybridBootstrapCommandExecutorConfig(
-                mode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED
+                mode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_JAVANET
             ),
             config
         )
     }
 
     @Test
-    fun runtimeTriggerControllerMatchesFactoryCreateWithRuntimeConfigBehavior() {
+    fun runtimeTriggerControllerInJavaNetModeStartsIdleWithoutExecuting() {
         val controller = currentHybridBootstrapCommandTriggerController()
-        val buildResult = HybridBootstrapAttemptCommandBuildResult.Built(
-            HybridBootstrapAttemptCommand(
-                peerId = "peer-runtime-config",
-                sessionId = "session-runtime-config",
-                bootstrapIdentifier = "bootstrap-runtime-config",
-                groupOwnerAddress = "192.168.49.230",
-                socketPort = 9230,
-                latestCreatedAtMillis = 1_739_000_000L,
-                requestedAtMillis = 1_739_000_001L,
-                commandCreatedAtMillis = 1_739_000_002L
-            )
-        )
-        val expected = HybridBootstrapCommandTriggerResult.Executed(
-            executionResult = HybridBootstrapCommandExecutorFactory.create(
-                currentHybridBootstrapCommandExecutorConfig()
-            ).execute(buildResult.command)
-        )
 
-        val result = controller.trigger(buildResult)
-
-        assertEquals(expected, result)
+        assertNull(controller.latestResult)
+        assertTrue(controller.triggerHistory.isEmpty())
     }
 
     @Test
@@ -2942,38 +2924,23 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
-    fun disabledSocketExecutorWouldRejectIfExplicitlyTriggeredButRuntimeDoesNotTriggerItAutomatically() {
+    fun explicitHelperWithNoCandidatesDoesNotDialAndReturnsNoCandidatesInJavaNetMode() {
         val controller = currentHybridBootstrapCommandTriggerController()
 
         val result = triggerHybridBootstrapCommandIfExplicitlyRequested(
-            buildResult = HybridBootstrapAttemptCommandBuildResult.Built(
-                HybridBootstrapAttemptCommand(
-                    peerId = "peer-explicit-no-op",
-                    sessionId = "session-explicit-no-op",
-                    bootstrapIdentifier = "bootstrap-explicit-no-op",
-                    groupOwnerAddress = "192.168.49.173",
-                    socketPort = 9173,
-                    latestCreatedAtMillis = 1_733_000_040L,
-                    requestedAtMillis = 1_733_000_041L,
-                    commandCreatedAtMillis = 1_733_000_042L
-                )
-            ),
+            buildResult = HybridBootstrapAttemptCommandBuildResult.NoCandidates,
             controller = controller
         )
 
-        assertEquals(
-            HybridBootstrapCommandTriggerResult.Executed(
-                HybridBootstrapCommandExecutionResult.Rejected(
-                    reason = "Hybrid bootstrap socket connector is disabled."
-                )
-            ),
-            result
-        )
+        assertEquals(HybridBootstrapCommandTriggerResult.NoCandidates, result)
     }
 
     @Test
-    fun explicitHelperWithBuiltBuildResultTriggersControllerAndReturnsExecuted() {
-        val controller = currentHybridBootstrapCommandTriggerController()
+    fun explicitHelperWithBuiltBuildResultTriggersCustomControllerAndReturnsExecuted() {
+        val expectedExecutionResult = testHybridBootstrapRejectedExecutionResult()
+        val (controller, executor) = createRecordingHybridBootstrapCommandTriggerController(
+            result = expectedExecutionResult
+        )
 
         val result = triggerHybridBootstrapCommandIfExplicitlyRequested(
             buildResult = HybridBootstrapAttemptCommandBuildResult.Built(
@@ -2993,12 +2960,11 @@ class AuroraBleRuntimeHostTest {
 
         assertEquals(
             HybridBootstrapCommandTriggerResult.Executed(
-                HybridBootstrapCommandExecutionResult.Rejected(
-                    reason = "Hybrid bootstrap socket connector is disabled."
-                )
+                expectedExecutionResult
             ),
             result
         )
+        assertEquals(1, executor.executeCallCount)
     }
 
     @Test
@@ -3485,6 +3451,7 @@ class AuroraBleRuntimeHostTest {
 
     @Test
     fun directInvocationOfRuntimeStyleManualTriggerActionUpdatesLatestResultVariable() {
+        val (controller, executor) = createRecordingHybridBootstrapCommandTriggerController()
         var latestTriggerResult: HybridBootstrapCommandTriggerResult? = null
         val action = createHybridBootstrapManualTriggerAction(
             buildResultProvider = {
@@ -3499,17 +3466,22 @@ class AuroraBleRuntimeHostTest {
                     commandCreatedAtMillis = 1_733_000_150L
                 )
             },
-            controllerProvider = { currentHybridBootstrapCommandTriggerController() },
+            controllerProvider = { controller },
             recordResult = { latestTriggerResult = it }
         )
 
         val result = action()
 
         assertEquals(result, latestTriggerResult)
+        assertEquals(1, executor.executeCallCount)
     }
 
     @Test
     fun recordedManualTriggerResultCanRefreshSnapshotWithRejectedStatus() {
+        val expectedExecutionResult = testHybridBootstrapRejectedExecutionResult()
+        val (controller, executor) = createRecordingHybridBootstrapCommandTriggerController(
+            result = expectedExecutionResult
+        )
         var latestTriggerResult: HybridBootstrapCommandTriggerResult? = null
         var latestSnapshot: HybridBootstrapManualTriggerSnapshot? = null
         val buildResult = builtHybridBootstrapAttemptCommandResult(
@@ -3524,7 +3496,7 @@ class AuroraBleRuntimeHostTest {
         )
         val action = createHybridBootstrapManualTriggerAction(
             buildResultProvider = { buildResult },
-            controllerProvider = { currentHybridBootstrapCommandTriggerController() },
+            controllerProvider = { controller },
             recordResult = { result ->
                 latestTriggerResult = result
                 latestSnapshot = currentHybridBootstrapManualTriggerSnapshot(
@@ -3539,13 +3511,18 @@ class AuroraBleRuntimeHostTest {
         assertEquals(result, latestTriggerResult)
         assertEquals(result, latestSnapshot?.latestTriggerResult)
         assertEquals(
-            "Hybrid bootstrap trigger: rejected: Hybrid bootstrap socket connector is disabled.",
+            "Hybrid bootstrap trigger: rejected: ${expectedExecutionResult.reason}",
             latestSnapshot?.triggerStatusText
         )
+        assertEquals(1, executor.executeCallCount)
     }
 
     @Test
-    fun manualTriggerActionWithRuntimeSocketPlanDisabledControllerReturnsRejectedAndRecordsIt() {
+    fun manualTriggerActionWithRuntimeJavaNetModeCustomControllerReturnsRejectedAndRecordsIt() {
+        val expectedExecutionResult = testHybridBootstrapRejectedExecutionResult()
+        val (controller, executor) = createRecordingHybridBootstrapCommandTriggerController(
+            result = expectedExecutionResult
+        )
         var latestTriggerResult: HybridBootstrapCommandTriggerResult? = null
         val action = createHybridBootstrapManualTriggerAction(
             buildResultProvider = {
@@ -3560,7 +3537,7 @@ class AuroraBleRuntimeHostTest {
                     commandCreatedAtMillis = 1_733_000_150L
                 )
             },
-            controllerProvider = { currentHybridBootstrapCommandTriggerController() },
+            controllerProvider = { controller },
             recordResult = { latestTriggerResult = it }
         )
 
@@ -3568,13 +3545,12 @@ class AuroraBleRuntimeHostTest {
 
         assertEquals(
             HybridBootstrapCommandTriggerResult.Executed(
-                HybridBootstrapCommandExecutionResult.Rejected(
-                    reason = "Hybrid bootstrap socket connector is disabled."
-                )
+                expectedExecutionResult
             ),
             result
         )
         assertEquals(result, latestTriggerResult)
+        assertEquals(1, executor.executeCallCount)
     }
 
     @Test
@@ -3806,7 +3782,7 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
-    fun builtSnapshotWithRuntimeNoOpActionReturnsRejected() {
+    fun builtSnapshotWithCustomControllerActionReturnsExecutedRejectedWithoutDialing() {
         val snapshot = currentHybridBootstrapManualTriggerSnapshot(
             commandBuildResult = builtHybridBootstrapAttemptCommandResult(
                 peerId = "peer-guard-no-op",
@@ -3820,9 +3796,13 @@ class AuroraBleRuntimeHostTest {
             ),
             latestTriggerResult = null
         )
+        val expectedExecutionResult = testHybridBootstrapRejectedExecutionResult()
+        val (controller, executor) = createRecordingHybridBootstrapCommandTriggerController(
+            result = expectedExecutionResult
+        )
         val action = createHybridBootstrapManualTriggerAction(
             buildResultProvider = { snapshot.commandBuildResult },
-            controllerProvider = { currentHybridBootstrapCommandTriggerController() },
+            controllerProvider = { controller },
             recordResult = {}
         )
 
@@ -3833,12 +3813,11 @@ class AuroraBleRuntimeHostTest {
 
         assertEquals(
             HybridBootstrapCommandTriggerResult.Executed(
-                HybridBootstrapCommandExecutionResult.Rejected(
-                    reason = "Hybrid bootstrap socket connector is disabled."
-                )
+                expectedExecutionResult
             ),
             result
         )
+        assertEquals(1, executor.executeCallCount)
     }
 
     @Test
@@ -4032,17 +4011,17 @@ class AuroraBleRuntimeHostTest {
             ),
             latestTriggerResult = latestTriggerResult
         )
-        val manualAction = createHybridBootstrapManualTriggerAction(
-            buildResultProvider = { latestSnapshot.commandBuildResult },
-            controllerProvider = { currentHybridBootstrapCommandTriggerController() },
-            recordResult = { result ->
-                latestTriggerResult = result
-                latestSnapshot = currentHybridBootstrapManualTriggerSnapshot(
-                    commandBuildResult = latestSnapshot.commandBuildResult,
-                    latestTriggerResult = result
-                )
-            }
+        val expected = HybridBootstrapCommandTriggerResult.Executed(
+            testHybridBootstrapRejectedExecutionResult()
         )
+        val manualAction = {
+            latestTriggerResult = expected
+            latestSnapshot = currentHybridBootstrapManualTriggerSnapshot(
+                commandBuildResult = latestSnapshot.commandBuildResult,
+                latestTriggerResult = expected
+            )
+            expected
+        }
         val guardedAction = {
             triggerHybridBootstrapManuallyIfAvailable(
                 snapshot = latestSnapshot,
@@ -4052,14 +4031,7 @@ class AuroraBleRuntimeHostTest {
 
         val result = guardedAction()
 
-        assertEquals(
-            HybridBootstrapCommandTriggerResult.Executed(
-                HybridBootstrapCommandExecutionResult.Rejected(
-                    reason = "Hybrid bootstrap socket connector is disabled."
-                )
-            ),
-            result
-        )
+        assertEquals(expected, result)
         assertEquals(result, latestTriggerResult)
         assertEquals(result, latestSnapshot.latestTriggerResult)
     }
@@ -4150,17 +4122,17 @@ class AuroraBleRuntimeHostTest {
             ),
             latestTriggerResult = latestTriggerResult
         )
-        val manualAction = createHybridBootstrapManualTriggerAction(
-            buildResultProvider = { latestSnapshot.commandBuildResult },
-            controllerProvider = { currentHybridBootstrapCommandTriggerController() },
-            recordResult = { result ->
-                latestTriggerResult = result
-                latestSnapshot = currentHybridBootstrapManualTriggerSnapshot(
-                    commandBuildResult = latestSnapshot.commandBuildResult,
-                    latestTriggerResult = result
-                )
-            }
+        val expected = HybridBootstrapCommandTriggerResult.Executed(
+            testHybridBootstrapRejectedExecutionResult()
         )
+        val manualAction = {
+            latestTriggerResult = expected
+            latestSnapshot = currentHybridBootstrapManualTriggerSnapshot(
+                commandBuildResult = latestSnapshot.commandBuildResult,
+                latestTriggerResult = expected
+            )
+            expected
+        }
         val guardedAction = {
             triggerHybridBootstrapManuallyIfAvailable(
                 snapshot = latestSnapshot,
@@ -4173,17 +4145,10 @@ class AuroraBleRuntimeHostTest {
 
         val result = callback()
 
-        assertEquals(
-            HybridBootstrapCommandTriggerResult.Executed(
-                HybridBootstrapCommandExecutionResult.Rejected(
-                    reason = "Hybrid bootstrap socket connector is disabled."
-                )
-            ),
-            result
-        )
+        assertEquals(expected, result)
         assertEquals(result, latestTriggerResult)
         assertEquals(
-            "Hybrid bootstrap trigger: rejected: Hybrid bootstrap socket connector is disabled.",
+            "Hybrid bootstrap trigger: rejected: Hybrid bootstrap test executor rejected command.",
             latestSnapshot.triggerStatusText
         )
     }
@@ -4421,7 +4386,10 @@ class AuroraBleRuntimeHostTest {
 
     @Test
     fun triggerAndRecordHelperTriggersRecordsAndReturnsExecuted() {
-        val controller = currentHybridBootstrapCommandTriggerController()
+        val expectedExecutionResult = testHybridBootstrapRejectedExecutionResult()
+        val (controller, executor) = createRecordingHybridBootstrapCommandTriggerController(
+            result = expectedExecutionResult
+        )
         val recordedResults = mutableListOf<HybridBootstrapCommandTriggerResult>()
         val buildResult = HybridBootstrapAttemptCommandBuildResult.Built(
             HybridBootstrapAttemptCommand(
@@ -4443,14 +4411,13 @@ class AuroraBleRuntimeHostTest {
         )
 
         val expected = HybridBootstrapCommandTriggerResult.Executed(
-            HybridBootstrapCommandExecutionResult.Rejected(
-                reason = "Hybrid bootstrap socket connector is disabled."
-            )
+            expectedExecutionResult
         )
         assertEquals(expected, result)
         assertEquals(listOf(recordExplicitHybridBootstrapTriggerResult(expected)), recordedResults)
         assertEquals(expected, controller.latestResult)
         assertEquals(listOf(expected), controller.triggerHistory)
+        assertEquals(1, executor.executeCallCount)
     }
 
     @Test
@@ -4474,7 +4441,7 @@ class AuroraBleRuntimeHostTest {
 
     @Test
     fun triggerAndRecordHelperDoesNotMutateBuildResult() {
-        val controller = currentHybridBootstrapCommandTriggerController()
+        val (controller, executor) = createRecordingHybridBootstrapCommandTriggerController()
         val buildResult = HybridBootstrapAttemptCommandBuildResult.Built(
             HybridBootstrapAttemptCommand(
                 peerId = "peer-trigger-record-stable",
@@ -4501,10 +4468,12 @@ class AuroraBleRuntimeHostTest {
         assertTrue(result is HybridBootstrapCommandTriggerResult.Executed)
         assertEquals(before, buildResult)
         assertEquals(1, recordedResults.size)
+        assertEquals(1, executor.executeCallCount)
     }
 
     @Test
     fun manualTriggerActionDoesNotMutateBuildResult() {
+        val (controller, executor) = createRecordingHybridBootstrapCommandTriggerController()
         var buildResult = builtHybridBootstrapAttemptCommandResult(
             peerId = "peer-manual-stable",
             sessionId = "session-manual-stable",
@@ -4520,7 +4489,7 @@ class AuroraBleRuntimeHostTest {
         )
         val action = createHybridBootstrapManualTriggerAction(
             buildResultProvider = { buildResult },
-            controllerProvider = { currentHybridBootstrapCommandTriggerController() },
+            controllerProvider = { controller },
             recordResult = {}
         )
 
@@ -4528,10 +4497,12 @@ class AuroraBleRuntimeHostTest {
 
         assertTrue(result is HybridBootstrapCommandTriggerResult.Executed)
         assertEquals(before, buildResult)
+        assertEquals(1, executor.executeCallCount)
     }
 
     @Test
     fun manualTriggerActionDoesNotAppendGlobalChatMessages() {
+        val (controller, executor) = createRecordingHybridBootstrapCommandTriggerController()
         val holder = AuroraStateHolder(
             initialState = SampleAuroraState.create(
                 generatedUsername = "PIAIUFN1"
@@ -4553,7 +4524,7 @@ class AuroraBleRuntimeHostTest {
                     commandCreatedAtMillis = 1_733_000_170L
                 )
             },
-            controllerProvider = { currentHybridBootstrapCommandTriggerController() },
+            controllerProvider = { controller },
             recordResult = { latestTriggerResult = it }
         )
 
@@ -4561,10 +4532,12 @@ class AuroraBleRuntimeHostTest {
 
         assertNotNull(latestTriggerResult)
         assertEquals(initialGlobalMessages, holder.uiState.globalMessages)
+        assertEquals(1, executor.executeCallCount)
     }
 
     @Test
     fun manualTriggerActionDoesNotAppendPrivateChatMessages() {
+        val (controller, executor) = createRecordingHybridBootstrapCommandTriggerController()
         val holder = AuroraStateHolder(
             initialState = SampleAuroraState.create(
                 generatedUsername = "PIAIUFN1"
@@ -4586,7 +4559,7 @@ class AuroraBleRuntimeHostTest {
                     commandCreatedAtMillis = 1_733_000_180L
                 )
             },
-            controllerProvider = { currentHybridBootstrapCommandTriggerController() },
+            controllerProvider = { controller },
             recordResult = { latestTriggerResult = it }
         )
 
@@ -4594,10 +4567,12 @@ class AuroraBleRuntimeHostTest {
 
         assertNotNull(latestTriggerResult)
         assertEquals(initialPrivateMessages, holder.uiState.privateMessagesByPeerId)
+        assertEquals(1, executor.executeCallCount)
     }
 
     @Test
     fun triggerAndRecordHelperDoesNotAppendGlobalChatMessages() {
+        val (controller, executor) = createRecordingHybridBootstrapCommandTriggerController()
         val holder = AuroraStateHolder(
             initialState = SampleAuroraState.create(
                 generatedUsername = "PIAIUFN1"
@@ -4620,16 +4595,18 @@ class AuroraBleRuntimeHostTest {
                     commandCreatedAtMillis = 1_733_000_122L
                 )
             ),
-            controller = currentHybridBootstrapCommandTriggerController(),
+            controller = controller,
             recordResult = { latestTriggerResult = it }
         )
 
         assertNotNull(latestTriggerResult)
         assertEquals(initialGlobalMessages, holder.uiState.globalMessages)
+        assertEquals(1, executor.executeCallCount)
     }
 
     @Test
     fun triggerAndRecordHelperDoesNotAppendPrivateChatMessages() {
+        val (controller, executor) = createRecordingHybridBootstrapCommandTriggerController()
         val holder = AuroraStateHolder(
             initialState = SampleAuroraState.create(
                 generatedUsername = "PIAIUFN1"
@@ -4652,17 +4629,18 @@ class AuroraBleRuntimeHostTest {
                     commandCreatedAtMillis = 1_733_000_132L
                 )
             ),
-            controller = currentHybridBootstrapCommandTriggerController(),
+            controller = controller,
             recordResult = { latestTriggerResult = it }
         )
 
         assertNotNull(latestTriggerResult)
         assertEquals(initialPrivateMessages, holder.uiState.privateMessagesByPeerId)
+        assertEquals(1, executor.executeCallCount)
     }
 
     @Test
     fun explicitHelperDoesNotMutateBuildResult() {
-        val controller = currentHybridBootstrapCommandTriggerController()
+        val (controller, executor) = createRecordingHybridBootstrapCommandTriggerController()
         val buildResult = HybridBootstrapAttemptCommandBuildResult.Built(
             HybridBootstrapAttemptCommand(
                 peerId = "peer-explicit-stable",
@@ -4686,10 +4664,12 @@ class AuroraBleRuntimeHostTest {
 
         assertTrue(result is HybridBootstrapCommandTriggerResult.Executed)
         assertEquals(before, buildResult)
+        assertEquals(1, executor.executeCallCount)
     }
 
     @Test
     fun explicitHelperDoesNotAppendGlobalChatMessages() {
+        val (controller, executor) = createRecordingHybridBootstrapCommandTriggerController()
         val holder = AuroraStateHolder(
             initialState = SampleAuroraState.create(
                 generatedUsername = "PIAIUFN1"
@@ -4711,14 +4691,16 @@ class AuroraBleRuntimeHostTest {
                     commandCreatedAtMillis = 1_733_000_082L
                 )
             ),
-            controller = currentHybridBootstrapCommandTriggerController()
+            controller = controller
         )
 
         assertEquals(initialGlobalMessages, holder.uiState.globalMessages)
+        assertEquals(1, executor.executeCallCount)
     }
 
     @Test
     fun explicitHelperDoesNotAppendPrivateChatMessages() {
+        val (controller, executor) = createRecordingHybridBootstrapCommandTriggerController()
         val holder = AuroraStateHolder(
             initialState = SampleAuroraState.create(
                 generatedUsername = "PIAIUFN1"
@@ -4740,10 +4722,11 @@ class AuroraBleRuntimeHostTest {
                     commandCreatedAtMillis = 1_733_000_092L
                 )
             ),
-            controller = currentHybridBootstrapCommandTriggerController()
+            controller = controller
         )
 
         assertEquals(initialPrivateMessages, holder.uiState.privateMessagesByPeerId)
+        assertEquals(1, executor.executeCallCount)
     }
 
     @Test
@@ -5826,6 +5809,19 @@ class AuroraBleRuntimeHostTest {
             recordedCommands += command.copy()
             return result
         }
+    }
+
+    private fun testHybridBootstrapRejectedExecutionResult(
+        reason: String = "Hybrid bootstrap test executor rejected command."
+    ): HybridBootstrapCommandExecutionResult.Rejected {
+        return HybridBootstrapCommandExecutionResult.Rejected(reason = reason)
+    }
+
+    private fun createRecordingHybridBootstrapCommandTriggerController(
+        result: HybridBootstrapCommandExecutionResult = testHybridBootstrapRejectedExecutionResult()
+    ): Pair<HybridBootstrapCommandTriggerController, RecordingHybridBootstrapCommandExecutor> {
+        val executor = RecordingHybridBootstrapCommandExecutor(result = result)
+        return HybridBootstrapCommandTriggerController(executor) to executor
     }
 
     private fun builtHybridBootstrapAttemptCommandResult(
