@@ -2563,9 +2563,19 @@ internal fun currentHybridBootstrapAttemptCommandBuildResult(
     )
 }
 
+internal fun hybridBootstrapJavaNetRuntimeEnabled(): Boolean = false
+
+internal fun currentHybridBootstrapRuntimeExecutorMode(): HybridBootstrapCommandExecutorMode {
+    return if (hybridBootstrapJavaNetRuntimeEnabled()) {
+        HybridBootstrapCommandExecutorMode.SOCKET_PLAN_JAVANET
+    } else {
+        HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED
+    }
+}
+
 internal fun currentHybridBootstrapCommandExecutorConfig(): HybridBootstrapCommandExecutorConfig {
     return HybridBootstrapCommandExecutorConfig(
-        mode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED
+        mode = currentHybridBootstrapRuntimeExecutorMode()
     )
 }
 

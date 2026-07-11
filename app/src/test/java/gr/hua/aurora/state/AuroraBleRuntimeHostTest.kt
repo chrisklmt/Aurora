@@ -1444,6 +1444,19 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun runtimeJavaNetHybridBootstrapGuardIsDisabled() {
+        assertFalse(hybridBootstrapJavaNetRuntimeEnabled())
+    }
+
+    @Test
+    fun runtimeExecutorModeResolvesToSocketPlanDisabledWhileJavaNetGuardIsOff() {
+        assertEquals(
+            HybridBootstrapCommandExecutorMode.SOCKET_PLAN_DISABLED,
+            currentHybridBootstrapRuntimeExecutorMode()
+        )
+    }
+
+    @Test
     fun runtimeExecutorConfigExistsAndIsSocketPlanDisabled() {
         val config = currentHybridBootstrapCommandExecutorConfig()
 
