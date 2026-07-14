@@ -39,6 +39,7 @@ import gr.hua.aurora.protocol.OutgoingMessageSendEncryptionMaterial
 import gr.hua.aurora.protocol.PeerIdentityExchangeMessage
 import gr.hua.aurora.protocol.PeerIdentityExchangeHandlingResult
 import gr.hua.aurora.protocol.PeerIdentityExchangeSendResult
+import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
 import gr.hua.aurora.protocol.PrivateChatMessagePayload
 import gr.hua.aurora.protocol.PrivateChatMessagePayloadCodec
 import gr.hua.aurora.protocol.PrivateChatMessageSendResult
@@ -59,11 +60,13 @@ import gr.hua.aurora.transport.hybrid.HybridBootstrapDiagnostics
 import gr.hua.aurora.transport.hybrid.HybridBootstrapDecisionProvider
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutionResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutor
+import gr.hua.aurora.transport.hybrid.HybridBootstrapManualOfferSendResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapManualTriggerSnapshot
 import gr.hua.aurora.transport.hybrid.HybridBootstrapSocketEndpoint
 import gr.hua.aurora.transport.hybrid.HybridBootstrapSocketEndpointResolution
 import gr.hua.aurora.transport.hybrid.HybridTransportControlFrameFactory
 import gr.hua.aurora.transport.hybrid.HybridTransportControlMessage
+import gr.hua.aurora.transport.hybrid.HybridTransportControlStore
 import gr.hua.aurora.transport.hybrid.InMemoryHybridTransportControlStore
 import gr.hua.aurora.wifidirect.frame.WifiDirectTransportFrame
 import gr.hua.aurora.wifidirect.transport.WifiDirectTransportSendResult
@@ -875,6 +878,268 @@ class AuroraBleRuntimeHostTest {
             result
         )
         assertEquals(0, sender.sendCallCount)
+    }
+
+    @Test
+    fun manualHybridBootstrapOfferAvailabilityRequiresConnectedPeerSessionWriterAndLocalPeerId() {
+        val sessionDiagnostics = PeerSessionRegistryDiagnostics(
+            establishedPeerIds = listOf("peer-canonical"),
+            canonicalPeerIdByAlias = mapOf("peer-active" to "peer-canonical")
+        )
+
+        assertFalse(
+            currentHybridBootstrapManualOfferAvailable(
+                bleConnectionStatus = BleConnectionStatus.IDLE,
+                activeTransportPeerId = "peer-active",
+                peerSessionDiagnostics = sessionDiagnostics,
+                transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally),
+                localPeerId = "peer-local"
+            )
+        )
+        assertFalse(
+            currentHybridBootstrapManualOfferAvailable(
+                bleConnectionStatus = BleConnectionStatus.CONNECTED,
+                activeTransportPeerId = "peer-active",
+                peerSessionDiagnostics = sessionDiagnostics,
+                transportSender = NoOpBleTransportSender(),
+                localPeerId = "peer-local"
+            )
+        )
+        assertFalse(
+            currentHybridBootstrapManualOfferAvailable(
+                bleConnectionStatus = BleConnectionStatus.CONNECTED,
+                activeTransportPeerId = "peer-missing",
+                peerSessionDiagnostics = sessionDiagnostics,
+                transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally),
+                localPeerId = "peer-local"
+            )
+        )
+        assertTrue(
+            currentHybridBootstrapManualOfferAvailable(
+                bleConnectionStatus = BleConnectionStatus.CONNECTED,
+                activeTransportPeerId = "peer-active",
+                peerSessionDiagnostics = sessionDiagnostics,
+                transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally),
+                localPeerId = "peer-local"
+            )
+        )
+    }
+
+    @Test
+    fun manualHybridBootstrapOfferRequestCallbackDoesNotInvokeActionUntilExplicitlyCalled() {
+        var invokeCount = 0
+        val callback = createHybridBootstrapManualOfferRequestCallback {
+            invokeCount += 1
+            HybridBootstrapManualOfferSendResult.NoActivePeer
+        }
+
+        assertEquals(0, invokeCount)
+        assertEquals(
+            HybridBootstrapManualOfferSendResult.NoActivePeer,
+            runSuspending { callback() }
+        )
+        assertEquals(1, invokeCount)
+    }
+
+    @Test
+    fun manualHybridBootstrapOfferWithoutActivePeerReturnsNoActivePeerAndSendsNoFrame() {
+        val sender = RecordingTransportSender(BleTransportSendResult.QueuedLocally)
+
+        val result = runSuspending {
+            submitHybridBootstrapManualOffer(
+                bleConnectionStatus = BleConnectionStatus.IDLE,
+                activeTransportPeerId = null,
+                peerSessionDiagnostics = PeerSessionRegistryDiagnostics(
+                    establishedPeerIds = emptyList(),
+                    canonicalPeerIdByAlias = emptyMap()
+                ),
+                transportSender = sender,
+                localPeerId = "peer-local",
+                createdAtMillis = 1_716_410_001L
+            )
+        }
+
+        assertEquals(HybridBootstrapManualOfferSendResult.NoActivePeer, result)
+        assertEquals(0, sender.sendCallCount)
+        assertNull(sender.capturedPlan)
+    }
+
+    @Test
+    fun manualHybridBootstrapOfferWithoutEstablishedSessionReturnsNoActiveSessionAndSendsNoFrame() {
+        val sender = RecordingTransportSender(BleTransportSendResult.QueuedLocally)
+
+        val result = runSuspending {
+            submitHybridBootstrapManualOffer(
+                bleConnectionStatus = BleConnectionStatus.CONNECTED,
+                activeTransportPeerId = "peer-active",
+                peerSessionDiagnostics = PeerSessionRegistryDiagnostics(
+                    establishedPeerIds = emptyList(),
+                    canonicalPeerIdByAlias = emptyMap()
+                ),
+                transportSender = sender,
+                localPeerId = "peer-local",
+                createdAtMillis = 1_716_410_002L
+            )
+        }
+
+        assertEquals(HybridBootstrapManualOfferSendResult.NoActiveSession, result)
+        assertEquals(0, sender.sendCallCount)
+        assertNull(sender.capturedPlan)
+    }
+
+    @Test
+    fun manualHybridBootstrapOfferWithWriterUnavailableReturnsWriterUnavailable() {
+        val result = runSuspending {
+            submitHybridBootstrapManualOffer(
+                bleConnectionStatus = BleConnectionStatus.CONNECTED,
+                activeTransportPeerId = "peer-active",
+                peerSessionDiagnostics = PeerSessionRegistryDiagnostics(
+                    establishedPeerIds = listOf("peer-canonical"),
+                    canonicalPeerIdByAlias = mapOf("peer-active" to "peer-canonical")
+                ),
+                transportSender = NoOpBleTransportSender(),
+                localPeerId = "peer-local",
+                createdAtMillis = 1_716_410_003L
+            )
+        }
+
+        assertEquals(HybridBootstrapManualOfferSendResult.WriterUnavailable, result)
+    }
+
+    @Test
+    fun manualHybridBootstrapOfferSendBuildsOneOfferAndPassiveReceiverKeepsTriggerUnavailable() {
+        val sender = RecordingTransportSender(BleTransportSendResult.QueuedLocally)
+        val sessionDiagnostics = PeerSessionRegistryDiagnostics(
+            establishedPeerIds = listOf("peer-canonical"),
+            canonicalPeerIdByAlias = mapOf("peer-active" to "peer-canonical")
+        )
+
+        val sendResult = runSuspending {
+            submitHybridBootstrapManualOffer(
+                bleConnectionStatus = BleConnectionStatus.CONNECTED,
+                activeTransportPeerId = "peer-active",
+                peerSessionDiagnostics = sessionDiagnostics,
+                transportSender = sender,
+                localPeerId = "peer-local",
+                createdAtMillis = 1_716_410_010L
+            )
+        }
+
+        assertEquals(
+            HybridBootstrapManualOfferSendResult.Sent(
+                peerId = "peer-canonical",
+                sessionId = "peer-local"
+            ),
+            sendResult
+        )
+        assertEquals(1, sender.sendCallCount)
+        assertEquals(listOf("peer-canonical"), sender.sentTargetPeerIds)
+
+        val sentPlan = requireNotNull(sender.capturedPlan)
+        val sentFrame = decodePlaintextFrame(sentPlan)
+        val controlMessage = requireNotNull(
+            HybridTransportControlFrameFactory.parseOrNull(sentFrame)
+        )
+
+        assertEquals("hybrid-offer-peer-local-1716410010", sentFrame.id)
+        assertEquals(MessageFrameType.HYBRID_TRANSPORT_CONTROL, sentFrame.type)
+        assertEquals("peer-local", sentFrame.senderId)
+        assertEquals("peer-canonical", sentFrame.recipientId)
+        assertEquals(
+            HybridTransportControlMessage.MessageType.WIFI_DIRECT_OFFER,
+            controlMessage.messageType
+        )
+        assertEquals("peer-local", controlMessage.sessionId)
+        assertEquals("peer-local", controlMessage.publicPeerIdHint)
+        assertNull(controlMessage.groupOwnerAddress)
+        assertNull(controlMessage.socketPort)
+        assertFalse(
+            controlMessage.capabilityFlags.contains(
+                HybridTransportControlMessage.CapabilityFlag.WIFI_DIRECT_SOCKET_HINT
+            )
+        )
+
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val initialGlobalMessages = holder.uiState.globalMessages
+        val initialPrivateMessages = holder.uiState.privateMessagesByPeerId
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val receiveResult = receiveFrames(
+            receiver = createAuroraBleTransportFrameReceiver(
+                stateHolder = holder,
+                hybridControlStore = store
+            ),
+            frames = sentPlan.framesInSendOrder()
+        )
+
+        assertTrue(receiveResult is BleTransportReceiveResult.Processed)
+        val processed = receiveResult as BleTransportReceiveResult.Processed
+        assertTrue(
+            processed.processingResult is IncomingTransportFrameProcessingResult.HybridControlHandled
+        )
+        val handled =
+            processed.processingResult as IncomingTransportFrameProcessingResult.HybridControlHandled
+        assertEquals("peer-local", handled.peerId)
+        assertEquals(HybridTransportControlStore.RecordResult.Stored, handled.storeResult)
+
+        val storedSession = requireNotNull(
+            store.snapshot().sessionStateFor(
+                peerId = "peer-local",
+                sessionId = "peer-local"
+            )
+        )
+        assertEquals(controlMessage, storedSession.latestOffer)
+        assertNull(storedSession.latestSocketHint)
+
+        val decision = provider.currentDecision()
+        assertEquals(1, decision.candidates.size)
+        val candidate = decision.candidates.single()
+        assertEquals("peer-local", candidate.peerId)
+        assertEquals("peer-local", candidate.sessionId)
+        assertTrue(candidate.hasOffer)
+        assertFalse(candidate.hasSocketHint)
+        assertFalse(candidate.socketReady)
+        assertEquals(
+            HybridBootstrapCandidateSelection.NoSocketReadyCandidates,
+            decision.selection
+        )
+
+        val diagnostics = requireNotNull(
+            hybridBootstrapDiagnosticsAfterReceiveOrNull(
+                result = receiveResult,
+                provider = provider
+            )
+        )
+        assertEquals(
+            "Hybrid bootstrap: candidates available, none socket-ready",
+            hybridBootstrapDiagnosticsRuntimeStatusText(diagnostics)
+        )
+
+        val commandBuildResult = currentHybridBootstrapAttemptCommandBuildResult(
+            provider = provider,
+            requestedAtMillis = 1_716_410_011L,
+            commandCreatedAtMillis = 1_716_410_012L
+        )
+        assertEquals(
+            HybridBootstrapAttemptCommandBuildResult.NoSocketReadyCandidate,
+            commandBuildResult
+        )
+        val manualTriggerSnapshot = currentHybridBootstrapManualTriggerSnapshot(
+            commandBuildResult = commandBuildResult,
+            latestTriggerResult = null
+        )
+        assertFalse(manualTriggerSnapshot.canTriggerNow)
+        assertEquals(
+            "Hybrid bootstrap command: no socket-ready candidate",
+            manualTriggerSnapshot.commandStatusText
+        )
+        assertEquals(initialGlobalMessages, holder.uiState.globalMessages)
+        assertEquals(initialPrivateMessages, holder.uiState.privateMessagesByPeerId)
     }
 
     @Test

@@ -76,6 +76,8 @@ import gr.hua.aurora.protocol.PeerIdentityExchangeSendUseCase
 import gr.hua.aurora.protocol.PeerSessionRegistry
 import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
 import gr.hua.aurora.protocol.PeerSessionPeerId
+import gr.hua.aurora.protocol.canonicalPeerIdFor
+import gr.hua.aurora.protocol.hasSessionForPeer
 import gr.hua.aurora.protocol.PrivateChatMessageSendResult
 import gr.hua.aurora.protocol.PrivateChatMessagePayload
 import gr.hua.aurora.protocol.PrivateChatMessagePayloadCodec
@@ -96,12 +98,15 @@ import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptPolicy
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutorConfig
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutionResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutorMode
+import gr.hua.aurora.transport.hybrid.HybridBootstrapManualOfferSendResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapManualTriggerSnapshot
 import gr.hua.aurora.transport.hybrid.HybridBootstrapManualTriggerSnapshotFormatter
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandTriggerController
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandTriggerResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapSocketEndpointResolution
 import gr.hua.aurora.transport.hybrid.HybridBootstrapSocketEndpointResolver
+import gr.hua.aurora.transport.hybrid.HybridTransportControlFrameFactory
+import gr.hua.aurora.transport.hybrid.HybridTransportControlMessage
 import gr.hua.aurora.transport.hybrid.HybridTransportControlStore
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutorFactory
 import gr.hua.aurora.transport.hybrid.InMemoryHybridTransportControlStore
@@ -157,6 +162,9 @@ data class AuroraBleRuntimeState(
     val hybridBootstrapCommandExecutorMode: HybridBootstrapCommandExecutorMode,
     val hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
     val onHybridBootstrapManualTriggerRequested: () -> HybridBootstrapCommandTriggerResult,
+    val hybridBootstrapManualOfferAvailable: Boolean,
+    val lastHybridBootstrapManualOfferStatus: String?,
+    val onHybridBootstrapManualOfferRequested: suspend () -> HybridBootstrapManualOfferSendResult,
     val submitGlobalMeshMessage: suspend (OutgoingChatMessage, String) -> GlobalMeshDeliveryResult,
     val submitPrivateChatMessage: suspend (OutgoingChatMessage, String, String) -> PrivateChatTransportSubmission,
     val exchangeIdentityWithPeer: suspend (BleDiscoveredDevice, String?) -> PeerIdentityExchangeSendResult,
@@ -544,6 +552,28 @@ fun rememberAuroraBleRuntimeState(
             )
         )
     }
+    val hybridBootstrapManualOfferCreatedAtMillis = System::currentTimeMillis
+    var lastHybridBootstrapManualOfferStatus by remember(
+        runtimeGeneration
+    ) {
+        mutableStateOf<String?>(null)
+    }
+    val hybridBootstrapManualOfferAvailable = remember(
+        runtimeGeneration,
+        bleConnectionStatus,
+        activeTransportPeerId,
+        bleTransportSender,
+        peerSessionDiagnostics,
+        localPeerId
+    ) {
+        currentHybridBootstrapManualOfferAvailable(
+            bleConnectionStatus = bleConnectionStatus,
+            activeTransportPeerId = activeTransportPeerId,
+            peerSessionDiagnostics = peerSessionDiagnostics,
+            transportSender = bleTransportSender,
+            localPeerId = localPeerId
+        )
+    }
     @Suppress("UNUSED_VARIABLE")
     val hybridBootstrapManualTriggerAction = remember(
         runtimeGeneration,
@@ -585,6 +615,28 @@ fun rememberAuroraBleRuntimeState(
         createHybridBootstrapManualTriggerRequestCallback(
             guardedManualTriggerAction = guardedHybridBootstrapManualTriggerAction
         )
+    }
+    val onHybridBootstrapManualOfferRequested = remember(
+        runtimeGeneration,
+        bleConnectionStatus,
+        activeTransportPeerId,
+        bleTransportSender,
+        peerSessionDiagnostics,
+        localPeerId
+    ) {
+        createHybridBootstrapManualOfferRequestCallback {
+            val result = submitHybridBootstrapManualOffer(
+                bleConnectionStatus = bleConnectionStatus,
+                activeTransportPeerId = activeTransportPeerId,
+                peerSessionDiagnostics = peerSessionDiagnostics,
+                transportSender = bleTransportSender,
+                localPeerId = localPeerId,
+                createdAtMillis = hybridBootstrapManualOfferCreatedAtMillis()
+            )
+            lastHybridBootstrapManualOfferStatus =
+                hybridBootstrapManualOfferRuntimeStatusText(result)
+            result
+        }
     }
     val transportFrameReceiver = remember(
         stateHolder,
@@ -1113,6 +1165,9 @@ fun rememberAuroraBleRuntimeState(
         hybridBootstrapCommandExecutorMode = hybridBootstrapCommandExecutorConfig.mode,
         hybridBootstrapManualTriggerSnapshot = latestHybridBootstrapManualTriggerSnapshot,
         onHybridBootstrapManualTriggerRequested = onHybridBootstrapManualTriggerRequested,
+        hybridBootstrapManualOfferAvailable = hybridBootstrapManualOfferAvailable,
+        lastHybridBootstrapManualOfferStatus = lastHybridBootstrapManualOfferStatus,
+        onHybridBootstrapManualOfferRequested = onHybridBootstrapManualOfferRequested,
         submitGlobalMeshMessage = submitGlobalMeshMessage,
         submitPrivateChatMessage = submitPrivateChatMessage,
         exchangeIdentityWithPeer = exchangeIdentityWithPeer,
@@ -2660,6 +2715,140 @@ internal fun createHybridBootstrapManualTriggerRequestCallback(
 ): () -> HybridBootstrapCommandTriggerResult {
     return {
         guardedManualTriggerAction()
+    }
+}
+
+internal fun currentHybridBootstrapManualOfferAvailable(
+    bleConnectionStatus: BleConnectionStatus,
+    activeTransportPeerId: String?,
+    peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
+    transportSender: BleTransportSender,
+    localPeerId: String?
+): Boolean {
+    val activePeerId = activeTransportPeerId?.trim()?.takeIf { it.isNotEmpty() } ?: return false
+    val localSenderPeerId = localPeerId?.trim()?.takeIf { it.isNotEmpty() } ?: return false
+    if (bleConnectionStatus != BleConnectionStatus.CONNECTED) {
+        return false
+    }
+    if (!peerSessionDiagnostics.hasSessionForPeer(activePeerId)) {
+        return false
+    }
+    if (transportSender is NoOpBleTransportSender) {
+        return false
+    }
+
+    return localSenderPeerId.isNotEmpty()
+}
+
+internal suspend fun submitHybridBootstrapManualOffer(
+    bleConnectionStatus: BleConnectionStatus,
+    activeTransportPeerId: String?,
+    peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
+    transportSender: BleTransportSender,
+    localPeerId: String?,
+    createdAtMillis: Long
+): HybridBootstrapManualOfferSendResult {
+    if (bleConnectionStatus != BleConnectionStatus.CONNECTED) {
+        return HybridBootstrapManualOfferSendResult.NoActivePeer
+    }
+    val activePeerId = activeTransportPeerId?.trim()?.takeIf { it.isNotEmpty() }
+        ?: return HybridBootstrapManualOfferSendResult.NoActivePeer
+    val activeSessionPeerId = peerSessionDiagnostics.canonicalPeerIdFor(activePeerId)
+        ?: return HybridBootstrapManualOfferSendResult.NoActiveSession
+    val localSenderPeerId = localPeerId?.trim()?.takeIf { it.isNotEmpty() }
+        ?: return HybridBootstrapManualOfferSendResult.InvalidOffer(
+            reason = "Local hybrid bootstrap peer id unavailable."
+        )
+    val frame = runCatching {
+        createHybridBootstrapManualOfferFrame(
+            localPeerId = localSenderPeerId,
+            targetPeerId = activeSessionPeerId,
+            createdAtMillis = createdAtMillis
+        )
+    }.getOrElse { error ->
+        return HybridBootstrapManualOfferSendResult.InvalidOffer(
+            reason = error.message ?: "Hybrid bootstrap offer is invalid."
+        )
+    }
+
+    return when (
+        val sendResult = MessageFrameTransportSendUseCase.sendPublic(
+            frame = frame,
+            transportSender = transportSender,
+            targetPeerId = activeSessionPeerId
+        )
+    ) {
+        BleTransportSendResult.QueuedLocally ->
+            HybridBootstrapManualOfferSendResult.Sent(
+                peerId = activeSessionPeerId,
+                sessionId = localSenderPeerId
+            )
+
+        BleTransportSendResult.NotAvailable ->
+            HybridBootstrapManualOfferSendResult.WriterUnavailable
+
+        is BleTransportSendResult.Failed ->
+            HybridBootstrapManualOfferSendResult.SendFailed(sendResult.reason)
+    }
+}
+
+internal fun createHybridBootstrapManualOfferFrame(
+    localPeerId: String,
+    targetPeerId: String,
+    createdAtMillis: Long
+): MessageFrame {
+    val message = HybridTransportControlMessage(
+        messageType = HybridTransportControlMessage.MessageType.WIFI_DIRECT_OFFER,
+        sessionId = localPeerId,
+        publicPeerIdHint = localPeerId,
+        createdAtMillis = createdAtMillis,
+        capabilityFlags = setOf(
+            HybridTransportControlMessage.CapabilityFlag.WIFI_DIRECT_BOOTSTRAP,
+            HybridTransportControlMessage.CapabilityFlag.BLE_FALLBACK
+        )
+    )
+    return HybridTransportControlFrameFactory.create(
+        message = message,
+        frameId = hybridBootstrapManualOfferFrameId(
+            localPeerId = localPeerId,
+            createdAtMillis = createdAtMillis
+        ),
+        senderId = localPeerId,
+        recipientId = targetPeerId
+    )
+}
+
+internal fun hybridBootstrapManualOfferFrameId(
+    localPeerId: String,
+    createdAtMillis: Long
+): String {
+    return "hybrid-offer-$localPeerId-$createdAtMillis"
+}
+
+internal fun hybridBootstrapManualOfferRuntimeStatusText(
+    result: HybridBootstrapManualOfferSendResult
+): String {
+    return when (result) {
+        is HybridBootstrapManualOfferSendResult.Sent ->
+            "Manual bootstrap offer sent: peer=${result.peerId} session=${result.sessionId}"
+        HybridBootstrapManualOfferSendResult.NoActivePeer ->
+            "Manual bootstrap offer unavailable: no active BLE peer."
+        HybridBootstrapManualOfferSendResult.NoActiveSession ->
+            "Manual bootstrap offer unavailable: no active BLE session."
+        HybridBootstrapManualOfferSendResult.WriterUnavailable ->
+            "Manual bootstrap offer unavailable: BLE writer unavailable."
+        is HybridBootstrapManualOfferSendResult.InvalidOffer ->
+            "Manual bootstrap offer invalid: ${result.reason}"
+        is HybridBootstrapManualOfferSendResult.SendFailed ->
+            "Manual bootstrap offer failed: ${result.reason}"
+    }
+}
+
+internal fun createHybridBootstrapManualOfferRequestCallback(
+    explicitManualOfferAction: suspend () -> HybridBootstrapManualOfferSendResult
+): suspend () -> HybridBootstrapManualOfferSendResult {
+    return {
+        explicitManualOfferAction()
     }
 }
 

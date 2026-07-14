@@ -57,6 +57,7 @@ import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
 import gr.hua.aurora.protocol.PeerSessionPeerId
 import gr.hua.aurora.protocol.hasSessionForPeer
 import gr.hua.aurora.state.AuroraAvailabilityPreference
+import gr.hua.aurora.transport.hybrid.HybridBootstrapManualOfferSendResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutorMode
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandTriggerResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapManualTriggerSnapshot
@@ -148,6 +149,9 @@ internal fun NearbyDevicesScreen(
     hybridBootstrapCommandExecutorMode: HybridBootstrapCommandExecutorMode,
     hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
     onHybridBootstrapManualTriggerRequested: () -> HybridBootstrapCommandTriggerResult,
+    hybridBootstrapManualOfferAvailable: Boolean,
+    lastHybridBootstrapManualOfferStatus: String?,
+    onHybridBootstrapManualOfferRequested: suspend () -> HybridBootstrapManualOfferSendResult,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
     activeTransportPeerId: String?,
     activeTransportDeviceAddress: String?,
@@ -328,8 +332,12 @@ internal fun NearbyDevicesScreen(
                     hybridBootstrapJavaNetRuntimeEnabled,
                     hybridBootstrapCommandExecutorMode = hybridBootstrapCommandExecutorMode,
                     hybridBootstrapManualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot,
+                    hybridBootstrapManualOfferAvailable = hybridBootstrapManualOfferAvailable,
+                    lastHybridBootstrapManualOfferStatus = lastHybridBootstrapManualOfferStatus,
                     onHybridBootstrapManualTriggerRequested =
                     onHybridBootstrapManualTriggerRequested,
+                    onHybridBootstrapManualOfferRequested =
+                    onHybridBootstrapManualOfferRequested,
                     isDiscoveryPausedByAvailability = !availabilityState.isOnline,
                     activeConnectionDeviceAddress = bleSessionState.activeConnectionDeviceAddress,
                     selectedSecurePeerId = selectedSecurePeerId,
@@ -606,6 +614,9 @@ private fun DiscoveredBleDevicesCard(
     hybridBootstrapCommandExecutorMode: HybridBootstrapCommandExecutorMode,
     hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
     onHybridBootstrapManualTriggerRequested: () -> HybridBootstrapCommandTriggerResult,
+    hybridBootstrapManualOfferAvailable: Boolean,
+    lastHybridBootstrapManualOfferStatus: String?,
+    onHybridBootstrapManualOfferRequested: suspend () -> HybridBootstrapManualOfferSendResult,
     isDiscoveryPausedByAvailability: Boolean,
     activeConnectionDeviceAddress: String?,
     selectedSecurePeerId: String?,
@@ -632,6 +643,9 @@ private fun DiscoveredBleDevicesCard(
     val manualTriggerRequestState = remember {
         NearbyHybridBootstrapManualTriggerRequestState()
     }
+    val manualOfferRequestState = remember {
+        NearbyHybridBootstrapManualOfferRequestState()
+    }
     val expandedDebugCard = buildNearbyExpandedDebugCard(
         showDebugDiagnostics = showDebugDiagnostics,
         advertiseStatus = advertiseStatus,
@@ -648,10 +662,17 @@ private fun DiscoveredBleDevicesCard(
         hybridBootstrapJavaNetRuntimeEnabled = hybridBootstrapJavaNetRuntimeEnabled,
         hybridBootstrapCommandExecutorMode = hybridBootstrapCommandExecutorMode,
         hybridBootstrapManualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot,
+        hybridBootstrapManualOfferAvailable = hybridBootstrapManualOfferAvailable,
+        lastHybridBootstrapManualOfferStatus = lastHybridBootstrapManualOfferStatus,
         selectedSecurePeerId = selectedSecurePeerId,
         activeSessionPeerId = activeTransportPeerId,
         lastIdentityExchangeStatus = lastIdentityExchangeStatus
     )
+    val hybridBootstrapManualOfferControlState =
+        nearbyHybridBootstrapManualOfferControlState(
+            available = hybridBootstrapManualOfferAvailable,
+            manualOfferInProgress = manualOfferRequestState.inProgress
+        )
     val hybridBootstrapManualTriggerControlState =
         nearbyHybridBootstrapManualTriggerControlState(
             hybridBootstrapManualTriggerSnapshot,
@@ -781,6 +802,32 @@ private fun DiscoveredBleDevicesCard(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         DebugInfoCard(card = card)
+                        Button(
+                            onClick = {
+                                coroutineScope.launch {
+                                    try {
+                                        requestNearbyHybridBootstrapManualOfferIfEnabled(
+                                            requestState = manualOfferRequestState,
+                                            available = hybridBootstrapManualOfferAvailable,
+                                            onHybridBootstrapManualOfferRequested = {
+                                                withContext(Dispatchers.IO) {
+                                                    onHybridBootstrapManualOfferRequested()
+                                                }
+                                            }
+                                        )
+                                    } catch (error: Throwable) {
+                                        Log.w(
+                                            nearbyDevicesLogTag,
+                                            "Manual hybrid bootstrap offer failed before runtime status update",
+                                            error
+                                        )
+                                    }
+                                }
+                            },
+                            enabled = hybridBootstrapManualOfferControlState.enabled
+                        ) {
+                            Text(hybridBootstrapManualOfferControlState.label)
+                        }
                         Button(
                             onClick = {
                                 coroutineScope.launch {
@@ -1604,6 +1651,8 @@ internal fun buildNearbyExpandedDebugSections(
     hybridBootstrapJavaNetRuntimeEnabled: Boolean,
     hybridBootstrapCommandExecutorMode: HybridBootstrapCommandExecutorMode,
     hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
+    hybridBootstrapManualOfferAvailable: Boolean = false,
+    lastHybridBootstrapManualOfferStatus: String? = null,
     selectedSecurePeerId: String?,
     activeSessionPeerId: String?,
     lastIdentityExchangeStatus: String?
@@ -1690,6 +1739,24 @@ internal fun buildNearbyExpandedDebugSections(
             )
             add(
                 DebugInfoItem(
+                    "Manual bootstrap offer available",
+                    hybridBootstrapManualOfferAvailable.toString()
+                )
+            )
+            lastHybridBootstrapManualOfferStatus
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?.let { statusText ->
+                    add(
+                        DebugInfoItem(
+                            "Last bootstrap offer",
+                            statusText,
+                            preferFullWidth = true
+                        )
+                    )
+                }
+            add(
+                DebugInfoItem(
                     "Manual trigger available",
                     nearbyHybridBootstrapManualTriggerAvailabilityValue(
                         hybridBootstrapManualTriggerSnapshot
@@ -1768,6 +1835,8 @@ internal fun buildNearbyExpandedDebugCard(
     hybridBootstrapJavaNetRuntimeEnabled: Boolean,
     hybridBootstrapCommandExecutorMode: HybridBootstrapCommandExecutorMode,
     hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
+    hybridBootstrapManualOfferAvailable: Boolean = false,
+    lastHybridBootstrapManualOfferStatus: String? = null,
     selectedSecurePeerId: String?,
     activeSessionPeerId: String?,
     lastIdentityExchangeStatus: String?
@@ -1788,6 +1857,8 @@ internal fun buildNearbyExpandedDebugCard(
         hybridBootstrapJavaNetRuntimeEnabled = hybridBootstrapJavaNetRuntimeEnabled,
         hybridBootstrapCommandExecutorMode = hybridBootstrapCommandExecutorMode,
         hybridBootstrapManualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot,
+        hybridBootstrapManualOfferAvailable = hybridBootstrapManualOfferAvailable,
+        lastHybridBootstrapManualOfferStatus = lastHybridBootstrapManualOfferStatus,
         selectedSecurePeerId = selectedSecurePeerId,
         activeSessionPeerId = activeSessionPeerId,
         lastIdentityExchangeStatus = lastIdentityExchangeStatus
@@ -1831,6 +1902,59 @@ internal fun nearbyHybridBootstrapManualTriggerAvailabilityValue(
     snapshot: HybridBootstrapManualTriggerSnapshot
 ): String {
     return snapshot.canTriggerNow.toString()
+}
+
+internal data class NearbyHybridBootstrapManualOfferControlState(
+    val label: String,
+    val enabled: Boolean
+)
+
+internal class NearbyHybridBootstrapManualOfferRequestState(
+    initialInProgress: Boolean = false
+) {
+    var inProgress by mutableStateOf(initialInProgress)
+        private set
+
+    fun tryStart(
+        available: Boolean
+    ): Boolean {
+        if (!available || inProgress) {
+            return false
+        }
+
+        inProgress = true
+        return true
+    }
+
+    fun finish() {
+        inProgress = false
+    }
+}
+
+internal fun nearbyHybridBootstrapManualOfferControlState(
+    available: Boolean,
+    manualOfferInProgress: Boolean = false
+): NearbyHybridBootstrapManualOfferControlState {
+    return NearbyHybridBootstrapManualOfferControlState(
+        label = "Send bootstrap offer",
+        enabled = available && !manualOfferInProgress
+    )
+}
+
+internal suspend fun requestNearbyHybridBootstrapManualOfferIfEnabled(
+    requestState: NearbyHybridBootstrapManualOfferRequestState,
+    available: Boolean,
+    onHybridBootstrapManualOfferRequested: suspend () -> HybridBootstrapManualOfferSendResult
+): HybridBootstrapManualOfferSendResult? {
+    if (!requestState.tryStart(available)) {
+        return null
+    }
+
+    return try {
+        onHybridBootstrapManualOfferRequested()
+    } finally {
+        requestState.finish()
+    }
 }
 
 internal data class NearbyHybridBootstrapManualTriggerControlState(

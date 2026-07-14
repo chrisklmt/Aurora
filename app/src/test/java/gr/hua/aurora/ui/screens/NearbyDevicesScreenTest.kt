@@ -16,6 +16,7 @@ import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommand
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommandBuildResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutorMode
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutionResult
+import gr.hua.aurora.transport.hybrid.HybridBootstrapManualOfferSendResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandTriggerResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapManualTriggerSnapshot
 import gr.hua.aurora.ui.debug.wifidirect.*
@@ -585,6 +586,142 @@ class NearbyDevicesScreenTest {
     }
 
     @Test
+    fun nearbyHybridBootstrapManualOfferControlStateUsesOfferButtonLabel() {
+        val state = nearbyHybridBootstrapManualOfferControlState(
+            available = true
+        )
+
+        assertEquals("Send bootstrap offer", state.label)
+        assertTrue(state.enabled)
+    }
+
+    @Test
+    fun nearbyHybridBootstrapManualOfferControlStateIsDisabledWhenOfferIsUnavailable() {
+        val state = nearbyHybridBootstrapManualOfferControlState(
+            available = false
+        )
+
+        assertFalse(state.enabled)
+    }
+
+    @Test
+    fun nearbyHybridBootstrapManualOfferControlStateIsDisabledWhileRequestIsInProgress() {
+        val state = nearbyHybridBootstrapManualOfferControlState(
+            available = true,
+            manualOfferInProgress = true
+        )
+
+        assertFalse(state.enabled)
+    }
+
+    @Test
+    fun disabledNearbyHybridBootstrapManualOfferRequestDoesNotInvokeCallback() {
+        var invokeCount = 0
+        val requestState = NearbyHybridBootstrapManualOfferRequestState()
+        val result = runBlocking {
+            requestNearbyHybridBootstrapManualOfferIfEnabled(
+                requestState = requestState,
+                available = false,
+                onHybridBootstrapManualOfferRequested = {
+                    invokeCount += 1
+                    HybridBootstrapManualOfferSendResult.NoActivePeer
+                }
+            )
+        }
+
+        assertEquals(0, invokeCount)
+        assertNull(result)
+        assertFalse(requestState.inProgress)
+    }
+
+    @Test
+    fun enabledNearbyHybridBootstrapManualOfferRequestInvokesCallbackExactlyOnce() {
+        var invokeCount = 0
+        val requestState = NearbyHybridBootstrapManualOfferRequestState()
+        val expected = HybridBootstrapManualOfferSendResult.Sent(
+            peerId = "peer-legacy",
+            sessionId = "peer-local"
+        )
+
+        val result = runBlocking {
+            requestNearbyHybridBootstrapManualOfferIfEnabled(
+                requestState = requestState,
+                available = true,
+                onHybridBootstrapManualOfferRequested = {
+                    invokeCount += 1
+                    expected
+                }
+            )
+        }
+
+        assertEquals(1, invokeCount)
+        assertEquals(expected, result)
+        assertFalse(requestState.inProgress)
+    }
+
+    @Test
+    fun inProgressNearbyHybridBootstrapManualOfferRequestDoesNotInvokeCallbackAgain() {
+        var invokeCount = 0
+        val requestState = NearbyHybridBootstrapManualOfferRequestState(initialInProgress = true)
+
+        val result = runBlocking {
+            requestNearbyHybridBootstrapManualOfferIfEnabled(
+                requestState = requestState,
+                available = true,
+                onHybridBootstrapManualOfferRequested = {
+                    invokeCount += 1
+                    HybridBootstrapManualOfferSendResult.NoActivePeer
+                }
+            )
+        }
+
+        assertEquals(0, invokeCount)
+        assertNull(result)
+        assertTrue(requestState.inProgress)
+    }
+
+    @Test
+    fun nearbyHybridBootstrapManualOfferRequestResetsInProgressAfterCompletion() {
+        val requestState = NearbyHybridBootstrapManualOfferRequestState()
+
+        runBlocking {
+            requestNearbyHybridBootstrapManualOfferIfEnabled(
+                requestState = requestState,
+                available = true,
+                onHybridBootstrapManualOfferRequested = {
+                    assertTrue(requestState.inProgress)
+                    HybridBootstrapManualOfferSendResult.NoActiveSession
+                }
+            )
+        }
+
+        assertFalse(requestState.inProgress)
+    }
+
+    @Test
+    fun nearbyHybridBootstrapManualOfferRequestResetsInProgressAfterFailure() {
+        val requestState = NearbyHybridBootstrapManualOfferRequestState()
+
+        try {
+            runBlocking {
+                requestNearbyHybridBootstrapManualOfferIfEnabled(
+                    requestState = requestState,
+                    available = true,
+                    onHybridBootstrapManualOfferRequested = {
+                        assertTrue(requestState.inProgress)
+                        throw IllegalStateException("boom")
+                    }
+                )
+            }
+            throw AssertionError("Expected manual offer request to rethrow the callback failure.")
+        } catch (expected: IllegalStateException) {
+            assertEquals("boom", expected.message)
+        }
+
+        assertFalse(requestState.inProgress)
+    }
+
+    @Test
     fun disabledNearbyHybridBootstrapManualTriggerRequestDoesNotInvokeCallback() {
         var invokeCount = 0
         val requestState = NearbyHybridBootstrapManualTriggerRequestState()
@@ -743,6 +880,63 @@ class NearbyDevicesScreenTest {
         assertNotNull(compactCard)
         assertNotNull(expandedCard)
         assertEquals("Trigger manual bootstrap", nearbyHybridBootstrapManualTriggerControlState(snapshot).label)
+        assertNotNull(callback)
+        assertEquals(0, invokeCount)
+    }
+
+    @Test
+    fun buildingNearbyExpandedDiagnosticsDoesNotInvokeHybridBootstrapManualOfferCallback() {
+        var invokeCount = 0
+        val callback: suspend () -> HybridBootstrapManualOfferSendResult = {
+            invokeCount += 1
+            HybridBootstrapManualOfferSendResult.NoActivePeer
+        }
+        val snapshot = hybridBootstrapManualTriggerSnapshot(
+            canTriggerNow = false,
+            commandStatusText = "Hybrid bootstrap command: no socket-ready candidate"
+        )
+
+        val compactCard = buildNearbyDebugCard(
+            showDebugDiagnostics = true,
+            advertiseStatus = BleAdvertiseStatus.ADVERTISING,
+            gattServerStatus = BleGattServerStatus.HOSTING,
+            scanStatus = BleScanStatus.SCANNING,
+            identityHandlerStatus = "Identity handler ready.",
+            hybridBootstrapManualTriggerSnapshot = snapshot,
+            peerSessionDiagnostics = PeerSessionRegistryDiagnostics(
+                establishedPeerIds = emptyList(),
+                canonicalPeerIdByAlias = emptyMap()
+            )
+        )
+        val expandedCard = buildNearbyExpandedDebugCard(
+            showDebugDiagnostics = true,
+            advertiseStatus = BleAdvertiseStatus.ADVERTISING,
+            gattServerStatus = BleGattServerStatus.HOSTING,
+            scanStatus = BleScanStatus.SCANNING,
+            transportSenderSourceLabel = "Android connector-backed",
+            activeTransportPeerId = "peer-legacy",
+            connectionStatus = BleConnectionStatus.CONNECTED,
+            transportReadStatus = NearbyBleTransportReadStatus.IDLE,
+            transportFrameReadStatus = NearbyBleTransportFrameReadStatus.FRAME_AVAILABLE,
+            transportWriteStatus = NearbyBleTransportWriteStatus.ACCEPTED,
+            scanDiagnostics = BleScanDiagnostics(),
+            peerSessionDiagnostics = PeerSessionRegistryDiagnostics(
+                establishedPeerIds = emptyList(),
+                canonicalPeerIdByAlias = emptyMap()
+            ),
+            hybridBootstrapJavaNetRuntimeEnabled = true,
+            hybridBootstrapCommandExecutorMode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_JAVANET,
+            hybridBootstrapManualTriggerSnapshot = snapshot,
+            hybridBootstrapManualOfferAvailable = true,
+            lastHybridBootstrapManualOfferStatus = null,
+            selectedSecurePeerId = "peer-legacy",
+            activeSessionPeerId = "peer-legacy",
+            lastIdentityExchangeStatus = null
+        )
+
+        assertNotNull(compactCard)
+        assertNotNull(expandedCard)
+        assertEquals("Send bootstrap offer", nearbyHybridBootstrapManualOfferControlState(true).label)
         assertNotNull(callback)
         assertEquals(0, invokeCount)
     }
@@ -2630,6 +2824,9 @@ class NearbyDevicesScreenTest {
             hybridBootstrapJavaNetRuntimeEnabled = true,
             hybridBootstrapCommandExecutorMode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_JAVANET,
             hybridBootstrapManualTriggerSnapshot = manualTriggerSnapshot,
+            hybridBootstrapManualOfferAvailable = true,
+            lastHybridBootstrapManualOfferStatus =
+            "Manual bootstrap offer sent: peer=peer-legacy session=peer-local",
             selectedSecurePeerId = "peer-legacy",
             activeSessionPeerId = "peer-legacy",
             lastIdentityExchangeStatus = "Identity sent. Run on both devices."
@@ -2675,6 +2872,12 @@ class NearbyDevicesScreenTest {
                 DebugInfoItem("Active session", "ready"),
                 DebugInfoItem("JavaNet runtime enabled", "true"),
                 DebugInfoItem("Executor mode", "SOCKET_PLAN_JAVANET"),
+                DebugInfoItem("Manual bootstrap offer available", "true"),
+                DebugInfoItem(
+                    "Last bootstrap offer",
+                    "Manual bootstrap offer sent: peer=peer-legacy session=peer-local",
+                    preferFullWidth = true
+                ),
                 DebugInfoItem("Manual trigger available", "true"),
                 DebugInfoItem(
                     "Manual command",
@@ -2724,6 +2927,8 @@ class NearbyDevicesScreenTest {
                     commandStatusText = "Hybrid bootstrap command: no candidates",
                     triggerStatusText = null
                 ),
+                hybridBootstrapManualOfferAvailable = false,
+                lastHybridBootstrapManualOfferStatus = null,
                 selectedSecurePeerId = null,
                 activeSessionPeerId = null,
                 lastIdentityExchangeStatus = null

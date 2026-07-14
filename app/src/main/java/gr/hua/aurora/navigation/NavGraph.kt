@@ -296,6 +296,12 @@ fun NavGraph(
                 bleRuntimeState.hybridBootstrapManualTriggerSnapshot,
                 onHybridBootstrapManualTriggerRequested =
                 bleRuntimeState.onHybridBootstrapManualTriggerRequested,
+                hybridBootstrapManualOfferAvailable =
+                bleRuntimeState.hybridBootstrapManualOfferAvailable,
+                lastHybridBootstrapManualOfferStatus =
+                bleRuntimeState.lastHybridBootstrapManualOfferStatus,
+                onHybridBootstrapManualOfferRequested =
+                bleRuntimeState.onHybridBootstrapManualOfferRequested,
                 peerSessionDiagnostics = bleRuntimeState.peerSessionDiagnostics,
                 activeTransportPeerId = bleRuntimeState.activeTransportPeerId,
                 activeTransportDeviceAddress = bleRuntimeState.activeTransportDeviceAddress,
