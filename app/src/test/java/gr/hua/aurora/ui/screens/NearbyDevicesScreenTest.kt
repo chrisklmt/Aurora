@@ -14,8 +14,12 @@ import gr.hua.aurora.protocol.PeerIdentityExchangeSendResult
 import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommand
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommandBuildResult
+import gr.hua.aurora.transport.hybrid.HybridBootstrapCandidateSelection
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutorMode
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutionResult
+import gr.hua.aurora.transport.hybrid.HybridBootstrapDecision
+import gr.hua.aurora.transport.hybrid.HybridBootstrapDiagnostics
+import gr.hua.aurora.transport.hybrid.HybridBootstrapManualAcceptSendResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapManualOfferSendResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandTriggerResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapManualTriggerSnapshot
@@ -554,6 +558,11 @@ class NearbyDevicesScreenTest {
                 item.label == "Trigger manual bootstrap"
             }
         )
+        assertFalse(
+            card.sections.flatMap { it.items }.any { item ->
+                item.label == "Send bootstrap accept"
+            }
+        )
     }
 
     @Test
@@ -612,6 +621,140 @@ class NearbyDevicesScreenTest {
         )
 
         assertFalse(state.enabled)
+    }
+
+    @Test
+    fun nearbyHybridBootstrapManualAcceptControlStateUsesAcceptButtonLabel() {
+        val state = nearbyHybridBootstrapManualAcceptControlState(
+            available = true
+        )
+
+        assertEquals("Send bootstrap accept", state.label)
+        assertTrue(state.enabled)
+    }
+
+    @Test
+    fun nearbyHybridBootstrapManualAcceptControlStateIsDisabledWhenAcceptIsUnavailable() {
+        val state = nearbyHybridBootstrapManualAcceptControlState(
+            available = false
+        )
+
+        assertFalse(state.enabled)
+    }
+
+    @Test
+    fun nearbyHybridBootstrapManualAcceptControlStateIsDisabledWhileRequestIsInProgress() {
+        val state = nearbyHybridBootstrapManualAcceptControlState(
+            available = true,
+            manualAcceptInProgress = true
+        )
+
+        assertFalse(state.enabled)
+    }
+
+    @Test
+    fun disabledNearbyHybridBootstrapManualAcceptRequestDoesNotInvokeCallback() {
+        var invokeCount = 0
+        val requestState = NearbyHybridBootstrapManualAcceptRequestState()
+        val result = runBlocking {
+            requestNearbyHybridBootstrapManualAcceptIfEnabled(
+                requestState = requestState,
+                available = false,
+                onHybridBootstrapManualAcceptRequested = {
+                    invokeCount += 1
+                    HybridBootstrapManualAcceptSendResult.NoOfferCandidate
+                }
+            )
+        }
+
+        assertEquals(0, invokeCount)
+        assertNull(result)
+        assertFalse(requestState.inProgress)
+    }
+
+    @Test
+    fun enabledNearbyHybridBootstrapManualAcceptRequestInvokesCallbackExactlyOnce() {
+        var invokeCount = 0
+        val requestState = NearbyHybridBootstrapManualAcceptRequestState()
+        val expected = HybridBootstrapManualAcceptSendResult.Sent(
+            peerId = "peer-legacy",
+            sessionId = "offer-session-1"
+        )
+
+        val result = runBlocking {
+            requestNearbyHybridBootstrapManualAcceptIfEnabled(
+                requestState = requestState,
+                available = true,
+                onHybridBootstrapManualAcceptRequested = {
+                    invokeCount += 1
+                    expected
+                }
+            )
+        }
+
+        assertEquals(1, invokeCount)
+        assertEquals(expected, result)
+        assertFalse(requestState.inProgress)
+    }
+
+    @Test
+    fun inProgressNearbyHybridBootstrapManualAcceptRequestDoesNotInvokeCallbackAgain() {
+        var invokeCount = 0
+        val requestState = NearbyHybridBootstrapManualAcceptRequestState(initialInProgress = true)
+
+        val result = runBlocking {
+            requestNearbyHybridBootstrapManualAcceptIfEnabled(
+                requestState = requestState,
+                available = true,
+                onHybridBootstrapManualAcceptRequested = {
+                    invokeCount += 1
+                    HybridBootstrapManualAcceptSendResult.NoOfferCandidate
+                }
+            )
+        }
+
+        assertEquals(0, invokeCount)
+        assertNull(result)
+        assertTrue(requestState.inProgress)
+    }
+
+    @Test
+    fun nearbyHybridBootstrapManualAcceptRequestResetsInProgressAfterCompletion() {
+        val requestState = NearbyHybridBootstrapManualAcceptRequestState()
+
+        runBlocking {
+            requestNearbyHybridBootstrapManualAcceptIfEnabled(
+                requestState = requestState,
+                available = true,
+                onHybridBootstrapManualAcceptRequested = {
+                    assertTrue(requestState.inProgress)
+                    HybridBootstrapManualAcceptSendResult.NoActiveSession
+                }
+            )
+        }
+
+        assertFalse(requestState.inProgress)
+    }
+
+    @Test
+    fun nearbyHybridBootstrapManualAcceptRequestResetsInProgressAfterFailure() {
+        val requestState = NearbyHybridBootstrapManualAcceptRequestState()
+
+        try {
+            runBlocking {
+                requestNearbyHybridBootstrapManualAcceptIfEnabled(
+                    requestState = requestState,
+                    available = true,
+                    onHybridBootstrapManualAcceptRequested = {
+                        assertTrue(requestState.inProgress)
+                        throw IllegalStateException("boom")
+                    }
+                )
+            }
+            throw AssertionError("Expected manual accept request to rethrow the callback failure.")
+        } catch (_: IllegalStateException) {
+            assertFalse(requestState.inProgress)
+        }
     }
 
     @Test
@@ -2795,6 +2938,49 @@ class NearbyDevicesScreenTest {
             establishedPeerIds = listOf("peer-canonical"),
             canonicalPeerIdByAlias = mapOf("peer-legacy" to "peer-canonical")
         )
+        val hybridDecision = HybridBootstrapDecision.create(
+            candidates = listOf(
+                gr.hua.aurora.transport.hybrid.HybridBootstrapCandidate(
+                    peerId = "peer-legacy",
+                    sessionId = "session-1",
+                    bootstrapIdentifier = "bootstrap-1",
+                    publicPeerIdHint = "peer-legacy",
+                    groupOwnerAddress = "192.168.49.1",
+                    socketPort = 8988,
+                    latestCreatedAtMillis = 30L,
+                    hasOffer = true,
+                    hasAccept = true,
+                    hasSocketHint = true,
+                    socketReady = true
+                )
+            ),
+            selection = HybridBootstrapCandidateSelection.Selected(
+                candidate = gr.hua.aurora.transport.hybrid.HybridBootstrapCandidate(
+                    peerId = "peer-legacy",
+                    sessionId = "session-1",
+                    bootstrapIdentifier = "bootstrap-1",
+                    publicPeerIdHint = "peer-legacy",
+                    groupOwnerAddress = "192.168.49.1",
+                    socketPort = 8988,
+                    latestCreatedAtMillis = 30L,
+                    hasOffer = true,
+                    hasAccept = true,
+                    hasSocketHint = true,
+                    socketReady = true
+                )
+            )
+        )
+        val hybridDiagnostics = HybridBootstrapDiagnostics(
+            candidateCount = 1,
+            socketReadyCandidateCount = 1,
+            selectionStatus = HybridBootstrapDiagnostics.SelectionStatus.Selected,
+            selectedPeerId = "peer-legacy",
+            selectedSessionId = "session-1",
+            selectedGroupOwnerAddress = "192.168.49.1",
+            selectedSocketPort = 8988,
+            selectedLatestCreatedAtMillis = 30L,
+            statusText = "Hybrid bootstrap candidate ready: peer=peer-legacy session=session-1 address=192.168.49.1 port=8988"
+        )
         val manualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot(
             canTriggerNow = true,
             commandStatusText = "Hybrid bootstrap command: built peer=peer-legacy session=session-1 address=192.168.49.1 port=8988",
@@ -2823,8 +3009,15 @@ class NearbyDevicesScreenTest {
             peerSessionDiagnostics = diagnostics,
             hybridBootstrapJavaNetRuntimeEnabled = true,
             hybridBootstrapCommandExecutorMode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_JAVANET,
+            hybridBootstrapDecision = hybridDecision,
+            hybridBootstrapDiagnostics = hybridDiagnostics,
             hybridBootstrapManualTriggerSnapshot = manualTriggerSnapshot,
+            hybridBootstrapManualAcceptAvailable = true,
+            hybridBootstrapManualAcceptBlockedReason = null,
+            lastHybridBootstrapManualAcceptStatus =
+            "Manual bootstrap accept sent: peer=peer-legacy session=session-1",
             hybridBootstrapManualOfferAvailable = true,
+            hybridBootstrapManualOfferBlockedReason = null,
             lastHybridBootstrapManualOfferStatus =
             "Manual bootstrap offer sent: peer=peer-legacy session=peer-local",
             selectedSecurePeerId = "peer-legacy",
@@ -2872,13 +3065,30 @@ class NearbyDevicesScreenTest {
                 DebugInfoItem("Active session", "ready"),
                 DebugInfoItem("JavaNet runtime enabled", "true"),
                 DebugInfoItem("Executor mode", "SOCKET_PLAN_JAVANET"),
+                DebugInfoItem("Manual bootstrap accept available", "true"),
+                DebugInfoItem("Accept blocker", "Ready", preferFullWidth = true),
+                DebugInfoItem(
+                    "Last bootstrap accept",
+                    "Manual bootstrap accept sent: peer=peer-legacy session=session-1",
+                    preferFullWidth = true
+                ),
                 DebugInfoItem("Manual bootstrap offer available", "true"),
+                DebugInfoItem("Offer blocker", "Ready", preferFullWidth = true),
                 DebugInfoItem(
                     "Last bootstrap offer",
                     "Manual bootstrap offer sent: peer=peer-legacy session=peer-local",
                     preferFullWidth = true
                 ),
                 DebugInfoItem("Manual trigger available", "true"),
+                DebugInfoItem(
+                    "Hybrid status",
+                    "Hybrid bootstrap candidate ready: peer=peer-legacy session=session-1 address=192.168.49.1 port=8988",
+                    preferFullWidth = true
+                ),
+                DebugInfoItem("Candidates", "1"),
+                DebugInfoItem("Socket-ready", "1"),
+                DebugInfoItem("Candidate peers", "peer-legacy", preferFullWidth = true),
+                DebugInfoItem("Trigger blocker", "Ready", preferFullWidth = true),
                 DebugInfoItem(
                     "Manual command",
                     "Hybrid bootstrap command: built peer=peer-legacy session=session-1 address=192.168.49.1 port=8988",
@@ -2899,6 +3109,96 @@ class NearbyDevicesScreenTest {
             ),
             card.sections[3].items
         )
+    }
+
+    @Test
+    fun nearbyExpandedDebugCardShowsExactHybridBlockersWhenPeerSessionExistsButNoCandidateExists() {
+        val diagnostics = PeerSessionRegistryDiagnostics(
+            establishedPeerIds = listOf("peer-canonical"),
+            canonicalPeerIdByAlias = mapOf("peer-legacy" to "peer-canonical")
+        )
+
+        val card = requireNotNull(
+            buildNearbyExpandedDebugCard(
+                showDebugDiagnostics = true,
+                advertiseStatus = BleAdvertiseStatus.ADVERTISING,
+                gattServerStatus = BleGattServerStatus.HOSTING,
+                scanStatus = BleScanStatus.SCANNING,
+                transportSenderSourceLabel = "Android connector-backed",
+                activeTransportPeerId = "peer-legacy",
+                connectionStatus = BleConnectionStatus.CONNECTED,
+                transportReadStatus = NearbyBleTransportReadStatus.IDLE,
+                transportFrameReadStatus = NearbyBleTransportFrameReadStatus.IDLE,
+                transportWriteStatus = NearbyBleTransportWriteStatus.IDLE,
+                scanDiagnostics = BleScanDiagnostics(),
+                peerSessionDiagnostics = diagnostics,
+                hybridBootstrapJavaNetRuntimeEnabled = true,
+                hybridBootstrapCommandExecutorMode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_JAVANET,
+                hybridBootstrapManualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot(
+                    canTriggerNow = false,
+                    commandBuildResult = HybridBootstrapAttemptCommandBuildResult.NoCandidates,
+                    commandStatusText = "Hybrid bootstrap command: no candidates"
+                ),
+                hybridBootstrapManualAcceptAvailable = false,
+                hybridBootstrapManualAcceptBlockedReason = "No received OFFER candidate.",
+                lastHybridBootstrapManualAcceptStatus = null,
+                hybridBootstrapManualOfferAvailable = true,
+                hybridBootstrapManualOfferBlockedReason = null,
+                lastHybridBootstrapManualOfferStatus = null,
+                selectedSecurePeerId = "peer-legacy",
+                activeSessionPeerId = "peer-legacy",
+                lastIdentityExchangeStatus = null
+            )
+        )
+
+        val identityItems = card.sections.first { it.title == "Identity details" }.items
+
+        assertTrue(identityItems.contains(DebugInfoItem("Selected session", "ready")))
+        assertTrue(identityItems.contains(DebugInfoItem("Active session", "ready")))
+        assertTrue(
+            identityItems.contains(
+                DebugInfoItem("Manual bootstrap accept available", "false")
+            )
+        )
+        assertTrue(
+            identityItems.contains(
+                DebugInfoItem(
+                    "Accept blocker",
+                    "No received OFFER candidate.",
+                    preferFullWidth = true
+                )
+            )
+        )
+        assertTrue(identityItems.contains(DebugInfoItem("Offer blocker", "Ready", preferFullWidth = true)))
+        assertTrue(
+            identityItems.contains(
+                DebugInfoItem("Trigger blocker", "No offer, accept, or socket hint.", preferFullWidth = true)
+            )
+        )
+        assertTrue(identityItems.contains(DebugInfoItem("Candidates", "0")))
+        assertTrue(identityItems.contains(DebugInfoItem("Socket-ready", "0")))
+    }
+
+    @Test
+    fun nearbyHybridBootstrapTriggerBlockedReasonExplainsMissingSelectedPeerBeforeNoCandidates() {
+        val blockedReason = nearbyHybridBootstrapManualTriggerBlockedReasonValue(
+            selectedSecurePeerId = null,
+            activeSessionPeerId = "peer-legacy",
+            peerSessionDiagnostics = PeerSessionRegistryDiagnostics(
+                establishedPeerIds = listOf("peer-canonical"),
+                canonicalPeerIdByAlias = mapOf("peer-legacy" to "peer-canonical")
+            ),
+            decision = HybridBootstrapDecision.create(
+                candidates = emptyList(),
+                selection = HybridBootstrapCandidateSelection.NoCandidates
+            ),
+            snapshot = hybridBootstrapManualTriggerSnapshot(
+                canTriggerNow = false,
+                commandBuildResult = HybridBootstrapAttemptCommandBuildResult.NoCandidates
+            )
+        )
+
+        assertEquals("No selected peer.", blockedReason)
     }
 
     @Test
@@ -2963,26 +3263,29 @@ class NearbyDevicesScreenTest {
 
     private fun hybridBootstrapManualTriggerSnapshot(
         canTriggerNow: Boolean = false,
+        commandBuildResult: HybridBootstrapAttemptCommandBuildResult? = null,
         commandStatusText: String = "Hybrid bootstrap command: no candidates",
         triggerStatusText: String? = null
     ): HybridBootstrapManualTriggerSnapshot {
-        return HybridBootstrapManualTriggerSnapshot(
-            commandBuildResult = if (canTriggerNow) {
-                HybridBootstrapAttemptCommandBuildResult.Built(
-                    HybridBootstrapAttemptCommand(
-                        peerId = "peer-legacy",
-                        sessionId = "session-1",
-                        bootstrapIdentifier = "bootstrap-1",
-                        groupOwnerAddress = "192.168.49.1",
-                        socketPort = 8988,
-                        latestCreatedAtMillis = 10L,
-                        requestedAtMillis = 20L,
-                        commandCreatedAtMillis = 30L
-                    )
+        val resolvedCommandBuildResult = commandBuildResult ?: if (canTriggerNow) {
+            HybridBootstrapAttemptCommandBuildResult.Built(
+                HybridBootstrapAttemptCommand(
+                    peerId = "peer-legacy",
+                    sessionId = "session-1",
+                    bootstrapIdentifier = "bootstrap-1",
+                    groupOwnerAddress = "192.168.49.1",
+                    socketPort = 8988,
+                    latestCreatedAtMillis = 10L,
+                    requestedAtMillis = 20L,
+                    commandCreatedAtMillis = 30L
                 )
-            } else {
-                HybridBootstrapAttemptCommandBuildResult.NoCandidates
-            },
+            )
+        } else {
+            HybridBootstrapAttemptCommandBuildResult.NoCandidates
+        }
+
+        return HybridBootstrapManualTriggerSnapshot(
+            commandBuildResult = resolvedCommandBuildResult,
             latestTriggerResult = triggerStatusText?.let {
                 HybridBootstrapCommandTriggerResult.NotAllowed("test")
             },

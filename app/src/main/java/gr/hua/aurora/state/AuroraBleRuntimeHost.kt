@@ -91,6 +91,7 @@ import gr.hua.aurora.transport.hybrid.HybridBootstrapDecision
 import gr.hua.aurora.transport.hybrid.HybridBootstrapDiagnostics
 import gr.hua.aurora.transport.hybrid.HybridBootstrapDiagnosticsFormatter
 import gr.hua.aurora.transport.hybrid.HybridBootstrapDecisionProvider
+import gr.hua.aurora.transport.hybrid.HybridBootstrapCandidate
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommandBuildResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommandBuilder
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptDecision
@@ -98,6 +99,7 @@ import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptPolicy
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutorConfig
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutionResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutorMode
+import gr.hua.aurora.transport.hybrid.HybridBootstrapManualAcceptSendResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapManualOfferSendResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapManualTriggerSnapshot
 import gr.hua.aurora.transport.hybrid.HybridBootstrapManualTriggerSnapshotFormatter
@@ -160,9 +162,16 @@ data class AuroraBleRuntimeState(
     val lastGlobalMeshStatus: String?,
     val hybridBootstrapJavaNetRuntimeEnabled: Boolean,
     val hybridBootstrapCommandExecutorMode: HybridBootstrapCommandExecutorMode,
+    val hybridBootstrapDecision: HybridBootstrapDecision,
+    val hybridBootstrapDiagnostics: HybridBootstrapDiagnostics,
     val hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
     val onHybridBootstrapManualTriggerRequested: () -> HybridBootstrapCommandTriggerResult,
+    val hybridBootstrapManualAcceptAvailable: Boolean,
+    val hybridBootstrapManualAcceptBlockedReason: String?,
+    val lastHybridBootstrapManualAcceptStatus: String?,
+    val onHybridBootstrapManualAcceptRequested: suspend () -> HybridBootstrapManualAcceptSendResult,
     val hybridBootstrapManualOfferAvailable: Boolean,
+    val hybridBootstrapManualOfferBlockedReason: String?,
     val lastHybridBootstrapManualOfferStatus: String?,
     val onHybridBootstrapManualOfferRequested: suspend () -> HybridBootstrapManualOfferSendResult,
     val submitGlobalMeshMessage: suspend (OutgoingChatMessage, String) -> GlobalMeshDeliveryResult,
@@ -553,10 +562,52 @@ fun rememberAuroraBleRuntimeState(
         )
     }
     val hybridBootstrapManualOfferCreatedAtMillis = System::currentTimeMillis
+    val hybridBootstrapManualAcceptCreatedAtMillis = System::currentTimeMillis
+    var lastHybridBootstrapManualAcceptStatus by remember(
+        runtimeGeneration
+    ) {
+        mutableStateOf<String?>(null)
+    }
     var lastHybridBootstrapManualOfferStatus by remember(
         runtimeGeneration
     ) {
         mutableStateOf<String?>(null)
+    }
+    val hybridBootstrapManualAcceptAvailable = remember(
+        runtimeGeneration,
+        latestHybridBootstrapDecision,
+        bleConnectionStatus,
+        activeTransportPeerId,
+        bleTransportSender,
+        peerSessionDiagnostics,
+        localPeerId
+    ) {
+        currentHybridBootstrapManualAcceptAvailable(
+            decision = latestHybridBootstrapDecision,
+            bleConnectionStatus = bleConnectionStatus,
+            activeTransportPeerId = activeTransportPeerId,
+            peerSessionDiagnostics = peerSessionDiagnostics,
+            transportSender = bleTransportSender,
+            localPeerId = localPeerId
+        )
+    }
+    val hybridBootstrapManualAcceptBlockedReason = remember(
+        runtimeGeneration,
+        latestHybridBootstrapDecision,
+        bleConnectionStatus,
+        activeTransportPeerId,
+        bleTransportSender,
+        peerSessionDiagnostics,
+        localPeerId
+    ) {
+        currentHybridBootstrapManualAcceptBlockedReason(
+            decision = latestHybridBootstrapDecision,
+            bleConnectionStatus = bleConnectionStatus,
+            activeTransportPeerId = activeTransportPeerId,
+            peerSessionDiagnostics = peerSessionDiagnostics,
+            transportSender = bleTransportSender,
+            localPeerId = localPeerId
+        )
     }
     val hybridBootstrapManualOfferAvailable = remember(
         runtimeGeneration,
@@ -567,6 +618,22 @@ fun rememberAuroraBleRuntimeState(
         localPeerId
     ) {
         currentHybridBootstrapManualOfferAvailable(
+            bleConnectionStatus = bleConnectionStatus,
+            activeTransportPeerId = activeTransportPeerId,
+            peerSessionDiagnostics = peerSessionDiagnostics,
+            transportSender = bleTransportSender,
+            localPeerId = localPeerId
+        )
+    }
+    val hybridBootstrapManualOfferBlockedReason = remember(
+        runtimeGeneration,
+        bleConnectionStatus,
+        activeTransportPeerId,
+        bleTransportSender,
+        peerSessionDiagnostics,
+        localPeerId
+    ) {
+        currentHybridBootstrapManualOfferBlockedReason(
             bleConnectionStatus = bleConnectionStatus,
             activeTransportPeerId = activeTransportPeerId,
             peerSessionDiagnostics = peerSessionDiagnostics,
@@ -635,6 +702,30 @@ fun rememberAuroraBleRuntimeState(
             )
             lastHybridBootstrapManualOfferStatus =
                 hybridBootstrapManualOfferRuntimeStatusText(result)
+            result
+        }
+    }
+    val onHybridBootstrapManualAcceptRequested = remember(
+        runtimeGeneration,
+        latestHybridBootstrapDecision,
+        bleConnectionStatus,
+        activeTransportPeerId,
+        bleTransportSender,
+        peerSessionDiagnostics,
+        localPeerId
+    ) {
+        createHybridBootstrapManualAcceptRequestCallback {
+            val result = submitHybridBootstrapManualAccept(
+                decision = latestHybridBootstrapDecision,
+                bleConnectionStatus = bleConnectionStatus,
+                activeTransportPeerId = activeTransportPeerId,
+                peerSessionDiagnostics = peerSessionDiagnostics,
+                transportSender = bleTransportSender,
+                localPeerId = localPeerId,
+                createdAtMillis = hybridBootstrapManualAcceptCreatedAtMillis()
+            )
+            lastHybridBootstrapManualAcceptStatus =
+                hybridBootstrapManualAcceptRuntimeStatusText(result)
             result
         }
     }
@@ -1163,9 +1254,16 @@ fun rememberAuroraBleRuntimeState(
         lastGlobalMeshStatus = lastGlobalMeshStatus,
         hybridBootstrapJavaNetRuntimeEnabled = hybridBootstrapJavaNetRuntimeEnabled(),
         hybridBootstrapCommandExecutorMode = hybridBootstrapCommandExecutorConfig.mode,
+        hybridBootstrapDecision = latestHybridBootstrapDecision,
+        hybridBootstrapDiagnostics = latestHybridBootstrapDiagnostics,
         hybridBootstrapManualTriggerSnapshot = latestHybridBootstrapManualTriggerSnapshot,
         onHybridBootstrapManualTriggerRequested = onHybridBootstrapManualTriggerRequested,
+        hybridBootstrapManualAcceptAvailable = hybridBootstrapManualAcceptAvailable,
+        hybridBootstrapManualAcceptBlockedReason = hybridBootstrapManualAcceptBlockedReason,
+        lastHybridBootstrapManualAcceptStatus = lastHybridBootstrapManualAcceptStatus,
+        onHybridBootstrapManualAcceptRequested = onHybridBootstrapManualAcceptRequested,
         hybridBootstrapManualOfferAvailable = hybridBootstrapManualOfferAvailable,
+        hybridBootstrapManualOfferBlockedReason = hybridBootstrapManualOfferBlockedReason,
         lastHybridBootstrapManualOfferStatus = lastHybridBootstrapManualOfferStatus,
         onHybridBootstrapManualOfferRequested = onHybridBootstrapManualOfferRequested,
         submitGlobalMeshMessage = submitGlobalMeshMessage,
@@ -2725,19 +2823,153 @@ internal fun currentHybridBootstrapManualOfferAvailable(
     transportSender: BleTransportSender,
     localPeerId: String?
 ): Boolean {
-    val activePeerId = activeTransportPeerId?.trim()?.takeIf { it.isNotEmpty() } ?: return false
-    val localSenderPeerId = localPeerId?.trim()?.takeIf { it.isNotEmpty() } ?: return false
+    return currentHybridBootstrapManualOfferBlockedReason(
+        bleConnectionStatus = bleConnectionStatus,
+        activeTransportPeerId = activeTransportPeerId,
+        peerSessionDiagnostics = peerSessionDiagnostics,
+        transportSender = transportSender,
+        localPeerId = localPeerId
+    ) == null
+}
+
+internal fun currentHybridBootstrapManualOfferBlockedReason(
+    bleConnectionStatus: BleConnectionStatus,
+    activeTransportPeerId: String?,
+    peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
+    transportSender: BleTransportSender,
+    localPeerId: String?
+): String? {
     if (bleConnectionStatus != BleConnectionStatus.CONNECTED) {
-        return false
+        return "No active BLE peer."
     }
+    val activePeerId = activeTransportPeerId?.trim()?.takeIf { it.isNotEmpty() }
+        ?: return "No active BLE peer."
     if (!peerSessionDiagnostics.hasSessionForPeer(activePeerId)) {
-        return false
+        return "No active BLE session."
     }
     if (transportSender is NoOpBleTransportSender) {
-        return false
+        return "BLE writer unavailable."
+    }
+    val localSenderPeerId = localPeerId?.trim()?.takeIf { it.isNotEmpty() }
+        ?: return "Local hybrid bootstrap peer id unavailable."
+
+    return if (localSenderPeerId.isNotEmpty()) {
+        null
+    } else {
+        "Local hybrid bootstrap peer id unavailable."
+    }
+}
+
+internal fun currentHybridBootstrapManualAcceptAvailable(
+    decision: HybridBootstrapDecision,
+    bleConnectionStatus: BleConnectionStatus,
+    activeTransportPeerId: String?,
+    peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
+    transportSender: BleTransportSender,
+    localPeerId: String?
+): Boolean {
+    return currentHybridBootstrapManualAcceptBlockedReason(
+        decision = decision,
+        bleConnectionStatus = bleConnectionStatus,
+        activeTransportPeerId = activeTransportPeerId,
+        peerSessionDiagnostics = peerSessionDiagnostics,
+        transportSender = transportSender,
+        localPeerId = localPeerId
+    ) == null
+}
+
+internal fun currentHybridBootstrapManualAcceptBlockedReason(
+    decision: HybridBootstrapDecision,
+    bleConnectionStatus: BleConnectionStatus,
+    activeTransportPeerId: String?,
+    peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
+    transportSender: BleTransportSender,
+    localPeerId: String?
+): String? {
+    if (bleConnectionStatus != BleConnectionStatus.CONNECTED) {
+        return "No active BLE peer."
+    }
+    val activePeerId = activeTransportPeerId?.trim()?.takeIf { it.isNotEmpty() }
+        ?: return "No active BLE peer."
+    if (peerSessionDiagnostics.canonicalPeerIdFor(activePeerId) == null) {
+        return "No active BLE session."
+    }
+    if (transportSender is NoOpBleTransportSender) {
+        return "BLE writer unavailable."
+    }
+    val localSenderPeerId = localPeerId?.trim()?.takeIf { it.isNotEmpty() }
+        ?: return "Local hybrid bootstrap peer id unavailable."
+    if (localSenderPeerId.isEmpty()) {
+        return "Local hybrid bootstrap peer id unavailable."
+    }
+    val matchingCandidate = selectHybridBootstrapManualAcceptCandidateOrNull(
+        decision = decision,
+        activeTransportPeerId = activePeerId,
+        peerSessionDiagnostics = peerSessionDiagnostics
+    )
+    if (matchingCandidate == null) {
+        return if (decision.candidates.any(HybridBootstrapCandidate::hasOffer)) {
+            "Received OFFER candidate is not for the active peer."
+        } else {
+            "No received OFFER candidate."
+        }
     }
 
-    return localSenderPeerId.isNotEmpty()
+    return null
+}
+
+internal data class HybridBootstrapManualAcceptTarget(
+    val peerId: String,
+    val sessionId: String
+) {
+    init {
+        require(peerId.isNotBlank()) {
+            "Hybrid bootstrap manual accept target peerId must not be blank."
+        }
+        require(sessionId.isNotBlank()) {
+            "Hybrid bootstrap manual accept target sessionId must not be blank."
+        }
+    }
+}
+
+internal fun selectHybridBootstrapManualAcceptTargetOrNull(
+    decision: HybridBootstrapDecision,
+    activeTransportPeerId: String?,
+    peerSessionDiagnostics: PeerSessionRegistryDiagnostics
+): HybridBootstrapManualAcceptTarget? {
+    val candidate = selectHybridBootstrapManualAcceptCandidateOrNull(
+        decision = decision,
+        activeTransportPeerId = activeTransportPeerId,
+        peerSessionDiagnostics = peerSessionDiagnostics
+    ) ?: return null
+    val canonicalPeerId = peerSessionDiagnostics.canonicalPeerIdFor(candidate.peerId)
+        ?: candidate.peerId.trim().takeIf { it.isNotEmpty() }
+        ?: return null
+
+    return HybridBootstrapManualAcceptTarget(
+        peerId = canonicalPeerId,
+        sessionId = candidate.sessionId
+    )
+}
+
+internal fun selectHybridBootstrapManualAcceptCandidateOrNull(
+    decision: HybridBootstrapDecision,
+    activeTransportPeerId: String?,
+    peerSessionDiagnostics: PeerSessionRegistryDiagnostics
+): HybridBootstrapCandidate? {
+    val activePeerId = activeTransportPeerId?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    val activeCanonicalPeerId = peerSessionDiagnostics.canonicalPeerIdFor(activePeerId) ?: return null
+    val matchingCandidates = decision.candidates.filter { candidate ->
+        candidate.hasOffer &&
+            candidate.peerId.isNotBlank() &&
+            candidate.sessionId.isNotBlank() &&
+            (
+                peerSessionDiagnostics.canonicalPeerIdFor(candidate.peerId)
+                    ?: candidate.peerId.trim().takeIf { it.isNotEmpty() }
+            ) == activeCanonicalPeerId
+    }
+
+    return matchingCandidates.firstOrNull { !it.hasAccept } ?: matchingCandidates.firstOrNull()
 }
 
 internal suspend fun submitHybridBootstrapManualOffer(
@@ -2792,6 +3024,69 @@ internal suspend fun submitHybridBootstrapManualOffer(
     }
 }
 
+internal suspend fun submitHybridBootstrapManualAccept(
+    decision: HybridBootstrapDecision,
+    bleConnectionStatus: BleConnectionStatus,
+    activeTransportPeerId: String?,
+    peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
+    transportSender: BleTransportSender,
+    localPeerId: String?,
+    createdAtMillis: Long
+): HybridBootstrapManualAcceptSendResult {
+    if (bleConnectionStatus != BleConnectionStatus.CONNECTED) {
+        return HybridBootstrapManualAcceptSendResult.NoActivePeer
+    }
+    val activePeerId = activeTransportPeerId?.trim()?.takeIf { it.isNotEmpty() }
+        ?: return HybridBootstrapManualAcceptSendResult.NoActivePeer
+    if (peerSessionDiagnostics.canonicalPeerIdFor(activePeerId) == null) {
+        return HybridBootstrapManualAcceptSendResult.NoActiveSession
+    }
+    if (transportSender is NoOpBleTransportSender) {
+        return HybridBootstrapManualAcceptSendResult.WriterUnavailable
+    }
+    val localSenderPeerId = localPeerId?.trim()?.takeIf { it.isNotEmpty() }
+        ?: return HybridBootstrapManualAcceptSendResult.InvalidAccept(
+            reason = "Local hybrid bootstrap peer id unavailable."
+        )
+    val target = selectHybridBootstrapManualAcceptTargetOrNull(
+        decision = decision,
+        activeTransportPeerId = activePeerId,
+        peerSessionDiagnostics = peerSessionDiagnostics
+    ) ?: return HybridBootstrapManualAcceptSendResult.NoOfferCandidate
+    val frame = runCatching {
+        createHybridBootstrapManualAcceptFrame(
+            localPeerId = localSenderPeerId,
+            targetPeerId = target.peerId,
+            sessionId = target.sessionId,
+            createdAtMillis = createdAtMillis
+        )
+    }.getOrElse { error ->
+        return HybridBootstrapManualAcceptSendResult.InvalidAccept(
+            reason = error.message ?: "Hybrid bootstrap accept is invalid."
+        )
+    }
+
+    return when (
+        val sendResult = MessageFrameTransportSendUseCase.sendPublic(
+            frame = frame,
+            transportSender = transportSender,
+            targetPeerId = target.peerId
+        )
+    ) {
+        BleTransportSendResult.QueuedLocally ->
+            HybridBootstrapManualAcceptSendResult.Sent(
+                peerId = target.peerId,
+                sessionId = target.sessionId
+            )
+
+        BleTransportSendResult.NotAvailable ->
+            HybridBootstrapManualAcceptSendResult.WriterUnavailable
+
+        is BleTransportSendResult.Failed ->
+            HybridBootstrapManualAcceptSendResult.SendFailed(sendResult.reason)
+    }
+}
+
 internal fun createHybridBootstrapManualOfferFrame(
     localPeerId: String,
     targetPeerId: String,
@@ -2818,11 +3113,45 @@ internal fun createHybridBootstrapManualOfferFrame(
     )
 }
 
+internal fun createHybridBootstrapManualAcceptFrame(
+    localPeerId: String,
+    targetPeerId: String,
+    sessionId: String,
+    createdAtMillis: Long
+): MessageFrame {
+    val message = HybridTransportControlMessage(
+        messageType = HybridTransportControlMessage.MessageType.WIFI_DIRECT_ACCEPT,
+        sessionId = sessionId,
+        publicPeerIdHint = localPeerId,
+        createdAtMillis = createdAtMillis,
+        capabilityFlags = setOf(
+            HybridTransportControlMessage.CapabilityFlag.WIFI_DIRECT_BOOTSTRAP,
+            HybridTransportControlMessage.CapabilityFlag.BLE_FALLBACK
+        )
+    )
+    return HybridTransportControlFrameFactory.create(
+        message = message,
+        frameId = hybridBootstrapManualAcceptFrameId(
+            localPeerId = localPeerId,
+            createdAtMillis = createdAtMillis
+        ),
+        senderId = localPeerId,
+        recipientId = targetPeerId
+    )
+}
+
 internal fun hybridBootstrapManualOfferFrameId(
     localPeerId: String,
     createdAtMillis: Long
 ): String {
     return "hybrid-offer-$localPeerId-$createdAtMillis"
+}
+
+internal fun hybridBootstrapManualAcceptFrameId(
+    localPeerId: String,
+    createdAtMillis: Long
+): String {
+    return "hybrid-accept-$localPeerId-$createdAtMillis"
 }
 
 internal fun hybridBootstrapManualOfferRuntimeStatusText(
@@ -2844,11 +3173,40 @@ internal fun hybridBootstrapManualOfferRuntimeStatusText(
     }
 }
 
+internal fun hybridBootstrapManualAcceptRuntimeStatusText(
+    result: HybridBootstrapManualAcceptSendResult
+): String {
+    return when (result) {
+        is HybridBootstrapManualAcceptSendResult.Sent ->
+            "Manual bootstrap accept sent: peer=${result.peerId} session=${result.sessionId}"
+        HybridBootstrapManualAcceptSendResult.NoOfferCandidate ->
+            "Manual bootstrap accept unavailable: no received OFFER candidate."
+        HybridBootstrapManualAcceptSendResult.NoActivePeer ->
+            "Manual bootstrap accept unavailable: no active BLE peer."
+        HybridBootstrapManualAcceptSendResult.NoActiveSession ->
+            "Manual bootstrap accept unavailable: no active BLE session."
+        HybridBootstrapManualAcceptSendResult.WriterUnavailable ->
+            "Manual bootstrap accept unavailable: BLE writer unavailable."
+        is HybridBootstrapManualAcceptSendResult.InvalidAccept ->
+            "Manual bootstrap accept invalid: ${result.reason}"
+        is HybridBootstrapManualAcceptSendResult.SendFailed ->
+            "Manual bootstrap accept failed: ${result.reason}"
+    }
+}
+
 internal fun createHybridBootstrapManualOfferRequestCallback(
     explicitManualOfferAction: suspend () -> HybridBootstrapManualOfferSendResult
 ): suspend () -> HybridBootstrapManualOfferSendResult {
     return {
         explicitManualOfferAction()
+    }
+}
+
+internal fun createHybridBootstrapManualAcceptRequestCallback(
+    explicitManualAcceptAction: suspend () -> HybridBootstrapManualAcceptSendResult
+): suspend () -> HybridBootstrapManualAcceptSendResult {
+    return {
+        explicitManualAcceptAction()
     }
 }
 

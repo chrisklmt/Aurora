@@ -55,8 +55,14 @@ import gr.hua.aurora.model.PrivateChatIdentity
 import gr.hua.aurora.protocol.PeerIdentityExchangeSendResult
 import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
 import gr.hua.aurora.protocol.PeerSessionPeerId
+import gr.hua.aurora.protocol.canonicalPeerIdFor
 import gr.hua.aurora.protocol.hasSessionForPeer
 import gr.hua.aurora.state.AuroraAvailabilityPreference
+import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommandBuildResult
+import gr.hua.aurora.transport.hybrid.HybridBootstrapCandidateSelection
+import gr.hua.aurora.transport.hybrid.HybridBootstrapDecision
+import gr.hua.aurora.transport.hybrid.HybridBootstrapDiagnostics
+import gr.hua.aurora.transport.hybrid.HybridBootstrapManualAcceptSendResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapManualOfferSendResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutorMode
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandTriggerResult
@@ -147,9 +153,16 @@ internal fun NearbyDevicesScreen(
     identityHandlerStatus: String,
     hybridBootstrapJavaNetRuntimeEnabled: Boolean,
     hybridBootstrapCommandExecutorMode: HybridBootstrapCommandExecutorMode,
+    hybridBootstrapDecision: HybridBootstrapDecision,
+    hybridBootstrapDiagnostics: HybridBootstrapDiagnostics,
     hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
     onHybridBootstrapManualTriggerRequested: () -> HybridBootstrapCommandTriggerResult,
+    hybridBootstrapManualAcceptAvailable: Boolean,
+    hybridBootstrapManualAcceptBlockedReason: String?,
+    lastHybridBootstrapManualAcceptStatus: String?,
+    onHybridBootstrapManualAcceptRequested: suspend () -> HybridBootstrapManualAcceptSendResult,
     hybridBootstrapManualOfferAvailable: Boolean,
+    hybridBootstrapManualOfferBlockedReason: String?,
     lastHybridBootstrapManualOfferStatus: String?,
     onHybridBootstrapManualOfferRequested: suspend () -> HybridBootstrapManualOfferSendResult,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
@@ -331,8 +344,19 @@ internal fun NearbyDevicesScreen(
                     hybridBootstrapJavaNetRuntimeEnabled =
                     hybridBootstrapJavaNetRuntimeEnabled,
                     hybridBootstrapCommandExecutorMode = hybridBootstrapCommandExecutorMode,
+                    hybridBootstrapDecision = hybridBootstrapDecision,
+                    hybridBootstrapDiagnostics = hybridBootstrapDiagnostics,
                     hybridBootstrapManualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot,
+                    hybridBootstrapManualAcceptAvailable = hybridBootstrapManualAcceptAvailable,
+                    hybridBootstrapManualAcceptBlockedReason =
+                    hybridBootstrapManualAcceptBlockedReason,
+                    lastHybridBootstrapManualAcceptStatus =
+                    lastHybridBootstrapManualAcceptStatus,
+                    onHybridBootstrapManualAcceptRequested =
+                    onHybridBootstrapManualAcceptRequested,
                     hybridBootstrapManualOfferAvailable = hybridBootstrapManualOfferAvailable,
+                    hybridBootstrapManualOfferBlockedReason =
+                    hybridBootstrapManualOfferBlockedReason,
                     lastHybridBootstrapManualOfferStatus = lastHybridBootstrapManualOfferStatus,
                     onHybridBootstrapManualTriggerRequested =
                     onHybridBootstrapManualTriggerRequested,
@@ -612,9 +636,16 @@ private fun DiscoveredBleDevicesCard(
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
     hybridBootstrapJavaNetRuntimeEnabled: Boolean,
     hybridBootstrapCommandExecutorMode: HybridBootstrapCommandExecutorMode,
+    hybridBootstrapDecision: HybridBootstrapDecision,
+    hybridBootstrapDiagnostics: HybridBootstrapDiagnostics,
     hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
     onHybridBootstrapManualTriggerRequested: () -> HybridBootstrapCommandTriggerResult,
+    hybridBootstrapManualAcceptAvailable: Boolean,
+    hybridBootstrapManualAcceptBlockedReason: String?,
+    lastHybridBootstrapManualAcceptStatus: String?,
+    onHybridBootstrapManualAcceptRequested: suspend () -> HybridBootstrapManualAcceptSendResult,
     hybridBootstrapManualOfferAvailable: Boolean,
+    hybridBootstrapManualOfferBlockedReason: String?,
     lastHybridBootstrapManualOfferStatus: String?,
     onHybridBootstrapManualOfferRequested: suspend () -> HybridBootstrapManualOfferSendResult,
     isDiscoveryPausedByAvailability: Boolean,
@@ -643,6 +674,9 @@ private fun DiscoveredBleDevicesCard(
     val manualTriggerRequestState = remember {
         NearbyHybridBootstrapManualTriggerRequestState()
     }
+    val manualAcceptRequestState = remember {
+        NearbyHybridBootstrapManualAcceptRequestState()
+    }
     val manualOfferRequestState = remember {
         NearbyHybridBootstrapManualOfferRequestState()
     }
@@ -661,8 +695,14 @@ private fun DiscoveredBleDevicesCard(
         peerSessionDiagnostics = peerSessionDiagnostics,
         hybridBootstrapJavaNetRuntimeEnabled = hybridBootstrapJavaNetRuntimeEnabled,
         hybridBootstrapCommandExecutorMode = hybridBootstrapCommandExecutorMode,
+        hybridBootstrapDecision = hybridBootstrapDecision,
+        hybridBootstrapDiagnostics = hybridBootstrapDiagnostics,
         hybridBootstrapManualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot,
+        hybridBootstrapManualAcceptAvailable = hybridBootstrapManualAcceptAvailable,
+        hybridBootstrapManualAcceptBlockedReason = hybridBootstrapManualAcceptBlockedReason,
+        lastHybridBootstrapManualAcceptStatus = lastHybridBootstrapManualAcceptStatus,
         hybridBootstrapManualOfferAvailable = hybridBootstrapManualOfferAvailable,
+        hybridBootstrapManualOfferBlockedReason = hybridBootstrapManualOfferBlockedReason,
         lastHybridBootstrapManualOfferStatus = lastHybridBootstrapManualOfferStatus,
         selectedSecurePeerId = selectedSecurePeerId,
         activeSessionPeerId = activeTransportPeerId,
@@ -672,6 +712,11 @@ private fun DiscoveredBleDevicesCard(
         nearbyHybridBootstrapManualOfferControlState(
             available = hybridBootstrapManualOfferAvailable,
             manualOfferInProgress = manualOfferRequestState.inProgress
+        )
+    val hybridBootstrapManualAcceptControlState =
+        nearbyHybridBootstrapManualAcceptControlState(
+            available = hybridBootstrapManualAcceptAvailable,
+            manualAcceptInProgress = manualAcceptRequestState.inProgress
         )
     val hybridBootstrapManualTriggerControlState =
         nearbyHybridBootstrapManualTriggerControlState(
@@ -802,6 +847,32 @@ private fun DiscoveredBleDevicesCard(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         DebugInfoCard(card = card)
+                        Button(
+                            onClick = {
+                                coroutineScope.launch {
+                                    try {
+                                        requestNearbyHybridBootstrapManualAcceptIfEnabled(
+                                            requestState = manualAcceptRequestState,
+                                            available = hybridBootstrapManualAcceptAvailable,
+                                            onHybridBootstrapManualAcceptRequested = {
+                                                withContext(Dispatchers.IO) {
+                                                    onHybridBootstrapManualAcceptRequested()
+                                                }
+                                            }
+                                        )
+                                    } catch (error: Throwable) {
+                                        Log.w(
+                                            nearbyDevicesLogTag,
+                                            "Manual hybrid bootstrap accept failed before runtime status update",
+                                            error
+                                        )
+                                    }
+                                }
+                            },
+                            enabled = hybridBootstrapManualAcceptControlState.enabled
+                        ) {
+                            Text(hybridBootstrapManualAcceptControlState.label)
+                        }
                         Button(
                             onClick = {
                                 coroutineScope.launch {
@@ -1650,8 +1721,14 @@ internal fun buildNearbyExpandedDebugSections(
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
     hybridBootstrapJavaNetRuntimeEnabled: Boolean,
     hybridBootstrapCommandExecutorMode: HybridBootstrapCommandExecutorMode,
+    hybridBootstrapDecision: HybridBootstrapDecision = nearbyDefaultHybridBootstrapDecision(),
+    hybridBootstrapDiagnostics: HybridBootstrapDiagnostics = nearbyDefaultHybridBootstrapDiagnostics(),
     hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
+    hybridBootstrapManualAcceptAvailable: Boolean = false,
+    hybridBootstrapManualAcceptBlockedReason: String? = null,
+    lastHybridBootstrapManualAcceptStatus: String? = null,
     hybridBootstrapManualOfferAvailable: Boolean = false,
+    hybridBootstrapManualOfferBlockedReason: String? = null,
     lastHybridBootstrapManualOfferStatus: String? = null,
     selectedSecurePeerId: String?,
     activeSessionPeerId: String?,
@@ -1739,8 +1816,46 @@ internal fun buildNearbyExpandedDebugSections(
             )
             add(
                 DebugInfoItem(
+                    "Manual bootstrap accept available",
+                    hybridBootstrapManualAcceptAvailable.toString()
+                )
+            )
+            add(
+                DebugInfoItem(
+                    "Accept blocker",
+                    nearbyHybridBootstrapManualAcceptBlockedReasonValue(
+                        available = hybridBootstrapManualAcceptAvailable,
+                        blockedReason = hybridBootstrapManualAcceptBlockedReason
+                    ),
+                    preferFullWidth = true
+                )
+            )
+            lastHybridBootstrapManualAcceptStatus
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?.let { statusText ->
+                    add(
+                        DebugInfoItem(
+                            "Last bootstrap accept",
+                            statusText,
+                            preferFullWidth = true
+                        )
+                    )
+                }
+            add(
+                DebugInfoItem(
                     "Manual bootstrap offer available",
                     hybridBootstrapManualOfferAvailable.toString()
+                )
+            )
+            add(
+                DebugInfoItem(
+                    "Offer blocker",
+                    nearbyHybridBootstrapManualOfferBlockedReasonValue(
+                        available = hybridBootstrapManualOfferAvailable,
+                        blockedReason = hybridBootstrapManualOfferBlockedReason
+                    ),
+                    preferFullWidth = true
                 )
             )
             lastHybridBootstrapManualOfferStatus
@@ -1761,6 +1876,45 @@ internal fun buildNearbyExpandedDebugSections(
                     nearbyHybridBootstrapManualTriggerAvailabilityValue(
                         hybridBootstrapManualTriggerSnapshot
                     )
+                )
+            )
+            add(
+                DebugInfoItem(
+                    "Hybrid status",
+                    hybridBootstrapDiagnostics.statusText,
+                    preferFullWidth = true
+                )
+            )
+            add(
+                DebugInfoItem(
+                    "Candidates",
+                    hybridBootstrapDiagnostics.candidateCount.toString()
+                )
+            )
+            add(
+                DebugInfoItem(
+                    "Socket-ready",
+                    hybridBootstrapDiagnostics.socketReadyCandidateCount.toString()
+                )
+            )
+            add(
+                DebugInfoItem(
+                    "Candidate peers",
+                    nearbyHybridBootstrapCandidatePeersValue(hybridBootstrapDecision),
+                    preferFullWidth = true
+                )
+            )
+            add(
+                DebugInfoItem(
+                    "Trigger blocker",
+                    nearbyHybridBootstrapManualTriggerBlockedReasonValue(
+                        selectedSecurePeerId = selectedSecurePeerId,
+                        activeSessionPeerId = activeSessionPeerId,
+                        peerSessionDiagnostics = peerSessionDiagnostics,
+                        decision = hybridBootstrapDecision,
+                        snapshot = hybridBootstrapManualTriggerSnapshot
+                    ),
+                    preferFullWidth = true
                 )
             )
             add(
@@ -1834,8 +1988,14 @@ internal fun buildNearbyExpandedDebugCard(
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
     hybridBootstrapJavaNetRuntimeEnabled: Boolean,
     hybridBootstrapCommandExecutorMode: HybridBootstrapCommandExecutorMode,
+    hybridBootstrapDecision: HybridBootstrapDecision = nearbyDefaultHybridBootstrapDecision(),
+    hybridBootstrapDiagnostics: HybridBootstrapDiagnostics = nearbyDefaultHybridBootstrapDiagnostics(),
     hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
+    hybridBootstrapManualAcceptAvailable: Boolean = false,
+    hybridBootstrapManualAcceptBlockedReason: String? = null,
+    lastHybridBootstrapManualAcceptStatus: String? = null,
     hybridBootstrapManualOfferAvailable: Boolean = false,
+    hybridBootstrapManualOfferBlockedReason: String? = null,
     lastHybridBootstrapManualOfferStatus: String? = null,
     selectedSecurePeerId: String?,
     activeSessionPeerId: String?,
@@ -1856,8 +2016,14 @@ internal fun buildNearbyExpandedDebugCard(
         peerSessionDiagnostics = peerSessionDiagnostics,
         hybridBootstrapJavaNetRuntimeEnabled = hybridBootstrapJavaNetRuntimeEnabled,
         hybridBootstrapCommandExecutorMode = hybridBootstrapCommandExecutorMode,
+        hybridBootstrapDecision = hybridBootstrapDecision,
+        hybridBootstrapDiagnostics = hybridBootstrapDiagnostics,
         hybridBootstrapManualTriggerSnapshot = hybridBootstrapManualTriggerSnapshot,
+        hybridBootstrapManualAcceptAvailable = hybridBootstrapManualAcceptAvailable,
+        hybridBootstrapManualAcceptBlockedReason = hybridBootstrapManualAcceptBlockedReason,
+        lastHybridBootstrapManualAcceptStatus = lastHybridBootstrapManualAcceptStatus,
         hybridBootstrapManualOfferAvailable = hybridBootstrapManualOfferAvailable,
+        hybridBootstrapManualOfferBlockedReason = hybridBootstrapManualOfferBlockedReason,
         lastHybridBootstrapManualOfferStatus = lastHybridBootstrapManualOfferStatus,
         selectedSecurePeerId = selectedSecurePeerId,
         activeSessionPeerId = activeSessionPeerId,
@@ -1928,6 +2094,59 @@ internal class NearbyHybridBootstrapManualOfferRequestState(
 
     fun finish() {
         inProgress = false
+    }
+}
+
+internal data class NearbyHybridBootstrapManualAcceptControlState(
+    val label: String,
+    val enabled: Boolean
+)
+
+internal class NearbyHybridBootstrapManualAcceptRequestState(
+    initialInProgress: Boolean = false
+) {
+    var inProgress by mutableStateOf(initialInProgress)
+        private set
+
+    fun tryStart(
+        available: Boolean
+    ): Boolean {
+        if (!available || inProgress) {
+            return false
+        }
+
+        inProgress = true
+        return true
+    }
+
+    fun finish() {
+        inProgress = false
+    }
+}
+
+internal fun nearbyHybridBootstrapManualAcceptControlState(
+    available: Boolean,
+    manualAcceptInProgress: Boolean = false
+): NearbyHybridBootstrapManualAcceptControlState {
+    return NearbyHybridBootstrapManualAcceptControlState(
+        label = "Send bootstrap accept",
+        enabled = available && !manualAcceptInProgress
+    )
+}
+
+internal suspend fun requestNearbyHybridBootstrapManualAcceptIfEnabled(
+    requestState: NearbyHybridBootstrapManualAcceptRequestState,
+    available: Boolean,
+    onHybridBootstrapManualAcceptRequested: suspend () -> HybridBootstrapManualAcceptSendResult
+): HybridBootstrapManualAcceptSendResult? {
+    if (!requestState.tryStart(available)) {
+        return null
+    }
+
+    return try {
+        onHybridBootstrapManualAcceptRequested()
+    } finally {
+        requestState.finish()
     }
 }
 
@@ -2008,6 +2227,70 @@ internal suspend fun requestNearbyHybridBootstrapManualTriggerIfEnabled(
     }
 }
 
+internal fun nearbyHybridBootstrapManualOfferBlockedReasonValue(
+    available: Boolean,
+    blockedReason: String?
+): String {
+    if (available) {
+        return "Ready"
+    }
+
+    return blockedReason?.trim()?.takeIf { it.isNotEmpty() } ?: "Unavailable."
+}
+
+internal fun nearbyHybridBootstrapManualAcceptBlockedReasonValue(
+    available: Boolean,
+    blockedReason: String?
+): String {
+    if (available) {
+        return "Ready"
+    }
+
+    return blockedReason?.trim()?.takeIf { it.isNotEmpty() } ?: "Unavailable."
+}
+
+internal fun nearbyHybridBootstrapCandidatePeersValue(
+    decision: HybridBootstrapDecision
+): String {
+    val peerIds = decision.candidates.map { candidate -> candidate.peerId }
+    return peerIds.joinToString().ifBlank { "none" }
+}
+
+internal fun nearbyHybridBootstrapManualTriggerBlockedReasonValue(
+    selectedSecurePeerId: String?,
+    activeSessionPeerId: String?,
+    peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
+    decision: HybridBootstrapDecision,
+    snapshot: HybridBootstrapManualTriggerSnapshot
+): String {
+    if (snapshot.canTriggerNow) {
+        return "Ready"
+    }
+
+    return when (val commandBuildResult = snapshot.commandBuildResult) {
+        is HybridBootstrapAttemptCommandBuildResult.Built -> "Ready"
+        HybridBootstrapAttemptCommandBuildResult.NoCandidates ->
+            nearbyHybridBootstrapNoCandidatesReason(
+                selectedSecurePeerId = selectedSecurePeerId,
+                activeSessionPeerId = activeSessionPeerId,
+                peerSessionDiagnostics = peerSessionDiagnostics
+            )
+        HybridBootstrapAttemptCommandBuildResult.NoSocketReadyCandidate ->
+            nearbyHybridBootstrapNoSocketReadyReason(
+                selectedSecurePeerId = selectedSecurePeerId,
+                activeSessionPeerId = activeSessionPeerId,
+                peerSessionDiagnostics = peerSessionDiagnostics,
+                decision = decision
+            )
+        is HybridBootstrapAttemptCommandBuildResult.InvalidEndpoint ->
+            commandBuildResult.reason
+        is HybridBootstrapAttemptCommandBuildResult.EndpointTooOld ->
+            "Candidate exists but socket hint is stale."
+        is HybridBootstrapAttemptCommandBuildResult.NotAllowed ->
+            commandBuildResult.reason
+    }
+}
+
 internal fun nearbyPeerSessionCompactValue(
     peerId: String?,
     diagnostics: PeerSessionRegistryDiagnostics
@@ -2073,6 +2356,89 @@ internal fun nearbySessionAliasText(
     }
 
     return "Session peer aliases: ${diagnostics.canonicalPeerIdByAlias.entries.joinToString(separator = ", ") { (aliasPeerId, canonicalPeerId) -> "$aliasPeerId -> $canonicalPeerId" }}"
+}
+
+private fun nearbyHybridBootstrapNoCandidatesReason(
+    selectedSecurePeerId: String?,
+    activeSessionPeerId: String?,
+    peerSessionDiagnostics: PeerSessionRegistryDiagnostics
+): String {
+    val selectedPeerId = selectedSecurePeerId?.trim()?.takeIf { it.isNotEmpty() }
+    if (selectedPeerId == null) {
+        return "No selected peer."
+    }
+    val activePeerId = activeSessionPeerId?.trim()?.takeIf { it.isNotEmpty() }
+    if (activePeerId == null) {
+        return "No active peer."
+    }
+    if (!peerSessionDiagnostics.hasSessionForPeer(selectedPeerId)) {
+        return "No selected session."
+    }
+    if (!peerSessionDiagnostics.hasSessionForPeer(activePeerId)) {
+        return "No active session."
+    }
+
+    return "No offer, accept, or socket hint."
+}
+
+private fun nearbyHybridBootstrapNoSocketReadyReason(
+    selectedSecurePeerId: String?,
+    activeSessionPeerId: String?,
+    peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
+    decision: HybridBootstrapDecision
+): String {
+    val candidatePeerIds = decision.candidates.mapTo(linkedSetOf()) { it.peerId }
+    val selectedCanonicalPeerId = peerSessionDiagnostics.canonicalPeerIdFor(selectedSecurePeerId)
+    val activeCanonicalPeerId = peerSessionDiagnostics.canonicalPeerIdFor(activeSessionPeerId)
+    if (
+        candidatePeerIds.isNotEmpty() &&
+        selectedCanonicalPeerId != null &&
+        activeCanonicalPeerId != null &&
+        selectedCanonicalPeerId !in candidatePeerIds &&
+        activeCanonicalPeerId !in candidatePeerIds
+    ) {
+        return "Candidate exists but not for the selected or active peer."
+    }
+
+    val candidate = decision.candidates.firstOrNull()
+        ?: return nearbyHybridBootstrapNoCandidatesReason(
+            selectedSecurePeerId = selectedSecurePeerId,
+            activeSessionPeerId = activeSessionPeerId,
+            peerSessionDiagnostics = peerSessionDiagnostics
+        )
+    if (!candidate.hasSocketHint) {
+        return "Candidate exists but no socket hint."
+    }
+    if (candidate.groupOwnerAddress.isNullOrBlank()) {
+        return "Candidate exists but no group owner address."
+    }
+    val socketPort = candidate.socketPort ?: return "Candidate exists but no socket port."
+    if (socketPort !in 1..65535) {
+        return "Candidate exists but socket port is invalid."
+    }
+
+    return "Candidate exists but socket not ready."
+}
+
+private fun nearbyDefaultHybridBootstrapDecision(): HybridBootstrapDecision {
+    return HybridBootstrapDecision.create(
+        candidates = emptyList(),
+        selection = HybridBootstrapCandidateSelection.NoCandidates
+    )
+}
+
+private fun nearbyDefaultHybridBootstrapDiagnostics(): HybridBootstrapDiagnostics {
+    return HybridBootstrapDiagnostics(
+        candidateCount = 0,
+        socketReadyCandidateCount = 0,
+        selectionStatus = HybridBootstrapDiagnostics.SelectionStatus.NoCandidates,
+        selectedPeerId = null,
+        selectedSessionId = null,
+        selectedGroupOwnerAddress = null,
+        selectedSocketPort = null,
+        selectedLatestCreatedAtMillis = null,
+        statusText = "No hybrid bootstrap candidates"
+    )
 }
 
 private fun BleStablePeerId.toNearbyPeerId(): String {

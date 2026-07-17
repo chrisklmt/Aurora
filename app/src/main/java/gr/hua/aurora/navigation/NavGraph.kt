@@ -166,6 +166,7 @@ fun NavGraph(
                 peerSessionDiagnostics = bleRuntimeState.peerSessionDiagnostics,
                 lastIdentityExchangeStatus = bleRuntimeState.lastIdentityExchangeStatus,
                 onOpenChat = { peerId ->
+                    stateHolder.selectSecurePeer(peerId)
                     navController.navigate(Routes.privateChat(peerId))
                 },
                 onRenameChat = { peerId, customName ->
@@ -292,12 +293,26 @@ fun NavGraph(
                 bleRuntimeState.hybridBootstrapJavaNetRuntimeEnabled,
                 hybridBootstrapCommandExecutorMode =
                 bleRuntimeState.hybridBootstrapCommandExecutorMode,
+                hybridBootstrapDecision =
+                bleRuntimeState.hybridBootstrapDecision,
+                hybridBootstrapDiagnostics =
+                bleRuntimeState.hybridBootstrapDiagnostics,
                 hybridBootstrapManualTriggerSnapshot =
                 bleRuntimeState.hybridBootstrapManualTriggerSnapshot,
                 onHybridBootstrapManualTriggerRequested =
                 bleRuntimeState.onHybridBootstrapManualTriggerRequested,
+                hybridBootstrapManualAcceptAvailable =
+                bleRuntimeState.hybridBootstrapManualAcceptAvailable,
+                hybridBootstrapManualAcceptBlockedReason =
+                bleRuntimeState.hybridBootstrapManualAcceptBlockedReason,
+                lastHybridBootstrapManualAcceptStatus =
+                bleRuntimeState.lastHybridBootstrapManualAcceptStatus,
+                onHybridBootstrapManualAcceptRequested =
+                bleRuntimeState.onHybridBootstrapManualAcceptRequested,
                 hybridBootstrapManualOfferAvailable =
                 bleRuntimeState.hybridBootstrapManualOfferAvailable,
+                hybridBootstrapManualOfferBlockedReason =
+                bleRuntimeState.hybridBootstrapManualOfferBlockedReason,
                 lastHybridBootstrapManualOfferStatus =
                 bleRuntimeState.lastHybridBootstrapManualOfferStatus,
                 onHybridBootstrapManualOfferRequested =
@@ -335,6 +350,7 @@ fun NavGraph(
                 onSelectSecurePeer = stateHolder::selectSecurePeer,
                 onClearSelectedSecurePeer = stateHolder::clearSelectedSecurePeer,
                 onOpenPrivateChat = { peerId ->
+                    stateHolder.selectSecurePeer(peerId)
                     navController.navigate(Routes.privateChat(peerId))
                 },
                 onResetLocalData = onResetLocalData,

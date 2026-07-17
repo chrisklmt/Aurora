@@ -50,6 +50,7 @@ import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptDecision
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommandBuildResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommand
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptRequest
+import gr.hua.aurora.transport.hybrid.HybridBootstrapCandidate
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutorConfig
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutorFactory
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutorMode
@@ -57,9 +58,11 @@ import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandTriggerResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCandidateSelection
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandTriggerController
 import gr.hua.aurora.transport.hybrid.HybridBootstrapDiagnostics
+import gr.hua.aurora.transport.hybrid.HybridBootstrapDecision
 import gr.hua.aurora.transport.hybrid.HybridBootstrapDecisionProvider
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutionResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutor
+import gr.hua.aurora.transport.hybrid.HybridBootstrapManualAcceptSendResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapManualOfferSendResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapManualTriggerSnapshot
 import gr.hua.aurora.transport.hybrid.HybridBootstrapSocketEndpoint
@@ -926,6 +929,64 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun manualHybridBootstrapOfferBlockedReasonReportsExactMissingPrerequisite() {
+        val sessionDiagnostics = PeerSessionRegistryDiagnostics(
+            establishedPeerIds = listOf("peer-canonical"),
+            canonicalPeerIdByAlias = mapOf("peer-active" to "peer-canonical")
+        )
+
+        assertEquals(
+            "No active BLE peer.",
+            currentHybridBootstrapManualOfferBlockedReason(
+                bleConnectionStatus = BleConnectionStatus.IDLE,
+                activeTransportPeerId = "peer-active",
+                peerSessionDiagnostics = sessionDiagnostics,
+                transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally),
+                localPeerId = "peer-local"
+            )
+        )
+        assertEquals(
+            "No active BLE session.",
+            currentHybridBootstrapManualOfferBlockedReason(
+                bleConnectionStatus = BleConnectionStatus.CONNECTED,
+                activeTransportPeerId = "peer-missing",
+                peerSessionDiagnostics = sessionDiagnostics,
+                transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally),
+                localPeerId = "peer-local"
+            )
+        )
+        assertEquals(
+            "BLE writer unavailable.",
+            currentHybridBootstrapManualOfferBlockedReason(
+                bleConnectionStatus = BleConnectionStatus.CONNECTED,
+                activeTransportPeerId = "peer-active",
+                peerSessionDiagnostics = sessionDiagnostics,
+                transportSender = NoOpBleTransportSender(),
+                localPeerId = "peer-local"
+            )
+        )
+        assertEquals(
+            "Local hybrid bootstrap peer id unavailable.",
+            currentHybridBootstrapManualOfferBlockedReason(
+                bleConnectionStatus = BleConnectionStatus.CONNECTED,
+                activeTransportPeerId = "peer-active",
+                peerSessionDiagnostics = sessionDiagnostics,
+                transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally),
+                localPeerId = null
+            )
+        )
+        assertNull(
+            currentHybridBootstrapManualOfferBlockedReason(
+                bleConnectionStatus = BleConnectionStatus.CONNECTED,
+                activeTransportPeerId = "peer-active",
+                peerSessionDiagnostics = sessionDiagnostics,
+                transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally),
+                localPeerId = "peer-local"
+            )
+        )
+    }
+
+    @Test
     fun manualHybridBootstrapOfferRequestCallbackDoesNotInvokeActionUntilExplicitlyCalled() {
         var invokeCount = 0
         val callback = createHybridBootstrapManualOfferRequestCallback {
@@ -1124,6 +1185,389 @@ class AuroraBleRuntimeHostTest {
             provider = provider,
             requestedAtMillis = 1_716_410_011L,
             commandCreatedAtMillis = 1_716_410_012L
+        )
+        assertEquals(
+            HybridBootstrapAttemptCommandBuildResult.NoSocketReadyCandidate,
+            commandBuildResult
+        )
+        val manualTriggerSnapshot = currentHybridBootstrapManualTriggerSnapshot(
+            commandBuildResult = commandBuildResult,
+            latestTriggerResult = null
+        )
+        assertFalse(manualTriggerSnapshot.canTriggerNow)
+        assertEquals(
+            "Hybrid bootstrap command: no socket-ready candidate",
+            manualTriggerSnapshot.commandStatusText
+        )
+        assertEquals(initialGlobalMessages, holder.uiState.globalMessages)
+        assertEquals(initialPrivateMessages, holder.uiState.privateMessagesByPeerId)
+    }
+
+    @Test
+    fun runtimeStateExposesReadOnlyHybridBootstrapManualAcceptFields() {
+        assertEquals(
+            Boolean::class.javaPrimitiveType,
+            AuroraBleRuntimeState::class.java.getDeclaredField(
+                "hybridBootstrapManualAcceptAvailable"
+            ).type
+        )
+        assertEquals(
+            String::class.java,
+            AuroraBleRuntimeState::class.java.getDeclaredField(
+                "hybridBootstrapManualAcceptBlockedReason"
+            ).type
+        )
+        assertTrue(
+            Modifier.isFinal(
+                AuroraBleRuntimeState::class.java.getDeclaredField(
+                    "hybridBootstrapManualAcceptAvailable"
+                ).modifiers
+            )
+        )
+        assertTrue(
+            Modifier.isFinal(
+                AuroraBleRuntimeState::class.java.getDeclaredField(
+                    "onHybridBootstrapManualAcceptRequested"
+                ).modifiers
+            )
+        )
+    }
+
+    @Test
+    fun manualHybridBootstrapAcceptAvailabilityRequiresOfferCandidateActivePeerSessionWriterAndLocalPeerId() {
+        val decision = hybridBootstrapDecision(
+            hybridBootstrapCandidate(
+                peerId = "peer-canonical",
+                sessionId = "offer-session-1",
+                hasOffer = true,
+                hasAccept = false,
+                latestCreatedAtMillis = 10L
+            )
+        )
+        val sessionDiagnostics = PeerSessionRegistryDiagnostics(
+            establishedPeerIds = listOf("peer-canonical"),
+            canonicalPeerIdByAlias = mapOf("peer-active" to "peer-canonical")
+        )
+
+        assertFalse(
+            currentHybridBootstrapManualAcceptAvailable(
+                decision = decision,
+                bleConnectionStatus = BleConnectionStatus.IDLE,
+                activeTransportPeerId = "peer-active",
+                peerSessionDiagnostics = sessionDiagnostics,
+                transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally),
+                localPeerId = "peer-local"
+            )
+        )
+        assertFalse(
+            currentHybridBootstrapManualAcceptAvailable(
+                decision = decision,
+                bleConnectionStatus = BleConnectionStatus.CONNECTED,
+                activeTransportPeerId = "peer-active",
+                peerSessionDiagnostics = sessionDiagnostics,
+                transportSender = NoOpBleTransportSender(),
+                localPeerId = "peer-local"
+            )
+        )
+        assertFalse(
+            currentHybridBootstrapManualAcceptAvailable(
+                decision = hybridBootstrapDecision(),
+                bleConnectionStatus = BleConnectionStatus.CONNECTED,
+                activeTransportPeerId = "peer-active",
+                peerSessionDiagnostics = sessionDiagnostics,
+                transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally),
+                localPeerId = "peer-local"
+            )
+        )
+        assertTrue(
+            currentHybridBootstrapManualAcceptAvailable(
+                decision = decision,
+                bleConnectionStatus = BleConnectionStatus.CONNECTED,
+                activeTransportPeerId = "peer-active",
+                peerSessionDiagnostics = sessionDiagnostics,
+                transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally),
+                localPeerId = "peer-local"
+            )
+        )
+    }
+
+    @Test
+    fun manualHybridBootstrapAcceptBlockedReasonReportsExactMissingPrerequisite() {
+        val sessionDiagnostics = PeerSessionRegistryDiagnostics(
+            establishedPeerIds = listOf("peer-canonical"),
+            canonicalPeerIdByAlias = mapOf("peer-active" to "peer-canonical")
+        )
+        val decision = hybridBootstrapDecision(
+            hybridBootstrapCandidate(
+                peerId = "peer-canonical",
+                sessionId = "offer-session-1",
+                hasOffer = true,
+                hasAccept = false
+            )
+        )
+
+        assertEquals(
+            "No active BLE peer.",
+            currentHybridBootstrapManualAcceptBlockedReason(
+                decision = decision,
+                bleConnectionStatus = BleConnectionStatus.IDLE,
+                activeTransportPeerId = "peer-active",
+                peerSessionDiagnostics = sessionDiagnostics,
+                transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally),
+                localPeerId = "peer-local"
+            )
+        )
+        assertEquals(
+            "No active BLE session.",
+            currentHybridBootstrapManualAcceptBlockedReason(
+                decision = decision,
+                bleConnectionStatus = BleConnectionStatus.CONNECTED,
+                activeTransportPeerId = "peer-missing",
+                peerSessionDiagnostics = sessionDiagnostics,
+                transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally),
+                localPeerId = "peer-local"
+            )
+        )
+        assertEquals(
+            "BLE writer unavailable.",
+            currentHybridBootstrapManualAcceptBlockedReason(
+                decision = decision,
+                bleConnectionStatus = BleConnectionStatus.CONNECTED,
+                activeTransportPeerId = "peer-active",
+                peerSessionDiagnostics = sessionDiagnostics,
+                transportSender = NoOpBleTransportSender(),
+                localPeerId = "peer-local"
+            )
+        )
+        assertEquals(
+            "No received OFFER candidate.",
+            currentHybridBootstrapManualAcceptBlockedReason(
+                decision = hybridBootstrapDecision(),
+                bleConnectionStatus = BleConnectionStatus.CONNECTED,
+                activeTransportPeerId = "peer-active",
+                peerSessionDiagnostics = sessionDiagnostics,
+                transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally),
+                localPeerId = "peer-local"
+            )
+        )
+        assertNull(
+            currentHybridBootstrapManualAcceptBlockedReason(
+                decision = decision,
+                bleConnectionStatus = BleConnectionStatus.CONNECTED,
+                activeTransportPeerId = "peer-active",
+                peerSessionDiagnostics = sessionDiagnostics,
+                transportSender = RecordingTransportSender(BleTransportSendResult.QueuedLocally),
+                localPeerId = "peer-local"
+            )
+        )
+    }
+
+    @Test
+    fun manualHybridBootstrapAcceptRequestCallbackDoesNotInvokeActionUntilExplicitlyCalled() {
+        var invokeCount = 0
+        val callback = createHybridBootstrapManualAcceptRequestCallback {
+            invokeCount += 1
+            HybridBootstrapManualAcceptSendResult.NoOfferCandidate
+        }
+
+        assertEquals(0, invokeCount)
+        assertEquals(
+            HybridBootstrapManualAcceptSendResult.NoOfferCandidate,
+            runSuspending { callback() }
+        )
+        assertEquals(1, invokeCount)
+    }
+
+    @Test
+    fun manualHybridBootstrapAcceptCandidateSelectionIsDeterministicAndReusesOfferSessionId() {
+        val olderAcceptedCandidate = hybridBootstrapCandidate(
+            peerId = "peer-canonical",
+            sessionId = "offer-session-older",
+            hasOffer = true,
+            hasAccept = true,
+            latestCreatedAtMillis = 5L
+        )
+        val newestUnacceptedCandidate = hybridBootstrapCandidate(
+            peerId = "peer-canonical",
+            sessionId = "offer-session-newest",
+            hasOffer = true,
+            hasAccept = false,
+            latestCreatedAtMillis = 25L
+        )
+        val decision = hybridBootstrapDecision(
+            newestUnacceptedCandidate,
+            olderAcceptedCandidate
+        )
+        val sessionDiagnostics = PeerSessionRegistryDiagnostics(
+            establishedPeerIds = listOf("peer-canonical"),
+            canonicalPeerIdByAlias = mapOf("peer-active" to "peer-canonical")
+        )
+
+        val target = requireNotNull(
+            selectHybridBootstrapManualAcceptTargetOrNull(
+                decision = decision,
+                activeTransportPeerId = "peer-active",
+                peerSessionDiagnostics = sessionDiagnostics
+            )
+        )
+
+        assertEquals("peer-canonical", target.peerId)
+        assertEquals("offer-session-newest", target.sessionId)
+    }
+
+    @Test
+    fun manualHybridBootstrapAcceptWithoutOfferCandidateReturnsNoOfferCandidateAndSendsNoFrame() {
+        val sender = RecordingTransportSender(BleTransportSendResult.QueuedLocally)
+
+        val result = runSuspending {
+            submitHybridBootstrapManualAccept(
+                decision = hybridBootstrapDecision(),
+                bleConnectionStatus = BleConnectionStatus.CONNECTED,
+                activeTransportPeerId = "peer-active",
+                peerSessionDiagnostics = PeerSessionRegistryDiagnostics(
+                    establishedPeerIds = listOf("peer-canonical"),
+                    canonicalPeerIdByAlias = mapOf("peer-active" to "peer-canonical")
+                ),
+                transportSender = sender,
+                localPeerId = "peer-local",
+                createdAtMillis = 1_716_510_001L
+            )
+        }
+
+        assertEquals(HybridBootstrapManualAcceptSendResult.NoOfferCandidate, result)
+        assertEquals(0, sender.sendCallCount)
+        assertNull(sender.capturedPlan)
+    }
+
+    @Test
+    fun manualHybridBootstrapAcceptSendBuildsOneAcceptAndPassiveReceiverRecordsAcceptOnlyCandidate() {
+        val sender = RecordingTransportSender(BleTransportSendResult.QueuedLocally)
+        val decision = hybridBootstrapDecision(
+            hybridBootstrapCandidate(
+                peerId = "peer-canonical",
+                sessionId = "offer-session-accept",
+                hasOffer = true,
+                hasAccept = false,
+                latestCreatedAtMillis = 42L
+            )
+        )
+        val sessionDiagnostics = PeerSessionRegistryDiagnostics(
+            establishedPeerIds = listOf("peer-canonical"),
+            canonicalPeerIdByAlias = mapOf("peer-active" to "peer-canonical")
+        )
+
+        val sendResult = runSuspending {
+            submitHybridBootstrapManualAccept(
+                decision = decision,
+                bleConnectionStatus = BleConnectionStatus.CONNECTED,
+                activeTransportPeerId = "peer-active",
+                peerSessionDiagnostics = sessionDiagnostics,
+                transportSender = sender,
+                localPeerId = "peer-responder",
+                createdAtMillis = 1_716_510_010L
+            )
+        }
+
+        assertEquals(
+            HybridBootstrapManualAcceptSendResult.Sent(
+                peerId = "peer-canonical",
+                sessionId = "offer-session-accept"
+            ),
+            sendResult
+        )
+        assertEquals(1, sender.sendCallCount)
+        assertEquals(listOf("peer-canonical"), sender.sentTargetPeerIds)
+
+        val sentPlan = requireNotNull(sender.capturedPlan)
+        val sentFrame = decodePlaintextFrame(sentPlan)
+        val controlMessage = requireNotNull(
+            HybridTransportControlFrameFactory.parseOrNull(sentFrame)
+        )
+
+        assertEquals("hybrid-accept-peer-responder-1716510010", sentFrame.id)
+        assertEquals(MessageFrameType.HYBRID_TRANSPORT_CONTROL, sentFrame.type)
+        assertEquals("peer-responder", sentFrame.senderId)
+        assertEquals("peer-canonical", sentFrame.recipientId)
+        assertEquals(
+            HybridTransportControlMessage.MessageType.WIFI_DIRECT_ACCEPT,
+            controlMessage.messageType
+        )
+        assertEquals("offer-session-accept", controlMessage.sessionId)
+        assertEquals("peer-responder", controlMessage.publicPeerIdHint)
+        assertNull(controlMessage.groupOwnerAddress)
+        assertNull(controlMessage.socketPort)
+        assertFalse(
+            controlMessage.capabilityFlags.contains(
+                HybridTransportControlMessage.CapabilityFlag.WIFI_DIRECT_SOCKET_HINT
+            )
+        )
+
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val initialGlobalMessages = holder.uiState.globalMessages
+        val initialPrivateMessages = holder.uiState.privateMessagesByPeerId
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val receiveResult = receiveFrames(
+            receiver = createAuroraBleTransportFrameReceiver(
+                stateHolder = holder,
+                hybridControlStore = store
+            ),
+            frames = sentPlan.framesInSendOrder()
+        )
+
+        assertTrue(receiveResult is BleTransportReceiveResult.Processed)
+        val processed = receiveResult as BleTransportReceiveResult.Processed
+        assertTrue(
+            processed.processingResult is IncomingTransportFrameProcessingResult.HybridControlHandled
+        )
+        val handled =
+            processed.processingResult as IncomingTransportFrameProcessingResult.HybridControlHandled
+        assertEquals("peer-responder", handled.peerId)
+        assertEquals(HybridTransportControlStore.RecordResult.Stored, handled.storeResult)
+
+        val storedSession = requireNotNull(
+            store.snapshot().sessionStateFor(
+                peerId = "peer-responder",
+                sessionId = "offer-session-accept"
+            )
+        )
+        assertEquals(controlMessage, storedSession.latestAccept)
+        assertNull(storedSession.latestOffer)
+        assertNull(storedSession.latestSocketHint)
+
+        val decisionAfterReceive = provider.currentDecision()
+        assertEquals(1, decisionAfterReceive.candidates.size)
+        val candidate = decisionAfterReceive.candidates.single()
+        assertEquals("peer-responder", candidate.peerId)
+        assertEquals("offer-session-accept", candidate.sessionId)
+        assertFalse(candidate.hasOffer)
+        assertTrue(candidate.hasAccept)
+        assertFalse(candidate.hasSocketHint)
+        assertFalse(candidate.socketReady)
+        assertEquals(
+            HybridBootstrapCandidateSelection.NoSocketReadyCandidates,
+            decisionAfterReceive.selection
+        )
+
+        val diagnostics = requireNotNull(
+            hybridBootstrapDiagnosticsAfterReceiveOrNull(
+                result = receiveResult,
+                provider = provider
+            )
+        )
+        assertEquals(
+            "Hybrid bootstrap: candidates available, none socket-ready",
+            hybridBootstrapDiagnosticsRuntimeStatusText(diagnostics)
+        )
+        val commandBuildResult = currentHybridBootstrapAttemptCommandBuildResult(
+            provider = provider,
+            requestedAtMillis = 1_716_510_011L,
+            commandCreatedAtMillis = 1_716_510_012L
         )
         assertEquals(
             HybridBootstrapAttemptCommandBuildResult.NoSocketReadyCandidate,
@@ -5933,6 +6377,55 @@ class AuroraBleRuntimeHostTest {
                 HybridTransportControlMessage.CapabilityFlag.WIFI_DIRECT_BOOTSTRAP,
                 HybridTransportControlMessage.CapabilityFlag.BLE_FALLBACK
             )
+        )
+    }
+
+    private fun hybridBootstrapDecision(
+        vararg candidates: HybridBootstrapCandidate
+    ): HybridBootstrapDecision {
+        val orderedCandidates = candidates.toList()
+        val selection = when {
+            orderedCandidates.isEmpty() ->
+                HybridBootstrapCandidateSelection.NoCandidates
+
+            orderedCandidates.any(HybridBootstrapCandidate::socketReady) ->
+                HybridBootstrapCandidateSelection.Selected(
+                    orderedCandidates.first(HybridBootstrapCandidate::socketReady)
+                )
+
+            else ->
+                HybridBootstrapCandidateSelection.NoSocketReadyCandidates
+        }
+        return HybridBootstrapDecision.create(
+            candidates = orderedCandidates,
+            selection = selection
+        )
+    }
+
+    private fun hybridBootstrapCandidate(
+        peerId: String,
+        sessionId: String,
+        latestCreatedAtMillis: Long = 0L,
+        hasOffer: Boolean = false,
+        hasAccept: Boolean = false,
+        hasSocketHint: Boolean = false,
+        socketReady: Boolean = false,
+        publicPeerIdHint: String? = peerId,
+        groupOwnerAddress: String? = null,
+        socketPort: Int? = null
+    ): HybridBootstrapCandidate {
+        return HybridBootstrapCandidate(
+            peerId = peerId,
+            sessionId = sessionId,
+            bootstrapIdentifier = sessionId,
+            publicPeerIdHint = publicPeerIdHint,
+            groupOwnerAddress = groupOwnerAddress,
+            socketPort = socketPort,
+            latestCreatedAtMillis = latestCreatedAtMillis,
+            hasOffer = hasOffer,
+            hasAccept = hasAccept,
+            hasSocketHint = hasSocketHint,
+            socketReady = socketReady
         )
     }
 
