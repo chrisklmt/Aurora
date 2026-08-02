@@ -23,6 +23,9 @@ data class RememberedWifiDirectRuntimeStatusState(
     val refreshConnectionInfo: () -> Unit,
     val startDiscovery: () -> Unit,
     val stopDiscovery: () -> Unit,
+    val registerAutomatedDiagnosticsService: (String, String?) -> Unit,
+    val startAutomatedDiagnosticsServiceDiscovery: () -> Unit,
+    val clearAutomatedDiagnosticsServiceDiscovery: () -> Unit,
     val connectToPeer: (WifiDirectPeer, WifiDirectRolePreference) -> Unit,
     val disconnect: () -> Unit
 )
@@ -55,6 +58,24 @@ fun rememberWifiDirectRuntimeStatusState(
             resolvedController.stopDiscovery()
         }
     }
+    val registerAutomatedDiagnosticsService = remember(resolvedController) {
+        { correlationToken: String, deviceNameHint: String? ->
+            resolvedController.registerAutomatedDiagnosticsService(
+                correlationToken = correlationToken,
+                deviceNameHint = deviceNameHint
+            )
+        }
+    }
+    val startAutomatedDiagnosticsServiceDiscovery = remember(resolvedController) {
+        {
+            resolvedController.startAutomatedDiagnosticsServiceDiscovery()
+        }
+    }
+    val clearAutomatedDiagnosticsServiceDiscovery = remember(resolvedController) {
+        {
+            resolvedController.clearAutomatedDiagnosticsServiceDiscovery()
+        }
+    }
     val refreshConnectionInfo = remember(resolvedController) {
         {
             resolvedController.refreshConnectionInfo()
@@ -84,6 +105,7 @@ fun rememberWifiDirectRuntimeStatusState(
         resolvedController.addListener(listener)
         onDispose {
             resolvedController.removeListener(listener)
+            resolvedController.clearAutomatedDiagnosticsServiceDiscovery()
         }
     }
 
@@ -131,6 +153,9 @@ fun rememberWifiDirectRuntimeStatusState(
         refreshConnectionInfo = refreshConnectionInfo,
         startDiscovery = startDiscovery,
         stopDiscovery = stopDiscovery,
+        registerAutomatedDiagnosticsService = registerAutomatedDiagnosticsService,
+        startAutomatedDiagnosticsServiceDiscovery = startAutomatedDiagnosticsServiceDiscovery,
+        clearAutomatedDiagnosticsServiceDiscovery = clearAutomatedDiagnosticsServiceDiscovery,
         connectToPeer = connectToPeer,
         disconnect = disconnect
     )

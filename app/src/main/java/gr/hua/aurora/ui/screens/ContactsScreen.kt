@@ -22,6 +22,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsRunState
+import gr.hua.aurora.diagnostics.automated.automatedDiagnosticsCompactSummaryText
 import gr.hua.aurora.model.AuroraContact
 import gr.hua.aurora.model.PrivateChatIdentity
 import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
@@ -29,6 +31,7 @@ import gr.hua.aurora.protocol.hasSessionForPeer
 import gr.hua.aurora.state.AuroraAvailabilityPreference
 import gr.hua.aurora.ui.components.AuroraAvailabilityIndicator
 import gr.hua.aurora.ui.components.AuroraTopBarAction
+import gr.hua.aurora.ui.components.CompactDiagnosticsCard
 import gr.hua.aurora.ui.components.DebugInfoCard
 import gr.hua.aurora.ui.components.DebugInfoCardModel
 import gr.hua.aurora.ui.components.DebugInfoItem
@@ -50,9 +53,11 @@ fun ContactsScreen(
     nearbyVisiblePeerIds: Set<String>,
     currentUsername: String,
     desiredAvailability: AuroraAvailabilityPreference,
+    automatedDiagnosticsState: AutomatedDiagnosticsRunState,
     showDebugDiagnostics: Boolean,
     peerSessionDiagnostics: PeerSessionRegistryDiagnostics,
     lastIdentityExchangeStatus: String?,
+    onOpenAutomatedDiagnostics: () -> Unit,
     onOpenChat: (String) -> Unit,
     onRenameChat: (String, String?) -> Unit,
     onDeleteChat: (String) -> Unit,
@@ -72,6 +77,7 @@ fun ContactsScreen(
     var renamePeerId by remember { mutableStateOf<String?>(null) }
     var deletePeerId by remember { mutableStateOf<String?>(null) }
     var renameDraft by remember { mutableStateOf("") }
+    var showAdvancedRawDiagnostics by remember { mutableStateOf(false) }
 
     PlaceholderScreenScaffold(
         title = "Contacts",
@@ -89,12 +95,6 @@ fun ContactsScreen(
             contentPadding = PaddingValues(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            debugCard?.let { card ->
-                item {
-                    DebugInfoCard(card = card)
-                }
-            }
-
             if (contacts.isEmpty()) {
                 item {
                     Column(
@@ -166,6 +166,32 @@ fun ContactsScreen(
                                 }
                             }
                         }
+                    }
+                }
+            }
+
+            if (showDebugDiagnostics) {
+                item {
+                    CompactDiagnosticsCard(
+                        summaryText = automatedDiagnosticsCompactSummaryText(
+                            automatedDiagnosticsState
+                        ),
+                        onOpenAutomatedDiagnostics = onOpenAutomatedDiagnostics,
+                        rawDiagnosticsExpanded = showAdvancedRawDiagnostics,
+                        onToggleRawDiagnostics = if (debugCard != null) {
+                            { showAdvancedRawDiagnostics = !showAdvancedRawDiagnostics }
+                        } else {
+                            null
+                        },
+                        supportingText = "Contacts remain first; detailed diagnostics stay collapsed."
+                    )
+                }
+            }
+
+            if (showDebugDiagnostics && showAdvancedRawDiagnostics) {
+                debugCard?.let { card ->
+                    item {
+                        DebugInfoCard(card = card)
                     }
                 }
             }

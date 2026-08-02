@@ -39,6 +39,8 @@ internal fun buildWifiDirectRuntimeStatus(
     permissionStatus: WifiDirectPermissionStatus,
     discoveryState: WifiDirectDiscoveryState,
     connectionStatus: WifiDirectConnectionStatus,
+    localDeviceInfo: WifiDirectLocalDeviceInfo,
+    dnsSdDiagnostics: WifiDirectDnsSdDiagnostics = WifiDirectDnsSdDiagnostics(),
     peers: List<WifiDirectPeer>,
     lastError: String?,
     lastUpdatedAtMillis: Long?
@@ -48,6 +50,8 @@ internal fun buildWifiDirectRuntimeStatus(
         discoveryState = discoveryState,
         transportState = WifiDirectTransportState.NOT_WIRED,
         connectionStatus = connectionStatus,
+        localDeviceInfo = localDeviceInfo,
+        dnsSdDiagnostics = dnsSdDiagnostics,
         peers = peers,
         lastError = lastError,
         lastUpdatedAtMillis = lastUpdatedAtMillis

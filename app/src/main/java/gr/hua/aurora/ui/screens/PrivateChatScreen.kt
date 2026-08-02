@@ -15,6 +15,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsRunState
+import gr.hua.aurora.diagnostics.automated.automatedDiagnosticsCompactSummaryText
 import gr.hua.aurora.model.AuroraContact
 import gr.hua.aurora.model.ChatMessage
 import gr.hua.aurora.model.PrivateChatIdentity
@@ -27,6 +29,7 @@ import gr.hua.aurora.ui.debug.wifidirect.privateChatDebugDetailsToggleLabel
 import gr.hua.aurora.ui.debug.wifidirect.privateChatWifiDirectDebugDiagnostics
 import gr.hua.aurora.ui.components.AuroraTopBarAction
 import gr.hua.aurora.ui.components.ChatScaffold
+import gr.hua.aurora.ui.components.CompactDiagnosticsCard
 import gr.hua.aurora.ui.components.DebugInfoCard
 import gr.hua.aurora.ui.components.DebugInfoCardModel
 import gr.hua.aurora.ui.components.DebugInfoItem
@@ -58,6 +61,7 @@ internal fun PrivateChatScreen(
     hasRuntimeSession: Boolean,
     isNearbyVisible: Boolean,
     currentUsername: String,
+    automatedDiagnosticsState: AutomatedDiagnosticsRunState,
     messages: List<ChatMessage>,
     lastDeliveryResult: PrivateChatMessageSendResult?,
     showDebugDiagnostics: Boolean,
@@ -71,6 +75,7 @@ internal fun PrivateChatScreen(
     wifiDirectPrivateDebugSendDiagnostics: WifiDirectPrivateDebugSendDiagnostics,
     wifiDirectReceiveBridgeDiagnostics: WifiDirectReceiveBridgeDiagnostics,
     onSetPrivateWifiDirectDebugSendEnabled: (Boolean) -> Unit,
+    onOpenAutomatedDiagnostics: () -> Unit,
     onBack: () -> Unit,
     onSendMessage: (String) -> Unit,
     onRetryMessage: (String) -> Unit,
@@ -148,23 +153,36 @@ internal fun PrivateChatScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    PrivateChatWifiDirectDebugControls(
-                        showDebugDiagnostics = showDebugDiagnostics,
-                        privateDebugSendEnabled = wifiDirectPrivateDebugSendDiagnostics.enabled,
-                        onSetEnabled = onSetPrivateWifiDirectDebugSendEnabled
-                    )
-                    debugCard?.let { card ->
-                        DebugInfoCard(card = card)
-                    }
-                    debugDetailsCard?.let { detailsCard ->
-                        TextButton(
-                            onClick = {
+                    if (showDebugDiagnostics) {
+                        CompactDiagnosticsCard(
+                            summaryText = automatedDiagnosticsCompactSummaryText(
+                                automatedDiagnosticsState
+                            ),
+                            onOpenAutomatedDiagnostics = onOpenAutomatedDiagnostics,
+                            rawDiagnosticsExpanded = showPrivateDebugDetails,
+                            onToggleRawDiagnostics = {
                                 showPrivateDebugDetails = !showPrivateDebugDetails
-                            }
-                        ) {
-                            Text(privateChatDebugDetailsToggleLabel(showPrivateDebugDetails))
+                            },
+                            supportingText = "Private Chat keeps detailed diagnostics collapsed so messages and input stay visible."
+                        )
+                    }
+                    if (showDebugDiagnostics && showPrivateDebugDetails) {
+                        PrivateChatWifiDirectDebugControls(
+                            showDebugDiagnostics = true,
+                            privateDebugSendEnabled = wifiDirectPrivateDebugSendDiagnostics.enabled,
+                            onSetEnabled = onSetPrivateWifiDirectDebugSendEnabled
+                        )
+                        debugCard?.let { card ->
+                            DebugInfoCard(card = card)
                         }
-                        if (showPrivateDebugDetails) {
+                        debugDetailsCard?.let { detailsCard ->
+                            TextButton(
+                                onClick = {
+                                    showPrivateDebugDetails = false
+                                }
+                            ) {
+                                Text(privateChatDebugDetailsToggleLabel(true))
+                            }
                             DebugInfoCard(card = detailsCard)
                         }
                     }
@@ -198,23 +216,28 @@ internal fun PrivateChatScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                PrivateChatWifiDirectDebugControls(
-                    showDebugDiagnostics = showDebugDiagnostics,
-                    privateDebugSendEnabled = wifiDirectPrivateDebugSendDiagnostics.enabled,
-                    onSetEnabled = onSetPrivateWifiDirectDebugSendEnabled
-                )
-                debugCard?.let { card ->
-                    DebugInfoCard(card = card)
-                }
-                debugDetailsCard?.let { detailsCard ->
-                    TextButton(
-                        onClick = {
+                if (showDebugDiagnostics) {
+                    CompactDiagnosticsCard(
+                        summaryText = automatedDiagnosticsCompactSummaryText(
+                            automatedDiagnosticsState
+                        ),
+                        onOpenAutomatedDiagnostics = onOpenAutomatedDiagnostics,
+                        rawDiagnosticsExpanded = showPrivateDebugDetails,
+                        onToggleRawDiagnostics = {
                             showPrivateDebugDetails = !showPrivateDebugDetails
                         }
-                    ) {
-                        Text(privateChatDebugDetailsToggleLabel(showPrivateDebugDetails))
+                    )
+                }
+                if (showDebugDiagnostics && showPrivateDebugDetails) {
+                    PrivateChatWifiDirectDebugControls(
+                        showDebugDiagnostics = true,
+                        privateDebugSendEnabled = wifiDirectPrivateDebugSendDiagnostics.enabled,
+                        onSetEnabled = onSetPrivateWifiDirectDebugSendEnabled
+                    )
+                    debugCard?.let { card ->
+                        DebugInfoCard(card = card)
                     }
-                    if (showPrivateDebugDetails) {
+                    debugDetailsCard?.let { detailsCard ->
                         DebugInfoCard(card = detailsCard)
                     }
                 }

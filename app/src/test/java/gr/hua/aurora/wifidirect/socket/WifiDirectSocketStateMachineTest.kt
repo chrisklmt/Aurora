@@ -112,8 +112,9 @@ class WifiDirectSocketStateMachineTest {
         val stateMachine = WifiDirectSocketStateMachine(initialPort = 8988)
         val token = stateMachine.nextOperationToken()
 
-        stateMachine.markDisposed()
+        val disposedDiagnostics = stateMachine.markDisposed()
 
+        assertEquals(WifiDirectSocketState.IDLE, disposedDiagnostics.state)
         assertFalse(stateMachine.isCurrentToken(token))
         assertNull(
             stateMachine.markIdle(token)

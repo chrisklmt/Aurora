@@ -40,9 +40,15 @@ class AndroidWifiDirectController internal constructor(
     private var latestWifiP2pEnabled: Boolean? = null
     private var discoveryState = WifiDirectDiscoveryState.INACTIVE
     private var connectionStatus = WifiDirectConnectionStatus()
+    private var localDeviceInfo = WifiDirectLocalDeviceInfo()
+    private var dnsSdDiagnostics = WifiDirectDnsSdDiagnostics()
     private var peers = emptyList<WifiDirectPeer>()
     private var lastError: String? = null
     private var lastUpdatedAtMillis: Long? = null
+    private val dnsSdResponsesByKey = linkedMapOf<String, WifiDirectDnsSdServiceResponse>()
+    private var dnsSdCleanupGeneration: Long = 0L
+    private var dnsSdLocalServiceCleanupPending: Boolean = false
+    private var dnsSdServiceRequestCleanupPending: Boolean = false
 
     override fun currentRuntimeStatus(): WifiDirectRuntimeStatus {
         return buildRuntimeStatus()
@@ -63,6 +69,7 @@ class AndroidWifiDirectController internal constructor(
             emitCurrentRuntimeStatus()
             return
         }
+        requestLocalDeviceInfo(client)
         requestConnectionSnapshot(client)
     }
 
@@ -91,6 +98,7 @@ class AndroidWifiDirectController internal constructor(
                 clearLastError()
                 touch()
                 emitCurrentRuntimeStatus()
+                requestLocalDeviceInfo(client)
                 requestPeers(client)
             },
             onFailure = { reason ->
@@ -305,6 +313,199 @@ class AndroidWifiDirectController internal constructor(
         }
     }
 
+    override fun registerAutomatedDiagnosticsService(
+        correlationToken: String,
+        deviceNameHint: String?
+    ) {
+        invalidateDnsSdCleanupTracking()
+        val permissionStatus = readPermissionStatusSafely()
+        val blockReason = wifiDirectDiscoveryBlockedReason(permissionStatus)
+        if (blockReason != null) {
+            dnsSdDiagnostics = dnsSdDiagnostics.copy(
+                localServiceRegistered = false,
+                localServiceInstanceName = null,
+                serviceType = automatedDiagnosticsWifiDirectDnsSdServiceType,
+                lastError = blockReason,
+                cleanupCompleted = false
+            )
+            emit(permissionStatus)
+            return
+        }
+        val client = platformClient ?: run {
+            dnsSdDiagnostics = dnsSdDiagnostics.copy(
+                localServiceRegistered = false,
+                localServiceInstanceName = null,
+                serviceType = automatedDiagnosticsWifiDirectDnsSdServiceType,
+                lastError = "Wi-Fi Direct unsupported on this device.",
+                cleanupCompleted = false
+            )
+            emit(permissionStatus)
+            return
+        }
+        configureAutomatedDiagnosticsDnsSdListeners(client)
+        client.clearLocalDnsSdServices(
+            onSuccess = {
+                dnsSdDiagnostics = dnsSdDiagnostics.copy(
+                    localServiceRegistered = false,
+                    localServiceInstanceName = null,
+                    serviceType = automatedDiagnosticsWifiDirectDnsSdServiceType,
+                    lastError = null,
+                    cleanupCompleted = false
+                )
+                client.addLocalDnsSdService(
+                    serviceType = automatedDiagnosticsWifiDirectDnsSdServiceType,
+                    txtRecord = automatedDiagnosticsWifiDirectDnsSdTxtRecord(correlationToken),
+                    onSuccess = {
+                        dnsSdDiagnostics = dnsSdDiagnostics.copy(
+                            localServiceRegistered = true,
+                            localServiceInstanceName =
+                            automatedDiagnosticsWifiDirectDnsSdInstanceName,
+                            serviceType = automatedDiagnosticsWifiDirectDnsSdServiceType,
+                            lastError = null,
+                            cleanupCompleted = false
+                        )
+                        clearLastError()
+                        touch()
+                        emitCurrentRuntimeStatus()
+                    },
+                    onFailure = { reason ->
+                        dnsSdDiagnostics = dnsSdDiagnostics.copy(
+                            localServiceRegistered = false,
+                            localServiceInstanceName = null,
+                            serviceType = automatedDiagnosticsWifiDirectDnsSdServiceType,
+                            lastError =
+                            "Wi-Fi Direct diagnostics service registration failed: " +
+                                wifiDirectFailureLabel(reason),
+                            cleanupCompleted = false
+                        )
+                        touch()
+                        emitCurrentRuntimeStatus()
+                    }
+                )
+            },
+            onFailure = { reason ->
+                dnsSdDiagnostics = dnsSdDiagnostics.copy(
+                    localServiceRegistered = false,
+                    localServiceInstanceName = null,
+                    serviceType = automatedDiagnosticsWifiDirectDnsSdServiceType,
+                    lastError =
+                    "Wi-Fi Direct diagnostics service cleanup failed: " +
+                        wifiDirectFailureLabel(reason),
+                    cleanupCompleted = false
+                )
+                touch()
+                emitCurrentRuntimeStatus()
+            }
+        )
+    }
+
+    override fun startAutomatedDiagnosticsServiceDiscovery() {
+        invalidateDnsSdCleanupTracking()
+        val permissionStatus = readPermissionStatusSafely()
+        val blockReason = wifiDirectDiscoveryBlockedReason(permissionStatus)
+        if (blockReason != null) {
+            dnsSdDiagnostics = dnsSdDiagnostics.copy(
+                serviceRequestRegistered = false,
+                discoveryStarted = false,
+                serviceType = automatedDiagnosticsWifiDirectDnsSdServiceType,
+                lastError = blockReason,
+                cleanupCompleted = false
+            )
+            emit(permissionStatus)
+            return
+        }
+        val client = platformClient ?: run {
+            dnsSdDiagnostics = dnsSdDiagnostics.copy(
+                serviceRequestRegistered = false,
+                discoveryStarted = false,
+                serviceType = automatedDiagnosticsWifiDirectDnsSdServiceType,
+                lastError = "Wi-Fi Direct unsupported on this device.",
+                cleanupCompleted = false
+            )
+            emit(permissionStatus)
+            return
+        }
+        configureAutomatedDiagnosticsDnsSdListeners(client)
+        client.clearDnsSdServiceRequests(
+            onSuccess = {
+                dnsSdDiagnostics = dnsSdDiagnostics.copy(
+                    serviceRequestRegistered = false,
+                    discoveryStarted = false,
+                    serviceType = automatedDiagnosticsWifiDirectDnsSdServiceType,
+                    lastError = null,
+                    cleanupCompleted = false
+                )
+                client.addDnsSdServiceRequest(
+                    onSuccess = {
+                        dnsSdDiagnostics = dnsSdDiagnostics.copy(
+                            serviceRequestRegistered = true,
+                            serviceType = automatedDiagnosticsWifiDirectDnsSdServiceType,
+                            lastError = null,
+                            cleanupCompleted = false
+                        )
+                        client.discoverDnsSdServices(
+                            onSuccess = {
+                                dnsSdDiagnostics = dnsSdDiagnostics.copy(
+                                    discoveryStarted = true,
+                                    serviceType =
+                                    automatedDiagnosticsWifiDirectDnsSdServiceType,
+                                    lastError = null,
+                                    cleanupCompleted = false
+                                )
+                                clearLastError()
+                                touch()
+                                emitCurrentRuntimeStatus()
+                            },
+                            onFailure = { reason ->
+                                dnsSdDiagnostics = dnsSdDiagnostics.copy(
+                                    discoveryStarted = false,
+                                    serviceType =
+                                    automatedDiagnosticsWifiDirectDnsSdServiceType,
+                                    lastError =
+                                    "Wi-Fi Direct diagnostics discovery failed: " +
+                                        wifiDirectFailureLabel(reason),
+                                    cleanupCompleted = false
+                                )
+                                touch()
+                                emitCurrentRuntimeStatus()
+                            }
+                        )
+                    },
+                    onFailure = { reason ->
+                        dnsSdDiagnostics = dnsSdDiagnostics.copy(
+                            serviceRequestRegistered = false,
+                            discoveryStarted = false,
+                            serviceType = automatedDiagnosticsWifiDirectDnsSdServiceType,
+                            lastError =
+                            "Wi-Fi Direct diagnostics request failed: " +
+                                wifiDirectFailureLabel(reason),
+                            cleanupCompleted = false
+                        )
+                        touch()
+                        emitCurrentRuntimeStatus()
+                    }
+                )
+            },
+            onFailure = { reason ->
+                dnsSdDiagnostics = dnsSdDiagnostics.copy(
+                    serviceRequestRegistered = false,
+                    discoveryStarted = false,
+                    serviceType = automatedDiagnosticsWifiDirectDnsSdServiceType,
+                    lastError =
+                    "Wi-Fi Direct diagnostics request cleanup failed: " +
+                        wifiDirectFailureLabel(reason),
+                    cleanupCompleted = false
+                )
+                touch()
+                emitCurrentRuntimeStatus()
+            }
+        )
+    }
+
+    override fun clearAutomatedDiagnosticsServiceDiscovery() {
+        clearAutomatedDiagnosticsServiceDiscoveryInternal(platformClient)
+    }
+
     override fun handleBroadcast(event: WifiDirectBroadcastEvent) {
         when (event.action) {
             WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION -> {
@@ -321,22 +522,33 @@ class AndroidWifiDirectController internal constructor(
                     touch()
                 }
                 if (event.isDiscoveryActive == true && platformClient != null) {
+                    requestLocalDeviceInfo(platformClient)
                     requestPeers(platformClient)
                 } else {
                     emitCurrentRuntimeStatus()
                 }
             }
             WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION -> {
-                platformClient?.let(::requestPeers) ?: emitCurrentRuntimeStatus()
+                platformClient?.let { client ->
+                    requestLocalDeviceInfo(client)
+                    requestPeers(client)
+                } ?: emitCurrentRuntimeStatus()
             }
             WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION -> {
                 when (event.isConnectionEstablished) {
-                    true -> platformClient?.let(::requestConnectionSnapshot) ?: emitCurrentRuntimeStatus()
+                    true -> platformClient?.let { client ->
+                        requestLocalDeviceInfo(client)
+                        requestConnectionSnapshot(client)
+                    } ?: emitCurrentRuntimeStatus()
                     false -> {
                         connectionStatus = wifiDirectDisconnectedStatus(connectionStatus)
+                        clearAutomatedDiagnosticsServiceDiscoveryInternal(platformClient)
                         emitCurrentRuntimeStatus()
                     }
-                    null -> platformClient?.let(::requestConnectionSnapshot) ?: emitCurrentRuntimeStatus()
+                    null -> platformClient?.let { client ->
+                        requestLocalDeviceInfo(client)
+                        requestConnectionSnapshot(client)
+                    } ?: emitCurrentRuntimeStatus()
                 }
             }
             else -> {
@@ -394,6 +606,23 @@ class AndroidWifiDirectController internal constructor(
         )
     }
 
+    private fun requestLocalDeviceInfo(client: WifiDirectPlatformClient) {
+        client.requestLocalDeviceInfo(
+            onSuccess = { info ->
+                localDeviceInfo = info
+                touch()
+                emitCurrentRuntimeStatus()
+            },
+            onFailure = { reason ->
+                localDeviceInfo = localDeviceInfo.copy(
+                    lastError = "Wi-Fi Direct local device info unavailable: $reason"
+                )
+                touch()
+                emitCurrentRuntimeStatus()
+            }
+        )
+    }
+
     private fun buildRuntimeStatus(): WifiDirectRuntimeStatus {
         val permissionStatus = readPermissionStatusSafely()
         val blockReason = wifiDirectDiscoveryBlockedReason(permissionStatus)
@@ -418,6 +647,10 @@ class AndroidWifiDirectController internal constructor(
             permissionStatus = permissionStatus,
             discoveryState = discoveryState,
             connectionStatus = connectionStatus,
+            localDeviceInfo = localDeviceInfo,
+            dnsSdDiagnostics = dnsSdDiagnostics.copy(
+                discoveredServices = dnsSdResponsesByKey.values.toList()
+            ),
             peers = peers,
             lastError = lastError,
             lastUpdatedAtMillis = lastUpdatedAtMillis
@@ -436,6 +669,10 @@ class AndroidWifiDirectController internal constructor(
                 permissionStatus = permissionStatus,
                 discoveryState = discoveryState,
                 connectionStatus = connectionStatus,
+                localDeviceInfo = localDeviceInfo,
+                dnsSdDiagnostics = dnsSdDiagnostics.copy(
+                    discoveredServices = dnsSdResponsesByKey.values.toList()
+                ),
                 peers = peers,
                 lastError = lastError,
                 lastUpdatedAtMillis = lastUpdatedAtMillis
@@ -481,6 +718,238 @@ class AndroidWifiDirectController internal constructor(
 
     private fun touch() {
         lastUpdatedAtMillis = nowMillis()
+    }
+
+    private fun configureAutomatedDiagnosticsDnsSdListeners(
+        client: WifiDirectPlatformClient
+    ) {
+        client.setDnsSdResponseListeners(
+            onServiceAvailable = { instanceName, serviceType, peer ->
+                recordAutomatedDiagnosticsDnsSdServiceAvailable(
+                    instanceName = instanceName,
+                    serviceType = serviceType,
+                    peer = peer
+                )
+            },
+            onTxtRecordAvailable = { fullDomain, txtRecord, peer ->
+                recordAutomatedDiagnosticsDnsSdTxtRecord(
+                    fullDomain = fullDomain,
+                    txtRecord = txtRecord,
+                    peer = peer
+                )
+            },
+            onFailure = { reason ->
+                invalidateDnsSdCleanupTracking()
+                dnsSdDiagnostics = dnsSdDiagnostics.copy(
+                    serviceType = automatedDiagnosticsWifiDirectDnsSdServiceType,
+                    lastError = "Wi-Fi Direct DNS-SD listener failed: $reason",
+                    cleanupCompleted = false
+                )
+                touch()
+                emitCurrentRuntimeStatus()
+            }
+        )
+    }
+
+    private fun recordAutomatedDiagnosticsDnsSdServiceAvailable(
+        instanceName: String?,
+        serviceType: String?,
+        peer: WifiDirectPeer
+    ) {
+        updateAutomatedDiagnosticsDnsSdResponse(
+            serviceType = serviceType,
+            instanceName = instanceName,
+            peer = peer,
+            txtRecord = null
+        )
+    }
+
+    private fun recordAutomatedDiagnosticsDnsSdTxtRecord(
+        fullDomain: String?,
+        txtRecord: Map<String, String>,
+        peer: WifiDirectPeer
+    ) {
+        val serviceType = dnsSdServiceTypeFromFullDomain(fullDomain)
+        val instanceName = fullDomain
+            ?.substringBefore('.')
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+        updateAutomatedDiagnosticsDnsSdResponse(
+            serviceType = serviceType,
+            instanceName = instanceName,
+            peer = peer,
+            txtRecord = txtRecord
+        )
+    }
+
+    private fun updateAutomatedDiagnosticsDnsSdResponse(
+        serviceType: String?,
+        instanceName: String?,
+        peer: WifiDirectPeer,
+        txtRecord: Map<String, String>?
+    ) {
+        invalidateDnsSdCleanupTracking()
+        val normalizedServiceType = serviceType?.trim()?.takeIf { it.isNotEmpty() }
+        val normalizedInstanceName = instanceName?.trim()?.takeIf { it.isNotEmpty() }
+        val key = dnsSdResponseKey(
+            serviceType = normalizedServiceType,
+            instanceName = normalizedInstanceName,
+            peer = peer
+        )
+        val previous = dnsSdResponsesByKey[key]
+        dnsSdResponsesByKey[key] = WifiDirectDnsSdServiceResponse(
+            serviceType = normalizedServiceType
+                ?: previous?.serviceType
+                ?: automatedDiagnosticsWifiDirectDnsSdServiceType,
+            instanceName = normalizedInstanceName ?: previous?.instanceName,
+            peer = peer,
+            txtRecord = txtRecord ?: previous?.txtRecord.orEmpty(),
+            observedAtMillis = nowMillis()
+        )
+        dnsSdDiagnostics = dnsSdDiagnostics.copy(
+            serviceType = automatedDiagnosticsWifiDirectDnsSdServiceType,
+            discoveredServices = dnsSdResponsesByKey.values.toList(),
+            lastError = null,
+            cleanupCompleted = false
+        )
+        touch()
+        emitCurrentRuntimeStatus()
+    }
+
+    private fun clearAutomatedDiagnosticsServiceDiscoveryInternal(
+        client: WifiDirectPlatformClient?
+    ) {
+        dnsSdResponsesByKey.clear()
+        val activeClient = client
+        if (activeClient == null) {
+            invalidateDnsSdCleanupTracking()
+            dnsSdDiagnostics = dnsSdDiagnostics.copy(
+                localServiceRegistered = false,
+                localServiceInstanceName = null,
+                serviceRequestRegistered = false,
+                discoveryStarted = false,
+                serviceType = automatedDiagnosticsWifiDirectDnsSdServiceType,
+                discoveredServices = emptyList(),
+                lastError = null,
+                cleanupCompleted = true
+            )
+            touch()
+            emitCurrentRuntimeStatus()
+            return
+        }
+        val cleanupGeneration = beginDnsSdCleanupTracking()
+        dnsSdDiagnostics = dnsSdDiagnostics.copy(
+            localServiceRegistered = false,
+            localServiceInstanceName = null,
+            serviceRequestRegistered = false,
+            discoveryStarted = false,
+            serviceType = automatedDiagnosticsWifiDirectDnsSdServiceType,
+            discoveredServices = emptyList(),
+            lastError = null,
+            cleanupCompleted = false
+        )
+        touch()
+        emitCurrentRuntimeStatus()
+        activeClient.clearLocalDnsSdServices(
+            onSuccess = {
+                resolveDnsSdCleanupOperation(
+                    generation = cleanupGeneration,
+                    localServicesCompleted = true
+                )
+            },
+            onFailure = { reason ->
+                resolveDnsSdCleanupOperation(
+                    generation = cleanupGeneration,
+                    localServicesCompleted = true,
+                    error = "Wi-Fi Direct diagnostics local-service cleanup failed: " +
+                        wifiDirectFailureLabel(reason)
+                )
+            }
+        )
+        activeClient.clearDnsSdServiceRequests(
+            onSuccess = {
+                resolveDnsSdCleanupOperation(
+                    generation = cleanupGeneration,
+                    serviceRequestsCompleted = true
+                )
+            },
+            onFailure = { reason ->
+                resolveDnsSdCleanupOperation(
+                    generation = cleanupGeneration,
+                    serviceRequestsCompleted = true,
+                    error = "Wi-Fi Direct diagnostics request cleanup failed: " +
+                        wifiDirectFailureLabel(reason)
+                )
+            }
+        )
+    }
+
+    private fun invalidateDnsSdCleanupTracking() {
+        dnsSdCleanupGeneration += 1L
+        dnsSdLocalServiceCleanupPending = false
+        dnsSdServiceRequestCleanupPending = false
+    }
+
+    private fun beginDnsSdCleanupTracking(): Long {
+        dnsSdCleanupGeneration += 1L
+        dnsSdLocalServiceCleanupPending = true
+        dnsSdServiceRequestCleanupPending = true
+        return dnsSdCleanupGeneration
+    }
+
+    private fun resolveDnsSdCleanupOperation(
+        generation: Long,
+        localServicesCompleted: Boolean = false,
+        serviceRequestsCompleted: Boolean = false,
+        error: String? = null
+    ) {
+        if (generation != dnsSdCleanupGeneration) {
+            return
+        }
+        if (localServicesCompleted) {
+            dnsSdLocalServiceCleanupPending = false
+        }
+        if (serviceRequestsCompleted) {
+            dnsSdServiceRequestCleanupPending = false
+        }
+        val preservedError = error ?: dnsSdDiagnostics.lastError
+        dnsSdDiagnostics = dnsSdDiagnostics.copy(
+            lastError = preservedError,
+            cleanupCompleted = !dnsSdLocalServiceCleanupPending &&
+                !dnsSdServiceRequestCleanupPending &&
+                preservedError == null
+        )
+        touch()
+        emitCurrentRuntimeStatus()
+    }
+
+    private fun dnsSdServiceTypeFromFullDomain(
+        fullDomain: String?
+    ): String? {
+        val parts = fullDomain
+            ?.trim()
+            ?.trimEnd('.')
+            ?.split('.')
+            ?.filter { it.isNotBlank() }
+            ?: return null
+        if (parts.size < 3) {
+            return null
+        }
+        return "${parts[1]}.${parts[2]}"
+    }
+
+    private fun dnsSdResponseKey(
+        serviceType: String?,
+        instanceName: String?,
+        peer: WifiDirectPeer
+    ): String {
+        return listOf(
+            serviceType?.trim().orEmpty(),
+            instanceName?.trim().orEmpty(),
+            normalizeWifiDirectDeviceAddress(peer.deviceAddress)
+                ?: peer.deviceAddress?.trim().orEmpty(),
+            peer.deviceName?.trim().orEmpty()
+        ).joinToString(separator = "|")
     }
 }
 

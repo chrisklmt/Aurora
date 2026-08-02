@@ -35,10 +35,29 @@ class InMemoryHybridTransportControlStore : HybridTransportControlStore {
                 HybridTransportControlMessage.MessageType.WIFI_DIRECT_SOCKET_HINT -> {
                     currentSessionState.withNewerSocketHintOrNull(storedMessage)
                 }
+
+                HybridTransportControlMessage.MessageType.AUTOMATED_DIAGNOSTICS_RUN_ANNOUNCE,
+                HybridTransportControlMessage.MessageType.AUTOMATED_DIAGNOSTICS_PARTICIPANT_JOIN,
+                HybridTransportControlMessage.MessageType.AUTOMATED_DIAGNOSTICS_PHASE_READY,
+                HybridTransportControlMessage.MessageType.AUTOMATED_DIAGNOSTICS_SERVER_READY -> {
+                    null
+                }
+
+                HybridTransportControlMessage.MessageType.AUTOMATED_DIAGNOSTICS_RUN_CANCEL,
+                HybridTransportControlMessage.MessageType.AUTOMATED_DIAGNOSTICS_RUN_COMPLETE -> {
+                    null
+                }
             }
 
             if (updatedSessionState == null) {
-                HybridTransportControlStore.RecordResult.IgnoredOlderMessage
+                if (
+                    storedMessage.messageType ==
+                    HybridTransportControlMessage.MessageType.AUTOMATED_DIAGNOSTICS_SERVER_READY
+                ) {
+                    HybridTransportControlStore.RecordResult.IgnoredNonBootstrapMessageType
+                } else {
+                    HybridTransportControlStore.RecordResult.IgnoredOlderMessage
+                }
             } else {
                 sessionsForPeer[storedMessage.sessionId] = updatedSessionState
                 HybridTransportControlStore.RecordResult.Stored

@@ -9,7 +9,9 @@ object HybridTransportControlCodec {
     private const val formatMagic = "AURORA_HYBRID_CONTROL"
     private const val separator = "|"
     private const val nullToken = "~"
-    private const val expectedPartCount = 9
+    private const val legacyPartCount = 13
+    private const val legacyExtendedPartCount = 17
+    private const val extendedPartCount = 18
     private val encoder = Base64.getUrlEncoder().withoutPadding()
     private val decoder = Base64.getUrlDecoder()
 
@@ -20,24 +22,48 @@ object HybridTransportControlCodec {
             "Unsupported hybrid transport protocol version: ${message.protocolVersion}."
         }
 
-        return listOf(
+        val parts = mutableListOf(
             formatMagic,
             message.protocolVersion.toString(),
             message.messageType.name,
             encodeField(message.sessionId),
             message.publicPeerIdHint?.let(::encodeField) ?: nullToken,
+            message.relatedPeerIdHint?.let(::encodeField) ?: nullToken,
             message.groupOwnerAddress?.let(::encodeField) ?: nullToken,
             message.socketPort?.toString() ?: nullToken,
             message.createdAtMillis.toString(),
+            message.associatedSessionId?.let(::encodeField) ?: nullToken,
+            message.expiresAtMillis?.toString() ?: nullToken,
+            message.generationToken?.toString() ?: nullToken,
             encodeCapabilityFlags(message.capabilityFlags)
-        ).joinToString(separator)
+        )
+        if (
+            message.senderPeerIdHint != null ||
+            message.expectedPeerIdHint != null ||
+            message.wifiDirectCorrelationToken != null ||
+            message.wifiDirectDeviceAddress != null ||
+            message.wifiDirectDeviceName != null
+        ) {
+            parts += listOf(
+                message.senderPeerIdHint?.let(::encodeField) ?: nullToken,
+                message.expectedPeerIdHint?.let(::encodeField) ?: nullToken,
+                message.wifiDirectCorrelationToken?.let(::encodeField) ?: nullToken,
+                message.wifiDirectDeviceAddress?.let(::encodeField) ?: nullToken,
+                message.wifiDirectDeviceName?.let(::encodeField) ?: nullToken
+            )
+        }
+        return parts.joinToString(separator)
     }
 
     fun decode(
         encoded: String
     ): HybridTransportControlMessage {
-        val parts = encoded.split(separator, limit = expectedPartCount)
-        require(parts.size == expectedPartCount) {
+        val parts = encoded.split(separator)
+        require(
+            parts.size == legacyPartCount ||
+                parts.size == legacyExtendedPartCount ||
+                parts.size == extendedPartCount
+        ) {
             "Invalid hybrid transport control part count: ${parts.size}."
         }
         require(parts[0] == formatMagic) {
@@ -61,21 +87,56 @@ object HybridTransportControlCodec {
             )
         }
 
-        val socketPort = decodeNullablePort(parts[6])
-        val createdAtMillis = parts[7].toLongOrNull()
+        val socketPort = decodeNullablePort(parts[7])
+        val createdAtMillis = parts[8].toLongOrNull()
             ?: throw IllegalArgumentException(
-                "Invalid hybrid transport createdAtMillis: ${parts[7]}."
+                "Invalid hybrid transport createdAtMillis: ${parts[8]}."
             )
+        val expiresAtMillis = decodeNullableLong(parts[10], "expiresAtMillis")
+        val generationToken = decodeNullableLong(parts[11], "generationToken")
 
         return HybridTransportControlMessage(
             protocolVersion = protocolVersion,
             messageType = messageType,
             sessionId = decodeField(parts[3], "sessionId"),
             publicPeerIdHint = decodeNullableField(parts[4], "publicPeerIdHint"),
-            groupOwnerAddress = decodeNullableField(parts[5], "groupOwnerAddress"),
+            relatedPeerIdHint = decodeNullableField(parts[5], "relatedPeerIdHint"),
+            senderPeerIdHint = decodeExtendedNullableField(parts, 13, "senderPeerIdHint"),
+            expectedPeerIdHint = decodeExtendedNullableField(parts, 14, "expectedPeerIdHint"),
+            wifiDirectCorrelationToken = if (parts.size >= extendedPartCount) {
+                decodeNullableField(parts[15], "wifiDirectCorrelationToken")
+            } else {
+                null
+            },
+            wifiDirectDeviceAddress = when (parts.size) {
+                extendedPartCount -> decodeNullableField(
+                    parts[16],
+                    "wifiDirectDeviceAddress"
+                )
+                legacyExtendedPartCount -> decodeNullableField(
+                    parts[15],
+                    "wifiDirectDeviceAddress"
+                )
+                else -> null
+            },
+            wifiDirectDeviceName = when (parts.size) {
+                extendedPartCount -> decodeNullableField(
+                    parts[17],
+                    "wifiDirectDeviceName"
+                )
+                legacyExtendedPartCount -> decodeNullableField(
+                    parts[16],
+                    "wifiDirectDeviceName"
+                )
+                else -> null
+            },
+            groupOwnerAddress = decodeNullableField(parts[6], "groupOwnerAddress"),
             socketPort = socketPort,
             createdAtMillis = createdAtMillis,
-            capabilityFlags = decodeCapabilityFlags(parts[8])
+            associatedSessionId = decodeNullableField(parts[9], "associatedSessionId"),
+            expiresAtMillis = expiresAtMillis,
+            generationToken = generationToken,
+            capabilityFlags = decodeCapabilityFlags(parts[12])
         )
     }
 
@@ -99,6 +160,18 @@ object HybridTransportControlCodec {
             null
         } else {
             decodeField(token, fieldName)
+        }
+    }
+
+    private fun decodeExtendedNullableField(
+        parts: List<String>,
+        index: Int,
+        fieldName: String
+    ): String? {
+        return if (parts.size <= index) {
+            null
+        } else {
+            decodeNullableField(parts[index], fieldName)
         }
     }
 
@@ -131,6 +204,20 @@ object HybridTransportControlCodec {
             "Invalid hybrid transport socket port: $token."
         }
         return port
+    }
+
+    private fun decodeNullableLong(
+        token: String,
+        fieldName: String
+    ): Long? {
+        if (token == nullToken) {
+            return null
+        }
+
+        return token.toLongOrNull()
+            ?: throw IllegalArgumentException(
+                "Invalid hybrid transport $fieldName: $token."
+            )
     }
 
     private fun encodeCapabilityFlags(

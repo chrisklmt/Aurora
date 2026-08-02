@@ -1,11 +1,14 @@
 package gr.hua.aurora.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsRunner
 import gr.hua.aurora.model.OutgoingChatMessage
 import gr.hua.aurora.protocol.GlobalMeshDeliveryResult
 import gr.hua.aurora.protocol.hasSessionForPeer
@@ -15,31 +18,31 @@ import gr.hua.aurora.state.AuroraStateHolder
 import gr.hua.aurora.state.PrivateChatTransportSubmission
 import gr.hua.aurora.state.submitGlobalMeshMessage
 import gr.hua.aurora.protocol.PrivateChatMessageSendResult
+import gr.hua.aurora.ui.screens.AutomatedDiagnosticsScreen
 import gr.hua.aurora.ui.screens.nearbyContactPeerId
 import gr.hua.aurora.ui.screens.ContactsScreen
 import gr.hua.aurora.ui.screens.GlobalChatScreen
 import gr.hua.aurora.ui.screens.NearbyDevicesScreen
 import gr.hua.aurora.ui.screens.PrivateChatScreen
 import gr.hua.aurora.ui.screens.SettingsScreen
-import gr.hua.aurora.wifidirect.socket.rememberWifiDirectSocketState
+import gr.hua.aurora.wifidirect.socket.RememberedWifiDirectSocketState
 import kotlinx.coroutines.launch
 
 @Composable
-fun NavGraph(
+internal fun NavGraph(
     navController: NavHostController,
     stateHolder: AuroraStateHolder,
+    automatedDiagnosticsRunner: AutomatedDiagnosticsRunner,
     bleRuntimeState: AuroraBleRuntimeState,
+    wifiDirectSocketState: RememberedWifiDirectSocketState,
     modifier: Modifier = Modifier
 ) {
     val uiState = stateHolder.uiState
     val sendScope = rememberCoroutineScope()
+    val automatedDiagnosticsState by automatedDiagnosticsRunner.state.collectAsState()
     val nearbyVisiblePeerIds = bleRuntimeState.discoveredAuroraPeers
         .mapNotNull(::nearbyContactPeerId)
         .toSet()
-    val wifiDirectSocketState = rememberWifiDirectSocketState(
-        runtimeStatus = bleRuntimeState.wifiDirectRuntimeStatus,
-        processReceiveBridgeFrame = bleRuntimeState.receiveWifiDirectDebugTransportFrame
-    )
     val onResetLocalData: () -> Unit = {
         wifiDirectSocketState.disableGlobalDebugSend()
         wifiDirectSocketState.disablePrivateDebugSend()
@@ -161,10 +164,14 @@ fun NavGraph(
                 privateChatIdentitiesByPeerId = uiState.privateChatIdentitiesByPeerId,
                 currentUsername = uiState.privateProfileUsername,
                 desiredAvailability = uiState.desiredAvailability,
+                automatedDiagnosticsState = automatedDiagnosticsState,
                 nearbyVisiblePeerIds = nearbyVisiblePeerIds,
                 showDebugDiagnostics = uiState.isDebugModeEnabled,
                 peerSessionDiagnostics = bleRuntimeState.peerSessionDiagnostics,
                 lastIdentityExchangeStatus = bleRuntimeState.lastIdentityExchangeStatus,
+                onOpenAutomatedDiagnostics = {
+                    navController.navigate(Routes.AUTOMATED_DIAGNOSTICS)
+                },
                 onOpenChat = { peerId ->
                     stateHolder.selectSecurePeer(peerId)
                     navController.navigate(Routes.privateChat(peerId))
@@ -193,6 +200,7 @@ fun NavGraph(
                 hasRuntimeSession = hasRuntimeSession,
                 isNearbyVisible = nearbyVisiblePeerIds.contains(peerId),
                 currentUsername = uiState.privateProfileUsername,
+                automatedDiagnosticsState = automatedDiagnosticsState,
                 messages = stateHolder.privateMessagesForPeerId(peerId),
                 lastDeliveryResult = stateHolder.latestPrivateChatDeliveryResultForPeerId(peerId),
                 showDebugDiagnostics = uiState.isDebugModeEnabled,
@@ -206,6 +214,9 @@ fun NavGraph(
                 wifiDirectPrivateDebugSendDiagnostics = wifiDirectSocketState.privateDebugSendDiagnostics,
                 wifiDirectReceiveBridgeDiagnostics = wifiDirectSocketState.receiveBridgeDiagnostics,
                 onSetPrivateWifiDirectDebugSendEnabled = wifiDirectSocketState.setPrivateDebugSendEnabled,
+                onOpenAutomatedDiagnostics = {
+                    navController.navigate(Routes.AUTOMATED_DIAGNOSTICS)
+                },
                 onBack = onNavigateBackOrGlobal,
                 onSendMessage = { text ->
                     val queuedMessage = stateHolder.sendPrivateChatMessage(peerId, text)
@@ -271,6 +282,7 @@ fun NavGraph(
                 contacts = uiState.contacts,
                 currentUsername = uiState.privateProfileUsername,
                 desiredAvailability = uiState.desiredAvailability,
+                automatedDiagnosticsState = automatedDiagnosticsState,
                 bleAdvertiseStatus = bleRuntimeState.bleAdvertiseStatus,
                 bleGattServerStatus = bleRuntimeState.bleGattServerStatus,
                 bleScanStatus = bleRuntimeState.bleScanStatus,
@@ -353,7 +365,20 @@ fun NavGraph(
                     stateHolder.selectSecurePeer(peerId)
                     navController.navigate(Routes.privateChat(peerId))
                 },
+                onOpenAutomatedDiagnostics = {
+                    navController.navigate(Routes.AUTOMATED_DIAGNOSTICS)
+                },
                 onResetLocalData = onResetLocalData,
+                onBack = onNavigateBackOrGlobal
+            )
+        }
+
+        composable(Routes.AUTOMATED_DIAGNOSTICS) {
+            AutomatedDiagnosticsScreen(
+                runner = automatedDiagnosticsRunner,
+                currentUsername = uiState.privateProfileUsername,
+                onRefreshWifiDirectStatus = bleRuntimeState.refreshWifiDirectStatus,
+                onRefreshBluetoothStatus = bleRuntimeState.refreshBluetoothStatus,
                 onBack = onNavigateBackOrGlobal
             )
         }

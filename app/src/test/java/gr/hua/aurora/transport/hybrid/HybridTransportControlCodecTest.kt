@@ -70,6 +70,93 @@ class HybridTransportControlCodecTest {
     }
 
     @Test
+    fun encodingAndDecodingPhaseReadyPreservesWifiDirectCorrelationFields() {
+        val message = HybridTransportControlMessage(
+            messageType = HybridTransportControlMessage.MessageType.AUTOMATED_DIAGNOSTICS_PHASE_READY,
+            sessionId = "diag-run-011",
+            publicPeerIdHint = "coordinator-peer-011",
+            relatedPeerIdHint = "participant-peer-011",
+            senderPeerIdHint = "participant-peer-011",
+            expectedPeerIdHint = "coordinator-peer-011",
+            wifiDirectCorrelationToken = "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+            wifiDirectDeviceName = "Aurora White",
+            createdAtMillis = 1_720_000_404L,
+            associatedSessionId = "secure-session-011",
+            expiresAtMillis = 1_720_008_404L,
+            capabilityFlags = setOf(
+                HybridTransportControlMessage.CapabilityFlag.BLE_FALLBACK
+            )
+        )
+
+        val encoded = HybridTransportControlCodec.encode(message)
+        val decoded = HybridTransportControlCodec.decode(encoded)
+
+        assertEquals(18, encoded.split("|").size)
+        assertEquals(message, decoded)
+    }
+
+    @Test
+    fun legacyPhaseReadyAddressPayloadStillDecodesWithoutToken() {
+        val legacyMessage = HybridTransportControlMessage(
+            messageType = HybridTransportControlMessage.MessageType.AUTOMATED_DIAGNOSTICS_PHASE_READY,
+            sessionId = "diag-run-legacy",
+            publicPeerIdHint = "coordinator-peer-legacy",
+            relatedPeerIdHint = "participant-peer-legacy",
+            senderPeerIdHint = "participant-peer-legacy",
+            expectedPeerIdHint = "coordinator-peer-legacy",
+            wifiDirectDeviceAddress = "aa:bb:cc:dd:ee:11",
+            wifiDirectDeviceName = "Aurora White",
+            createdAtMillis = 1_720_000_405L,
+            associatedSessionId = "secure-session-legacy",
+            expiresAtMillis = 1_720_008_405L,
+            capabilityFlags = setOf(
+                HybridTransportControlMessage.CapabilityFlag.BLE_FALLBACK
+            )
+        )
+
+        val legacyParts = listOf(
+            "AURORA_HYBRID_CONTROL",
+            HybridTransportControlCodec.currentProtocolVersion.toString(),
+            legacyMessage.messageType.name,
+            "ZGlhZy1ydW4tbGVnYWN5",
+            "Y29vcmRpbmF0b3ItcGVlci1sZWdhY3k",
+            "cGFydGljaXBhbnQtcGVlci1sZWdhY3k",
+            "~",
+            "~",
+            legacyMessage.createdAtMillis.toString(),
+            "c2VjdXJlLXNlc3Npb24tbGVnYWN5",
+            legacyMessage.expiresAtMillis.toString(),
+            "~",
+            "BLE_FALLBACK",
+            "cGFydGljaXBhbnQtcGVlci1sZWdhY3k",
+            "Y29vcmRpbmF0b3ItcGVlci1sZWdhY3k",
+            "YWE6YmI6Y2M6ZGQ6ZWU6MTE",
+            "QXVyb3JhIFdoaXRl"
+        ).joinToString("|")
+
+        val decoded = HybridTransportControlCodec.decode(legacyParts)
+
+        assertEquals(null, decoded.wifiDirectCorrelationToken)
+        assertEquals("aa:bb:cc:dd:ee:11", decoded.wifiDirectDeviceAddress)
+        assertEquals("Aurora White", decoded.wifiDirectDeviceName)
+    }
+
+    @Test
+    fun legacyMessagesKeepLegacyPartCount() {
+        val message = HybridTransportControlMessage(
+            messageType = HybridTransportControlMessage.MessageType.WIFI_DIRECT_OFFER,
+            sessionId = "bootstrap-token-offer-legacy",
+            publicPeerIdHint = "peer-offer-legacy",
+            createdAtMillis = 1_720_000_150L
+        )
+
+        val encoded = HybridTransportControlCodec.encode(message)
+
+        assertEquals(13, encoded.split("|").size)
+        assertEquals(message, HybridTransportControlCodec.decode(encoded))
+    }
+
+    @Test
     fun unsupportedProtocolVersionIsRejectedSafely() {
         val encoded = listOf(
             "AURORA_HYBRID_CONTROL",

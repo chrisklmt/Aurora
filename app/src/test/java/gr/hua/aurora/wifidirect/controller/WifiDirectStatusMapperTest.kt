@@ -90,6 +90,10 @@ class WifiDirectStatusMapperTest {
                     role = WifiDirectConnectionRole.CLIENT,
                     groupOwnerAddress = "192.168.49.1"
                 ),
+                localDeviceInfo = WifiDirectLocalDeviceInfo(
+                    deviceName = "Aurora Local",
+                    deviceAddress = "AA:BB:CC:DD:EE:99"
+                ),
                 peers = peers,
                 lastError = "Wi-Fi Direct peers unavailable: RuntimeException",
                 lastUpdatedAtMillis = 1234L
@@ -106,6 +110,10 @@ class WifiDirectStatusMapperTest {
                     groupFormed = WifiDirectGroupFormedState.YES,
                     role = WifiDirectConnectionRole.CLIENT,
                     groupOwnerAddress = "192.168.49.1"
+                ),
+                localDeviceInfo = WifiDirectLocalDeviceInfo(
+                    deviceName = "Aurora Local",
+                    deviceAddress = "AA:BB:CC:DD:EE:99"
                 ),
                 peers = peers,
                 lastError = "Wi-Fi Direct peers unavailable: RuntimeException",

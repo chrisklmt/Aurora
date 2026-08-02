@@ -30,6 +30,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsRunState
+import gr.hua.aurora.diagnostics.automated.automatedDiagnosticsCompactSummaryText
 import gr.hua.aurora.ble.connection.AndroidBleConnector
 import gr.hua.aurora.ble.advertise.BleAdvertiseStatus
 import gr.hua.aurora.ble.connection.BleConnectionStatus
@@ -70,6 +72,7 @@ import gr.hua.aurora.transport.hybrid.HybridBootstrapManualTriggerSnapshot
 import gr.hua.aurora.ui.debug.wifidirect.NearbyWifiDirectDebugControls
 import gr.hua.aurora.ui.components.AuroraAvailabilityIndicator
 import gr.hua.aurora.ui.components.AuroraTopBarAction
+import gr.hua.aurora.ui.components.CompactDiagnosticsCard
 import gr.hua.aurora.ui.components.DebugInfoCard
 import gr.hua.aurora.ui.components.DebugInfoCardModel
 import gr.hua.aurora.ui.components.DebugInfoItem
@@ -134,6 +137,7 @@ internal fun NearbyDevicesScreen(
     privateChatIdentitiesByPeerId: Map<String, PrivateChatIdentity>,
     currentUsername: String,
     desiredAvailability: AuroraAvailabilityPreference,
+    automatedDiagnosticsState: AutomatedDiagnosticsRunState,
     bleAdvertiseStatus: BleAdvertiseStatus,
     bleGattServerStatus: BleGattServerStatus,
     bleScanStatus: BleScanStatus,
@@ -179,6 +183,7 @@ internal fun NearbyDevicesScreen(
     onSelectSecurePeer: (String) -> Unit,
     onClearSelectedSecurePeer: () -> Unit,
     onOpenPrivateChat: (String) -> Unit,
+    onOpenAutomatedDiagnostics: () -> Unit,
     onResetLocalData: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -206,6 +211,9 @@ internal fun NearbyDevicesScreen(
     }
     var activeIdentityExchangeDeviceKey by remember {
         mutableStateOf<String?>(null)
+    }
+    var showAdvancedRawDiagnostics by remember {
+        mutableStateOf(false)
     }
     val debugCard = buildNearbyDebugCard(
         showDebugDiagnostics = showDebugDiagnostics,
@@ -413,7 +421,23 @@ internal fun NearbyDevicesScreen(
                     }
                 )
             }
-            debugCard?.let { card ->
+            if (showDebugDiagnostics) {
+                item {
+                    CompactDiagnosticsCard(
+                        summaryText = automatedDiagnosticsCompactSummaryText(
+                            automatedDiagnosticsState
+                        ),
+                        onOpenAutomatedDiagnostics = onOpenAutomatedDiagnostics,
+                        rawDiagnosticsExpanded = showAdvancedRawDiagnostics,
+                        onToggleRawDiagnostics = {
+                            showAdvancedRawDiagnostics = !showAdvancedRawDiagnostics
+                        },
+                        supportingText = "Nearby devices stay at the top; legacy raw diagnostics remain collapsed during the transition."
+                    )
+                }
+            }
+
+            if (showDebugDiagnostics && showAdvancedRawDiagnostics) {
                 item {
                     Column(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -453,7 +477,9 @@ internal fun NearbyDevicesScreen(
                             onResetDiagnostics = wifiDirectSocketState.resetDiagnostics,
                             onCloseSocket = wifiDirectSocketState.closeSocket
                         )
-                        DebugInfoCard(card = card)
+                        debugCard?.let { card ->
+                            DebugInfoCard(card = card)
+                        }
                     }
                 }
             }

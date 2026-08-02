@@ -32,8 +32,10 @@ import gr.hua.aurora.wifidirect.debug.WifiDirectSmokeTestSender
 import gr.hua.aurora.wifidirect.runtime.*
 import gr.hua.aurora.wifidirect.transport.LiveWifiDirectTransportSender
 import gr.hua.aurora.wifidirect.transport.WifiDirectTransportSender
+import java.util.concurrent.atomic.AtomicLong
 
 internal data class RememberedWifiDirectSocketState(
+    val instanceId: String,
     val diagnostics: WifiDirectSocketDiagnostics,
     val adapterDiagnostics: WifiDirectTransportAdapterDiagnostics,
     val sendBridgeDiagnostics: WifiDirectSendBridgeDiagnostics,
@@ -63,6 +65,12 @@ internal data class RememberedWifiDirectSocketState(
     val closeSocket: () -> Unit
 )
 
+private val wifiDirectSocketRuntimeInstanceCounter = AtomicLong(0L)
+
+private fun nextWifiDirectSocketRuntimeInstanceId(): String {
+    return "wifi-direct-socket-runtime-${wifiDirectSocketRuntimeInstanceCounter.incrementAndGet()}"
+}
+
 @Composable
 internal fun rememberWifiDirectSocketState(
     runtimeStatus: WifiDirectRuntimeStatus,
@@ -75,6 +83,9 @@ internal fun rememberWifiDirectSocketState(
     }
     val resolvedController = remember(controller) {
         controller ?: AndroidWifiDirectSocketController()
+    }
+    val socketRuntimeInstanceId = remember(resolvedController) {
+        nextWifiDirectSocketRuntimeInstanceId()
     }
     val transportAdapter = remember(resolvedController) {
         if (
@@ -394,7 +405,9 @@ internal fun rememberWifiDirectSocketState(
             privateDebugSender.removeListener(privateDebugSendListener)
             smokeTestSender.removeListener(smokeTestListener)
             transportAdapter.dispose()
-            resolvedController.dispose()
+            resolvedController.dispose(
+                reason = "rememberWifiDirectSocketState disposed."
+            )
         }
     }
 
@@ -418,7 +431,9 @@ internal fun rememberWifiDirectSocketState(
     DisposableEffect(lifecycleOwner, closeSocket) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP) {
-                closeSocket()
+                resolvedController.closeSocket(
+                    reason = "Lifecycle moved to ON_STOP."
+                )
             }
         }
 
@@ -436,11 +451,14 @@ internal fun rememberWifiDirectSocketState(
             runtimeStatus.connectionStatus.state != WifiDirectConnectionState.CONNECTED ||
             runtimeStatus.connectionStatus.groupFormed != WifiDirectGroupFormedState.YES
         ) {
-            closeSocket()
+            resolvedController.closeSocket(
+                reason = "Wi-Fi Direct group no longer connected."
+            )
         }
     }
 
     return RememberedWifiDirectSocketState(
+        instanceId = socketRuntimeInstanceId,
         diagnostics = diagnostics,
         adapterDiagnostics = adapterDiagnostics,
         sendBridgeDiagnostics = sendBridgeDiagnostics,

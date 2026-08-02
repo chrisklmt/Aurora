@@ -257,12 +257,12 @@ internal class AndroidWifiDirectSocketController internal constructor(
         }
     }
 
-    override fun closeSocket() {
+    override fun closeSocket(reason: String?) {
         safeSocketControllerLogDebug(
-            "closeSocket invoked: state=${currentDiagnostics().state.name.lowercase()}"
+            "closeSocket invoked: state=${currentDiagnostics().state.name.lowercase()} reason=${reason ?: "none"}"
         )
         val token = stateMachine.nextOperationToken()
-        emitIfPresent(stateMachine.markClosing(token))
+        emitIfPresent(stateMachine.markClosing(token, reason))
         releaseResources()
         emitIfPresent(stateMachine.markIdle(token))
     }
@@ -283,11 +283,19 @@ internal class AndroidWifiDirectSocketController internal constructor(
         transportFrameListeners -= listener
     }
 
-    override fun dispose() {
-        stateMachine.markDisposed()
+    override fun dispose(reason: String?) {
+        emit(stateMachine.markDisposed(reason ?: "Socket controller disposed."))
         releaseResources()
         ioScope.cancel()
         listeners.clear()
+    }
+
+    fun closeSocket() {
+        closeSocket(reason = null)
+    }
+
+    fun dispose() {
+        dispose(reason = null)
     }
 
     private fun acceptClient(

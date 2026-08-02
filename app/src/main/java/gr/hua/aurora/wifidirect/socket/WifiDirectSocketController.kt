@@ -70,13 +70,75 @@ internal data class WifiDirectSocketDiagnostics(
     val lastCommandResult: WifiDirectSocketCommandResult = WifiDirectSocketCommandResult.NONE,
     val lastCommandError: String? = null,
     val lastCommandSequence: Long = 0L,
+    val lastOperationToken: Long = 0L,
+    val lastCommandAtMillis: Long? = null,
+    val lastStateChangedAtMillis: Long? = null,
+    val lastStateTransition: String? = null,
     val lastCommandHost: String? = null,
+    val lastCloseReason: String? = null,
+    val lastDisposeReason: String? = null,
     val serverStartAttempts: Int = 0,
     val clientConnectAttempts: Int = 0,
     val closeAttempts: Int = 0,
     val note: String = wifiDirectSocketFoundationNote,
     val frameDiagnostics: WifiDirectFrameDiagnostics = WifiDirectFrameDiagnostics()
-)
+) {
+    constructor(
+        state: WifiDirectSocketState = WifiDirectSocketState.IDLE,
+        role: WifiDirectSocketRole = WifiDirectSocketRole.UNKNOWN,
+        endpoint: WifiDirectSocketEndpoint? = WifiDirectSocketEndpoint(
+            port = wifiDirectDebugSocketPort
+        ),
+        isConnected: Boolean = false,
+        isReadLoopActive: Boolean = false,
+        lastSentMessage: String? = null,
+        lastReceivedMessage: String? = null,
+        lastOutboundFrameSize: Int? = null,
+        lastInboundFrameSize: Int? = null,
+        lastError: String? = null,
+        bytesSent: Long = 0L,
+        bytesReceived: Long = 0L,
+        lastCommand: WifiDirectSocketCommand = WifiDirectSocketCommand.NONE,
+        lastCommandResult: WifiDirectSocketCommandResult = WifiDirectSocketCommandResult.NONE,
+        lastCommandError: String? = null,
+        lastCommandSequence: Long = 0L,
+        lastCommandHost: String? = null,
+        serverStartAttempts: Int = 0,
+        clientConnectAttempts: Int = 0,
+        closeAttempts: Int = 0,
+        note: String = wifiDirectSocketFoundationNote,
+        frameDiagnostics: WifiDirectFrameDiagnostics = WifiDirectFrameDiagnostics()
+    ) : this(
+        state = state,
+        role = role,
+        endpoint = endpoint,
+        isConnected = isConnected,
+        isReadLoopActive = isReadLoopActive,
+        lastSentMessage = lastSentMessage,
+        lastReceivedMessage = lastReceivedMessage,
+        lastOutboundFrameSize = lastOutboundFrameSize,
+        lastInboundFrameSize = lastInboundFrameSize,
+        lastError = lastError,
+        bytesSent = bytesSent,
+        bytesReceived = bytesReceived,
+        lastCommand = lastCommand,
+        lastCommandResult = lastCommandResult,
+        lastCommandError = lastCommandError,
+        lastCommandSequence = lastCommandSequence,
+        lastOperationToken = 0L,
+        lastCommandAtMillis = null,
+        lastStateChangedAtMillis = null,
+        lastStateTransition = null,
+        lastCommandHost = lastCommandHost,
+        lastCloseReason = null,
+        lastDisposeReason = null,
+        serverStartAttempts = serverStartAttempts,
+        clientConnectAttempts = clientConnectAttempts,
+        closeAttempts = closeAttempts,
+        note = note,
+        frameDiagnostics = frameDiagnostics
+    )
+}
 
 internal interface WifiDirectSocketController {
     interface Listener {
@@ -88,10 +150,10 @@ internal interface WifiDirectSocketController {
     fun startServer(hostHint: String? = null)
     fun connectClient(host: String)
     fun sendDebugFrame()
-    fun closeSocket()
+    fun closeSocket(reason: String? = null)
     fun addListener(listener: Listener)
     fun removeListener(listener: Listener)
-    fun dispose()
+    fun dispose(reason: String? = null)
 }
 
 internal fun wifiDirectEffectiveFrameTransportState(

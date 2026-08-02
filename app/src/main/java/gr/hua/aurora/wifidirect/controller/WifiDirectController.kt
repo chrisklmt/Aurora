@@ -21,6 +21,12 @@ interface WifiDirectController {
     fun refreshConnectionInfo()
     fun startDiscovery()
     fun stopDiscovery()
+    fun registerAutomatedDiagnosticsService(
+        correlationToken: String,
+        deviceNameHint: String? = null
+    )
+    fun startAutomatedDiagnosticsServiceDiscovery()
+    fun clearAutomatedDiagnosticsServiceDiscovery()
     fun connectToPeer(
         peer: WifiDirectPeer,
         rolePreference: WifiDirectRolePreference = WifiDirectRolePreference.AUTOMATIC

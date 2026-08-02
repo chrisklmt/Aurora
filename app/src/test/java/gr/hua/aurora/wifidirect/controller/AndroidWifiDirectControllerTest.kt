@@ -8,6 +8,8 @@ import gr.hua.aurora.wifidirect.platform.wifiDirectConnectRequestDebugText
 import gr.hua.aurora.wifidirect.platform.wifiDirectGroupOwnerIntentOrNull
 import gr.hua.aurora.wifidirect.runtime.*
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -64,6 +66,10 @@ class AndroidWifiDirectControllerTest {
                     deviceAddress = "AA:BB:CC:DD:EE:01"
                 )
             )
+            localDeviceInfoResult = WifiDirectLocalDeviceInfo(
+                deviceName = "Aurora Local",
+                deviceAddress = "AA:BB:CC:DD:EE:99"
+            )
         }
         val controller = AndroidWifiDirectController(
             permissionStatusReader = { permissionStatus },
@@ -82,8 +88,61 @@ class AndroidWifiDirectControllerTest {
         assertNull(status.lastError)
         assertEquals(1234L, status.lastUpdatedAtMillis)
         assertEquals(1, client.discoverPeersCallCount)
+        assertEquals(1, client.requestLocalDeviceInfoCallCount)
         assertEquals(1, client.requestPeersCallCount)
+        assertEquals("Aurora Local", status.localDeviceInfo.deviceName)
+        assertEquals("AA:BB:CC:DD:EE:99", status.localDeviceInfo.deviceAddress)
+        assertTrue(status.localDeviceInfo.isAddressAvailable)
         assertTrue(observedStatuses.any { it.discoveryState == WifiDirectDiscoveryState.ACTIVE })
+    }
+
+    @Test
+    fun localDeviceInfoFailureIsExposedSafely() {
+        val permissionStatus = readyPermissionStatus()
+        val client = FakeWifiDirectPlatformClient().apply {
+            requestLocalDeviceInfoFailureReason = "SecurityException"
+        }
+        val controller = AndroidWifiDirectController(
+            permissionStatusReader = { permissionStatus },
+            fallbackPermissionStatus = { permissionStatus },
+            platformClient = client,
+            nowMillis = { 123L }
+        )
+
+        controller.refreshConnectionInfo()
+
+        assertEquals(1, client.requestLocalDeviceInfoCallCount)
+        assertEquals(
+            "Wi-Fi Direct local device info unavailable: SecurityException",
+            controller.currentRuntimeStatus().localDeviceInfo.lastError
+        )
+    }
+
+    @Test
+    fun anonymizedLocalDeviceAddressIsClassifiedAsUnavailableForCorrelation() {
+        val permissionStatus = readyPermissionStatus()
+        val client = FakeWifiDirectPlatformClient().apply {
+            localDeviceInfoResult = WifiDirectLocalDeviceInfo(
+                deviceName = "Aurora Local",
+                deviceAddress = "02:00:00:00:00:00"
+            )
+        }
+        val controller = AndroidWifiDirectController(
+            permissionStatusReader = { permissionStatus },
+            fallbackPermissionStatus = { permissionStatus },
+            platformClient = client,
+            nowMillis = { 321L }
+        )
+
+        controller.refreshConnectionInfo()
+
+        val localInfo = controller.currentRuntimeStatus().localDeviceInfo
+        assertEquals(
+            WifiDirectLocalAddressClassification.ANONYMIZED,
+            localInfo.addressClassification
+        )
+        assertEquals(false, localInfo.isAddressAvailable)
+        assertNull(localInfo.lastError)
     }
 
     @Test
@@ -346,6 +405,7 @@ class AndroidWifiDirectControllerTest {
         )
 
         assertEquals(1, controller.currentRuntimeStatus().peerCount)
+        assertEquals(1, client.requestLocalDeviceInfoCallCount)
         assertEquals(1, client.requestPeersCallCount)
     }
 
@@ -374,6 +434,7 @@ class AndroidWifiDirectControllerTest {
         )
 
         val status = controller.currentRuntimeStatus().connectionStatus
+        assertEquals(1, client.requestLocalDeviceInfoCallCount)
         assertEquals(WifiDirectConnectionState.CONNECTED, status.state)
         assertEquals(WifiDirectConnectionRole.GROUP_OWNER, status.role)
         assertEquals("AA:BB:CC:DD:EE:AA", status.groupOwnerAddress)
@@ -536,6 +597,244 @@ class AndroidWifiDirectControllerTest {
     }
 
     @Test
+    fun registerAutomatedDiagnosticsServiceRegistersLocalDnsSdService() {
+        val permissionStatus = readyPermissionStatus()
+        val client = FakeWifiDirectPlatformClient()
+        val controller = AndroidWifiDirectController(
+            permissionStatusReader = { permissionStatus },
+            fallbackPermissionStatus = { permissionStatus },
+            platformClient = client,
+            nowMillis = { 200L }
+        )
+
+        controller.registerAutomatedDiagnosticsService(
+            correlationToken = "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+            deviceNameHint = "Participant Pixel"
+        )
+
+        val diagnostics = controller.currentRuntimeStatus().dnsSdDiagnostics
+        assertEquals(1, client.clearLocalDnsSdServicesCallCount)
+        assertEquals(1, client.addLocalDnsSdServiceCallCount)
+        assertEquals(
+            automatedDiagnosticsWifiDirectDnsSdInstanceName,
+            client.lastLocalDnsSdInstanceName
+        )
+        assertEquals(
+            automatedDiagnosticsWifiDirectDnsSdServiceType,
+            client.lastLocalDnsSdServiceType
+        )
+        assertEquals(
+            automatedDiagnosticsWifiDirectDnsSdProtocolVersion,
+            client.lastLocalDnsSdTxtRecord[automatedDiagnosticsWifiDirectDnsSdProtocolTxtKey]
+        )
+        assertEquals(
+            "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+            client.lastLocalDnsSdTxtRecord[automatedDiagnosticsWifiDirectDnsSdTokenTxtKey]
+        )
+        assertTrue(diagnostics.localServiceRegistered)
+        assertFalse(diagnostics.cleanupCompleted)
+        assertNull(diagnostics.lastError)
+    }
+
+    @Test
+    fun startAutomatedDiagnosticsServiceDiscoveryRegistersRequestAndStartsDiscovery() {
+        val permissionStatus = readyPermissionStatus()
+        val client = FakeWifiDirectPlatformClient()
+        val controller = AndroidWifiDirectController(
+            permissionStatusReader = { permissionStatus },
+            fallbackPermissionStatus = { permissionStatus },
+            platformClient = client,
+            nowMillis = { 201L }
+        )
+
+        controller.startAutomatedDiagnosticsServiceDiscovery()
+
+        val diagnostics = controller.currentRuntimeStatus().dnsSdDiagnostics
+        assertEquals(1, client.clearDnsSdServiceRequestsCallCount)
+        assertEquals(1, client.addDnsSdServiceRequestCallCount)
+        assertEquals(1, client.discoverDnsSdServicesCallCount)
+        assertTrue(diagnostics.serviceRequestRegistered)
+        assertTrue(diagnostics.discoveryStarted)
+        assertFalse(diagnostics.cleanupCompleted)
+        assertNotNull(client.dnsSdServiceListener)
+        assertNotNull(client.dnsSdTxtListener)
+    }
+
+    @Test
+    fun txtCallbackMapsToWifiDirectDnsSdServiceResponse() {
+        val permissionStatus = readyPermissionStatus()
+        val client = FakeWifiDirectPlatformClient()
+        val controller = AndroidWifiDirectController(
+            permissionStatusReader = { permissionStatus },
+            fallbackPermissionStatus = { permissionStatus },
+            platformClient = client,
+            nowMillis = { 202L }
+        )
+        val peer = WifiDirectPeer(
+            deviceName = "Participant Pixel",
+            deviceAddress = "AA:BB:CC:DD:EE:20"
+        )
+
+        controller.startAutomatedDiagnosticsServiceDiscovery()
+        client.dnsSdTxtListener?.invoke(
+            "${automatedDiagnosticsWifiDirectDnsSdInstanceName}." +
+                "${automatedDiagnosticsWifiDirectDnsSdServiceType}.local.",
+            mapOf(
+                automatedDiagnosticsWifiDirectDnsSdProtocolTxtKey to
+                    automatedDiagnosticsWifiDirectDnsSdProtocolVersion,
+                automatedDiagnosticsWifiDirectDnsSdTokenTxtKey to
+                    "a1b2c3d4e5f60718293a4b5c6d7e8f90"
+            ),
+            peer
+        )
+
+        val service = controller.currentRuntimeStatus()
+            .dnsSdDiagnostics
+            .discoveredServices
+            .single()
+        assertEquals(automatedDiagnosticsWifiDirectDnsSdServiceType, service.serviceType)
+        assertEquals(automatedDiagnosticsWifiDirectDnsSdInstanceName, service.instanceName)
+        assertEquals(peer, service.peer)
+        assertEquals(
+            "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+            service.txtRecord[automatedDiagnosticsWifiDirectDnsSdTokenTxtKey]
+        )
+    }
+
+    @Test
+    fun duplicateTxtCallbackIsDeduplicated() {
+        val permissionStatus = readyPermissionStatus()
+        val client = FakeWifiDirectPlatformClient()
+        val controller = AndroidWifiDirectController(
+            permissionStatusReader = { permissionStatus },
+            fallbackPermissionStatus = { permissionStatus },
+            platformClient = client,
+            nowMillis = { 203L }
+        )
+        val peer = WifiDirectPeer(
+            deviceName = "Participant Pixel",
+            deviceAddress = "AA:BB:CC:DD:EE:20"
+        )
+        val fullDomain =
+            "${automatedDiagnosticsWifiDirectDnsSdInstanceName}." +
+                "${automatedDiagnosticsWifiDirectDnsSdServiceType}.local."
+        val txtRecord = mapOf(
+            automatedDiagnosticsWifiDirectDnsSdProtocolTxtKey to
+                automatedDiagnosticsWifiDirectDnsSdProtocolVersion,
+            automatedDiagnosticsWifiDirectDnsSdTokenTxtKey to
+                "a1b2c3d4e5f60718293a4b5c6d7e8f90"
+        )
+
+        controller.startAutomatedDiagnosticsServiceDiscovery()
+        client.dnsSdTxtListener?.invoke(fullDomain, txtRecord, peer)
+        client.dnsSdTxtListener?.invoke(fullDomain, txtRecord, peer)
+
+        assertEquals(
+            1,
+            controller.currentRuntimeStatus().dnsSdDiagnostics.discoveredServices.size
+        )
+    }
+
+    @Test
+    fun clearAutomatedDiagnosticsServiceDiscoveryCompletesOnlyAfterBothCleanupsSucceed() {
+        val permissionStatus = readyPermissionStatus()
+        val client = FakeWifiDirectPlatformClient()
+        val controller = AndroidWifiDirectController(
+            permissionStatusReader = { permissionStatus },
+            fallbackPermissionStatus = { permissionStatus },
+            platformClient = client,
+            nowMillis = { 204L }
+        )
+
+        controller.registerAutomatedDiagnosticsService(
+            correlationToken = "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+            deviceNameHint = "Participant Pixel"
+        )
+        controller.startAutomatedDiagnosticsServiceDiscovery()
+        client.autoCompleteClearLocalDnsSdServices = false
+        client.autoCompleteClearDnsSdServiceRequests = false
+
+        controller.clearAutomatedDiagnosticsServiceDiscovery()
+
+        var diagnostics = controller.currentRuntimeStatus().dnsSdDiagnostics
+        assertFalse(diagnostics.cleanupCompleted)
+        assertFalse(diagnostics.localServiceRegistered)
+        assertFalse(diagnostics.serviceRequestRegistered)
+        assertFalse(diagnostics.discoveryStarted)
+
+        client.completePendingClearLocalDnsSdServicesSuccess()
+        diagnostics = controller.currentRuntimeStatus().dnsSdDiagnostics
+        assertFalse(diagnostics.cleanupCompleted)
+
+        client.completePendingClearDnsSdServiceRequestsSuccess()
+        diagnostics = controller.currentRuntimeStatus().dnsSdDiagnostics
+        assertTrue(diagnostics.cleanupCompleted)
+        assertNull(diagnostics.lastError)
+    }
+
+    @Test
+    fun clearAutomatedDiagnosticsServiceDiscoveryKeepsCleanupIncompleteWhenLocalServiceCleanupFails() {
+        val permissionStatus = readyPermissionStatus()
+        val client = FakeWifiDirectPlatformClient()
+        val controller = AndroidWifiDirectController(
+            permissionStatusReader = { permissionStatus },
+            fallbackPermissionStatus = { permissionStatus },
+            platformClient = client,
+            nowMillis = { 205L }
+        )
+
+        controller.registerAutomatedDiagnosticsService(
+            correlationToken = "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+            deviceNameHint = "Participant Pixel"
+        )
+        controller.startAutomatedDiagnosticsServiceDiscovery()
+        client.autoCompleteClearLocalDnsSdServices = false
+        client.autoCompleteClearDnsSdServiceRequests = false
+
+        controller.clearAutomatedDiagnosticsServiceDiscovery()
+        client.completePendingClearLocalDnsSdServicesFailure(WifiP2pManager.BUSY)
+        client.completePendingClearDnsSdServiceRequestsSuccess()
+
+        val diagnostics = controller.currentRuntimeStatus().dnsSdDiagnostics
+        assertFalse(diagnostics.cleanupCompleted)
+        assertEquals(
+            "Wi-Fi Direct diagnostics local-service cleanup failed: busy",
+            diagnostics.lastError
+        )
+    }
+
+    @Test
+    fun clearAutomatedDiagnosticsServiceDiscoveryKeepsCleanupIncompleteWhenServiceRequestCleanupFails() {
+        val permissionStatus = readyPermissionStatus()
+        val client = FakeWifiDirectPlatformClient()
+        val controller = AndroidWifiDirectController(
+            permissionStatusReader = { permissionStatus },
+            fallbackPermissionStatus = { permissionStatus },
+            platformClient = client,
+            nowMillis = { 206L }
+        )
+
+        controller.registerAutomatedDiagnosticsService(
+            correlationToken = "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+            deviceNameHint = "Participant Pixel"
+        )
+        controller.startAutomatedDiagnosticsServiceDiscovery()
+        client.autoCompleteClearLocalDnsSdServices = false
+        client.autoCompleteClearDnsSdServiceRequests = false
+
+        controller.clearAutomatedDiagnosticsServiceDiscovery()
+        client.completePendingClearLocalDnsSdServicesSuccess()
+        client.completePendingClearDnsSdServiceRequestsFailure(WifiP2pManager.ERROR)
+
+        val diagnostics = controller.currentRuntimeStatus().dnsSdDiagnostics
+        assertFalse(diagnostics.cleanupCompleted)
+        assertEquals(
+            "Wi-Fi Direct diagnostics request cleanup failed: error",
+            diagnostics.lastError
+        )
+    }
+
+    @Test
     fun discoveryFailureSurfacesSafeErrorText() {
         val permissionStatus = readyPermissionStatus()
         val client = FakeWifiDirectPlatformClient().apply {
@@ -589,6 +888,12 @@ private class FakeWifiDirectPlatformClient : WifiDirectPlatformClient {
     var cancelPendingConnectionCallCount: Int = 0
     var disconnectFromPeerCallCount: Int = 0
     var requestConnectionSnapshotCallCount: Int = 0
+    var requestLocalDeviceInfoCallCount: Int = 0
+    var addLocalDnsSdServiceCallCount: Int = 0
+    var clearLocalDnsSdServicesCallCount: Int = 0
+    var addDnsSdServiceRequestCallCount: Int = 0
+    var clearDnsSdServiceRequestsCallCount: Int = 0
+    var discoverDnsSdServicesCallCount: Int = 0
     var discoverFailureReason: Int? = null
     var stopFailureReason: Int? = null
     var requestPeersFailureReason: String? = null
@@ -596,9 +901,27 @@ private class FakeWifiDirectPlatformClient : WifiDirectPlatformClient {
     var cancelFailureReason: Int? = null
     var disconnectFailureReason: Int? = null
     var requestConnectionSnapshotFailureReason: String? = null
+    var requestLocalDeviceInfoFailureReason: String? = null
+    var addLocalDnsSdServiceFailureReason: Int? = null
+    var clearLocalDnsSdServicesFailureReason: Int? = null
+    var addDnsSdServiceRequestFailureReason: Int? = null
+    var clearDnsSdServiceRequestsFailureReason: Int? = null
+    var discoverDnsSdServicesFailureReason: Int? = null
     var requestPeersResult: List<WifiDirectPeer> = emptyList()
     var connectionSnapshot: WifiDirectConnectionSnapshot = WifiDirectConnectionSnapshot()
+    var localDeviceInfoResult: WifiDirectLocalDeviceInfo = WifiDirectLocalDeviceInfo()
     var lastRolePreference: WifiDirectRolePreference? = null
+    var lastLocalDnsSdInstanceName: String? = null
+    var lastLocalDnsSdServiceType: String? = null
+    var lastLocalDnsSdTxtRecord: Map<String, String> = emptyMap()
+    var dnsSdServiceListener: ((String?, String?, WifiDirectPeer) -> Unit)? = null
+    var dnsSdTxtListener: ((String?, Map<String, String>, WifiDirectPeer) -> Unit)? = null
+    var autoCompleteClearLocalDnsSdServices: Boolean = true
+    var autoCompleteClearDnsSdServiceRequests: Boolean = true
+    private var pendingClearLocalDnsSdServicesSuccess: (() -> Unit)? = null
+    private var pendingClearLocalDnsSdServicesFailure: ((Int) -> Unit)? = null
+    private var pendingClearDnsSdServiceRequestsSuccess: (() -> Unit)? = null
+    private var pendingClearDnsSdServiceRequestsFailure: ((Int) -> Unit)? = null
 
     override fun discoverPeers(
         onSuccess: () -> Unit,
@@ -657,5 +980,110 @@ private class FakeWifiDirectPlatformClient : WifiDirectPlatformClient {
     ) {
         requestConnectionSnapshotCallCount += 1
         requestConnectionSnapshotFailureReason?.let(onFailure) ?: onSuccess(connectionSnapshot)
+    }
+
+    override fun requestLocalDeviceInfo(
+        onSuccess: (WifiDirectLocalDeviceInfo) -> Unit,
+        onFailure: (String) -> Unit
+    ) {
+        requestLocalDeviceInfoCallCount += 1
+        requestLocalDeviceInfoFailureReason?.let(onFailure) ?: onSuccess(localDeviceInfoResult)
+    }
+
+    override fun setDnsSdResponseListeners(
+        onServiceAvailable: (String?, String?, WifiDirectPeer) -> Unit,
+        onTxtRecordAvailable: (String?, Map<String, String>, WifiDirectPeer) -> Unit,
+        onFailure: (String) -> Unit
+    ) {
+        dnsSdServiceListener = onServiceAvailable
+        dnsSdTxtListener = onTxtRecordAvailable
+    }
+
+    override fun addLocalDnsSdService(
+        instanceName: String,
+        serviceType: String,
+        txtRecord: Map<String, String>,
+        onSuccess: () -> Unit,
+        onFailure: (Int) -> Unit
+    ) {
+        addLocalDnsSdServiceCallCount += 1
+        lastLocalDnsSdInstanceName = instanceName
+        lastLocalDnsSdServiceType = serviceType
+        lastLocalDnsSdTxtRecord = txtRecord
+        addLocalDnsSdServiceFailureReason?.let(onFailure) ?: onSuccess()
+    }
+
+    override fun clearLocalDnsSdServices(
+        onSuccess: () -> Unit,
+        onFailure: (Int) -> Unit
+    ) {
+        clearLocalDnsSdServicesCallCount += 1
+        if (autoCompleteClearLocalDnsSdServices) {
+            clearLocalDnsSdServicesFailureReason?.let(onFailure) ?: onSuccess()
+            return
+        }
+        pendingClearLocalDnsSdServicesSuccess = onSuccess
+        pendingClearLocalDnsSdServicesFailure = onFailure
+    }
+
+    override fun addDnsSdServiceRequest(
+        onSuccess: () -> Unit,
+        onFailure: (Int) -> Unit
+    ) {
+        addDnsSdServiceRequestCallCount += 1
+        addDnsSdServiceRequestFailureReason?.let(onFailure) ?: onSuccess()
+    }
+
+    override fun clearDnsSdServiceRequests(
+        onSuccess: () -> Unit,
+        onFailure: (Int) -> Unit
+    ) {
+        clearDnsSdServiceRequestsCallCount += 1
+        if (autoCompleteClearDnsSdServiceRequests) {
+            clearDnsSdServiceRequestsFailureReason?.let(onFailure) ?: onSuccess()
+            return
+        }
+        pendingClearDnsSdServiceRequestsSuccess = onSuccess
+        pendingClearDnsSdServiceRequestsFailure = onFailure
+    }
+
+    override fun discoverDnsSdServices(
+        onSuccess: () -> Unit,
+        onFailure: (Int) -> Unit
+    ) {
+        discoverDnsSdServicesCallCount += 1
+        discoverDnsSdServicesFailureReason?.let(onFailure) ?: onSuccess()
+    }
+
+    fun completePendingClearLocalDnsSdServicesSuccess() {
+        val callback = pendingClearLocalDnsSdServicesSuccess
+        pendingClearLocalDnsSdServicesSuccess = null
+        pendingClearLocalDnsSdServicesFailure = null
+        callback?.invoke()
+    }
+
+    fun completePendingClearLocalDnsSdServicesFailure(
+        reason: Int
+    ) {
+        val callback = pendingClearLocalDnsSdServicesFailure
+        pendingClearLocalDnsSdServicesSuccess = null
+        pendingClearLocalDnsSdServicesFailure = null
+        callback?.invoke(reason)
+    }
+
+    fun completePendingClearDnsSdServiceRequestsSuccess() {
+        val callback = pendingClearDnsSdServiceRequestsSuccess
+        pendingClearDnsSdServiceRequestsSuccess = null
+        pendingClearDnsSdServiceRequestsFailure = null
+        callback?.invoke()
+    }
+
+    fun completePendingClearDnsSdServiceRequestsFailure(
+        reason: Int
+    ) {
+        val callback = pendingClearDnsSdServiceRequestsFailure
+        pendingClearDnsSdServiceRequestsSuccess = null
+        pendingClearDnsSdServiceRequestsFailure = null
+        callback?.invoke(reason)
     }
 }

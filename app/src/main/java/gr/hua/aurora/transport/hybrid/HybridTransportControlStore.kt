@@ -15,6 +15,8 @@ interface HybridTransportControlStore {
 
         data object IgnoredOlderMessage : RecordResult
 
+        data object IgnoredNonBootstrapMessageType : RecordResult
+
         data object IgnoredInvalidPeerId : RecordResult
     }
 }

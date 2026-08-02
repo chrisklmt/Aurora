@@ -12,8 +12,14 @@ private enum class WifiDirectSocketTokenStatus {
 }
 
 internal class WifiDirectSocketStateMachine(
-    initialPort: Int
+    initialPort: Int,
+    private val timeProvider: () -> Long = System::currentTimeMillis
 ) {
+    constructor(initialPort: Int) : this(
+        initialPort = initialPort,
+        timeProvider = System::currentTimeMillis
+    )
+
     private val stateLock = Any()
 
     private var diagnostics = WifiDirectSocketDiagnostics(
@@ -39,11 +45,28 @@ internal class WifiDirectSocketStateMachine(
         return synchronized(stateLock) { operationToken }
     }
 
-    fun markDisposed() {
-        synchronized(stateLock) {
+    fun markDisposed(
+        reason: String? = null
+    ): WifiDirectSocketDiagnostics {
+        return synchronized(stateLock) {
             isDisposed = true
             operationToken += 1L
+            diagnostics = finalizedDiagnostics(
+                previous = diagnostics,
+                updated = diagnostics.copy(
+                    lastDisposeReason = reason ?: diagnostics.lastDisposeReason,
+                    isConnected = false,
+                    isReadLoopActive = false
+                ),
+                token = operationToken
+            )
+            logStateUpdate(diagnostics)
+            diagnostics
         }
+    }
+
+    fun markDisposed(): WifiDirectSocketDiagnostics {
+        return markDisposed(reason = null)
     }
 
     fun isCurrentToken(
@@ -298,7 +321,8 @@ internal class WifiDirectSocketStateMachine(
     }
 
     fun markClosing(
-        token: Long
+        token: Long,
+        reason: String? = null
     ): WifiDirectSocketDiagnostics? {
         return updateIfCurrent(token) { current ->
             current.copy(
@@ -309,6 +333,7 @@ internal class WifiDirectSocketStateMachine(
                 lastCommand = WifiDirectSocketCommand.CLOSE_SOCKET,
                 lastCommandResult = WifiDirectSocketCommandResult.CLOSING,
                 lastCommandError = null,
+                lastCloseReason = reason ?: current.lastCloseReason,
                 lastCommandSequence = current.lastCommandSequence + 1L,
                 closeAttempts = current.closeAttempts + 1,
                 frameDiagnostics = current.frameDiagnostics.copy(
@@ -446,7 +471,11 @@ internal class WifiDirectSocketStateMachine(
         transform: (WifiDirectSocketDiagnostics) -> WifiDirectSocketDiagnostics
     ): WifiDirectSocketDiagnostics {
         val updated = synchronized(stateLock) {
-            diagnostics = transform(diagnostics)
+            diagnostics = finalizedDiagnostics(
+                previous = diagnostics,
+                updated = transform(diagnostics),
+                token = operationToken
+            )
             diagnostics
         }
         logStateUpdate(updated)
@@ -466,7 +495,11 @@ internal class WifiDirectSocketStateMachine(
                     currentToken = operationToken
                 )
             } else {
-                diagnostics = transform(diagnostics)
+                diagnostics = finalizedDiagnostics(
+                    previous = diagnostics,
+                    updated = transform(diagnostics),
+                    token = token
+                )
                 UpdateIfCurrentResult(
                     diagnostics = diagnostics,
                     tokenStatus = WifiDirectSocketTokenStatus.CURRENT,
@@ -491,6 +524,34 @@ internal class WifiDirectSocketStateMachine(
         return updated
     }
 
+    private fun finalizedDiagnostics(
+        previous: WifiDirectSocketDiagnostics,
+        updated: WifiDirectSocketDiagnostics,
+        token: Long
+    ): WifiDirectSocketDiagnostics {
+        val nowMillis = timeProvider()
+        val stateChanged = previous.state != updated.state
+        val commandChanged = previous.lastCommandSequence != updated.lastCommandSequence
+        return updated.copy(
+            lastOperationToken = token,
+            lastCommandAtMillis = if (commandChanged) {
+                nowMillis
+            } else {
+                updated.lastCommandAtMillis
+            },
+            lastStateChangedAtMillis = if (stateChanged) {
+                nowMillis
+            } else {
+                updated.lastStateChangedAtMillis
+            },
+            lastStateTransition = if (stateChanged) {
+                "${previous.state.name.lowercase()} -> ${updated.state.name.lowercase()}"
+            } else {
+                updated.lastStateTransition
+            }
+        )
+    }
+
     private fun tokenStatusLocked(
         token: Long
     ): WifiDirectSocketTokenStatus {
@@ -505,10 +566,11 @@ internal class WifiDirectSocketStateMachine(
         diagnostics: WifiDirectSocketDiagnostics
     ) {
         safeSocketStateMachineLogDebug(
-            "state=${diagnostics.state.name.lowercase()} " +
+                "state=${diagnostics.state.name.lowercase()} " +
                 "command=${diagnostics.lastCommand.name.lowercase()} " +
                 "result=${diagnostics.lastCommandResult.name.lowercase()} " +
                 "seq=${diagnostics.lastCommandSequence} " +
+                "token=${diagnostics.lastOperationToken} " +
                 "host=${diagnostics.lastCommandHost ?: "none"} " +
                 "connected=${diagnostics.isConnected} " +
                 "error=${diagnostics.lastCommandError ?: diagnostics.lastError ?: "none"}"

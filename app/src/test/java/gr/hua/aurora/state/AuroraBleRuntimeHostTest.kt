@@ -64,6 +64,7 @@ import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutionResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutor
 import gr.hua.aurora.transport.hybrid.HybridBootstrapManualAcceptSendResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapManualOfferSendResult
+import gr.hua.aurora.transport.hybrid.HybridBootstrapManualSocketHintSendResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapManualTriggerSnapshot
 import gr.hua.aurora.transport.hybrid.HybridBootstrapSocketEndpoint
 import gr.hua.aurora.transport.hybrid.HybridBootstrapSocketEndpointResolution
@@ -72,6 +73,10 @@ import gr.hua.aurora.transport.hybrid.HybridTransportControlMessage
 import gr.hua.aurora.transport.hybrid.HybridTransportControlStore
 import gr.hua.aurora.transport.hybrid.InMemoryHybridTransportControlStore
 import gr.hua.aurora.wifidirect.frame.WifiDirectTransportFrame
+import gr.hua.aurora.wifidirect.runtime.WifiDirectConnectionRole
+import gr.hua.aurora.wifidirect.runtime.WifiDirectConnectionState
+import gr.hua.aurora.wifidirect.runtime.WifiDirectConnectionStatus
+import gr.hua.aurora.wifidirect.runtime.WifiDirectGroupFormedState
 import gr.hua.aurora.wifidirect.transport.WifiDirectTransportSendResult
 import gr.hua.aurora.wifidirect.transport.WifiDirectTransportSender
 import org.junit.Assert.assertArrayEquals
@@ -1582,6 +1587,202 @@ class AuroraBleRuntimeHostTest {
             "Hybrid bootstrap command: no socket-ready candidate",
             manualTriggerSnapshot.commandStatusText
         )
+        assertEquals(initialGlobalMessages, holder.uiState.globalMessages)
+        assertEquals(initialPrivateMessages, holder.uiState.privateMessagesByPeerId)
+    }
+
+    @Test
+    fun manualHybridBootstrapSocketHintRequestCallbackDoesNotInvokeActionUntilExplicitlyCalled() {
+        var invokeCount = 0
+        val callback = createHybridBootstrapManualSocketHintRequestCallback {
+            invokeCount += 1
+            HybridBootstrapManualSocketHintSendResult.NoAcceptedCandidate
+        }
+
+        assertEquals(0, invokeCount)
+        assertEquals(
+            HybridBootstrapManualSocketHintSendResult.NoAcceptedCandidate,
+            runSuspending { callback() }
+        )
+        assertEquals(1, invokeCount)
+    }
+
+    @Test
+    fun manualHybridBootstrapSocketHintWithoutAcceptedCandidateReturnsNoAcceptedCandidate() {
+        val sender = RecordingTransportSender(BleTransportSendResult.QueuedLocally)
+
+        val result = runSuspending {
+            submitHybridBootstrapManualSocketHint(
+                decision = hybridBootstrapDecision(),
+                bleConnectionStatus = BleConnectionStatus.CONNECTED,
+                activeTransportPeerId = "peer-active",
+                peerSessionDiagnostics = PeerSessionRegistryDiagnostics(
+                    establishedPeerIds = listOf("peer-canonical"),
+                    canonicalPeerIdByAlias = mapOf("peer-active" to "peer-canonical")
+                ),
+                transportSender = sender,
+                localPeerId = "peer-owner",
+                wifiDirectConnectionStatus = WifiDirectConnectionStatus(
+                    state = WifiDirectConnectionState.CONNECTED,
+                    groupFormed = WifiDirectGroupFormedState.YES,
+                    role = WifiDirectConnectionRole.GROUP_OWNER,
+                    groupOwnerAddress = "192.168.49.1"
+                ),
+                socketPort = 8988,
+                createdAtMillis = 1_716_510_020L
+            )
+        }
+
+        assertEquals(HybridBootstrapManualSocketHintSendResult.NoAcceptedCandidate, result)
+        assertEquals(0, sender.sendCallCount)
+        assertNull(sender.capturedPlan)
+    }
+
+    @Test
+    fun manualHybridBootstrapSocketHintSendBuildsOneHintAndPassiveReceiverRecordsSocketReadyCandidate() {
+        val sender = RecordingTransportSender(BleTransportSendResult.QueuedLocally)
+        val decision = hybridBootstrapDecision(
+            hybridBootstrapCandidate(
+                peerId = "peer-canonical",
+                sessionId = "offer-session-hint",
+                hasOffer = true,
+                hasAccept = true,
+                latestCreatedAtMillis = 42L
+            )
+        )
+        val sessionDiagnostics = PeerSessionRegistryDiagnostics(
+            establishedPeerIds = listOf("peer-canonical"),
+            canonicalPeerIdByAlias = mapOf("peer-active" to "peer-canonical")
+        )
+
+        val sendResult = runSuspending {
+            submitHybridBootstrapManualSocketHint(
+                decision = decision,
+                bleConnectionStatus = BleConnectionStatus.CONNECTED,
+                activeTransportPeerId = "peer-active",
+                peerSessionDiagnostics = sessionDiagnostics,
+                transportSender = sender,
+                localPeerId = "peer-owner",
+                wifiDirectConnectionStatus = WifiDirectConnectionStatus(
+                    state = WifiDirectConnectionState.CONNECTED,
+                    groupFormed = WifiDirectGroupFormedState.YES,
+                    role = WifiDirectConnectionRole.GROUP_OWNER,
+                    groupOwnerAddress = "192.168.49.1"
+                ),
+                socketPort = 8988,
+                createdAtMillis = 1_716_510_030L
+            )
+        }
+
+        assertEquals(
+            HybridBootstrapManualSocketHintSendResult.Sent(
+                peerId = "peer-canonical",
+                sessionId = "offer-session-hint",
+                groupOwnerAddress = "192.168.49.1",
+                socketPort = 8988
+            ),
+            sendResult
+        )
+        assertEquals(1, sender.sendCallCount)
+        assertEquals(listOf("peer-canonical"), sender.sentTargetPeerIds)
+
+        val sentPlan = requireNotNull(sender.capturedPlan)
+        val sentFrame = decodePlaintextFrame(sentPlan)
+        val controlMessage = requireNotNull(
+            HybridTransportControlFrameFactory.parseOrNull(sentFrame)
+        )
+
+        assertEquals("hybrid-socket-hint-peer-owner-1716510030", sentFrame.id)
+        assertEquals(MessageFrameType.HYBRID_TRANSPORT_CONTROL, sentFrame.type)
+        assertEquals("peer-owner", sentFrame.senderId)
+        assertEquals("peer-canonical", sentFrame.recipientId)
+        assertEquals(
+            HybridTransportControlMessage.MessageType.WIFI_DIRECT_SOCKET_HINT,
+            controlMessage.messageType
+        )
+        assertEquals("offer-session-hint", controlMessage.sessionId)
+        assertEquals("peer-owner", controlMessage.publicPeerIdHint)
+        assertEquals("192.168.49.1", controlMessage.groupOwnerAddress)
+        assertEquals(8988, controlMessage.socketPort)
+        assertTrue(
+            controlMessage.capabilityFlags.contains(
+                HybridTransportControlMessage.CapabilityFlag.WIFI_DIRECT_SOCKET_HINT
+            )
+        )
+
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(
+                generatedUsername = "PIAIUFN1"
+            ),
+            localProfileStore = FakeProfileStore()
+        )
+        val initialGlobalMessages = holder.uiState.globalMessages
+        val initialPrivateMessages = holder.uiState.privateMessagesByPeerId
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val receiveResult = receiveFrames(
+            receiver = createAuroraBleTransportFrameReceiver(
+                stateHolder = holder,
+                hybridControlStore = store
+            ),
+            frames = sentPlan.framesInSendOrder()
+        )
+
+        assertTrue(receiveResult is BleTransportReceiveResult.Processed)
+        val processed = receiveResult as BleTransportReceiveResult.Processed
+        assertTrue(
+            processed.processingResult is IncomingTransportFrameProcessingResult.HybridControlHandled
+        )
+        val handled =
+            processed.processingResult as IncomingTransportFrameProcessingResult.HybridControlHandled
+        assertEquals("peer-owner", handled.peerId)
+        assertEquals(HybridTransportControlStore.RecordResult.Stored, handled.storeResult)
+
+        val storedSession = requireNotNull(
+            store.snapshot().sessionStateFor(
+                peerId = "peer-owner",
+                sessionId = "offer-session-hint"
+            )
+        )
+        assertEquals(controlMessage, storedSession.latestSocketHint)
+        assertNull(storedSession.latestOffer)
+        assertNull(storedSession.latestAccept)
+
+        val decisionAfterReceive = provider.currentDecision()
+        assertEquals(1, decisionAfterReceive.candidates.size)
+        val candidate = decisionAfterReceive.candidates.single()
+        assertEquals("peer-owner", candidate.peerId)
+        assertEquals("offer-session-hint", candidate.sessionId)
+        assertFalse(candidate.hasOffer)
+        assertFalse(candidate.hasAccept)
+        assertTrue(candidate.hasSocketHint)
+        assertTrue(candidate.socketReady)
+        assertEquals(
+            HybridBootstrapCandidateSelection.Selected(candidate),
+            decisionAfterReceive.selection
+        )
+
+        val diagnostics = requireNotNull(
+            hybridBootstrapDiagnosticsAfterReceiveOrNull(
+                result = receiveResult,
+                provider = provider
+            )
+        )
+        assertEquals(
+            "Hybrid bootstrap: socket-ready peer=peer-owner session=offer-session-hint address=192.168.49.1 port=8988",
+            hybridBootstrapDiagnosticsRuntimeStatusText(diagnostics)
+        )
+        val commandBuildResult = currentHybridBootstrapAttemptCommandBuildResult(
+            provider = provider,
+            requestedAtMillis = 1_716_510_031L,
+            commandCreatedAtMillis = 1_716_510_032L
+        )
+        assertTrue(commandBuildResult is HybridBootstrapAttemptCommandBuildResult.Built)
+        val manualTriggerSnapshot = currentHybridBootstrapManualTriggerSnapshot(
+            commandBuildResult = commandBuildResult,
+            latestTriggerResult = null
+        )
+        assertTrue(manualTriggerSnapshot.canTriggerNow)
         assertEquals(initialGlobalMessages, holder.uiState.globalMessages)
         assertEquals(initialPrivateMessages, holder.uiState.privateMessagesByPeerId)
     }
