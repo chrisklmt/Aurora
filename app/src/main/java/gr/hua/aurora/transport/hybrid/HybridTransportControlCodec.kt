@@ -12,6 +12,8 @@ object HybridTransportControlCodec {
     private const val legacyPartCount = 13
     private const val legacyExtendedPartCount = 17
     private const val extendedPartCount = 18
+    private const val diagnosticsExtendedPartCount = 21
+    private const val diagnosticsProbePayloadPartCount = 22
     private val encoder = Base64.getUrlEncoder().withoutPadding()
     private val decoder = Base64.getUrlDecoder()
 
@@ -37,13 +39,18 @@ object HybridTransportControlCodec {
             message.generationToken?.toString() ?: nullToken,
             encodeCapabilityFlags(message.capabilityFlags)
         )
-        if (
+        val hasExtendedPeerFields =
             message.senderPeerIdHint != null ||
             message.expectedPeerIdHint != null ||
             message.wifiDirectCorrelationToken != null ||
             message.wifiDirectDeviceAddress != null ||
             message.wifiDirectDeviceName != null
-        ) {
+        val hasDiagnosticsPhaseFields =
+            message.diagnosticsStepNumber != null ||
+                message.diagnosticsPhaseState != null ||
+                message.diagnosticsAttemptNumber != null ||
+                message.diagnosticsApplicationProbePayload != null
+        if (hasExtendedPeerFields || hasDiagnosticsPhaseFields) {
             parts += listOf(
                 message.senderPeerIdHint?.let(::encodeField) ?: nullToken,
                 message.expectedPeerIdHint?.let(::encodeField) ?: nullToken,
@@ -51,6 +58,14 @@ object HybridTransportControlCodec {
                 message.wifiDirectDeviceAddress?.let(::encodeField) ?: nullToken,
                 message.wifiDirectDeviceName?.let(::encodeField) ?: nullToken
             )
+            if (hasDiagnosticsPhaseFields) {
+                parts += listOf(
+                    message.diagnosticsStepNumber?.toString() ?: nullToken,
+                    message.diagnosticsPhaseState?.let(::encodeField) ?: nullToken,
+                    message.diagnosticsAttemptNumber?.toString() ?: nullToken,
+                    message.diagnosticsApplicationProbePayload?.let(::encodeField) ?: nullToken
+                )
+            }
         }
         return parts.joinToString(separator)
     }
@@ -62,7 +77,9 @@ object HybridTransportControlCodec {
         require(
             parts.size == legacyPartCount ||
                 parts.size == legacyExtendedPartCount ||
-                parts.size == extendedPartCount
+                parts.size == extendedPartCount ||
+                parts.size == diagnosticsExtendedPartCount ||
+                parts.size == diagnosticsProbePayloadPartCount
         ) {
             "Invalid hybrid transport control part count: ${parts.size}."
         }
@@ -109,29 +126,49 @@ object HybridTransportControlCodec {
                 null
             },
             wifiDirectDeviceAddress = when (parts.size) {
-                extendedPartCount -> decodeNullableField(
-                    parts[16],
-                    "wifiDirectDeviceAddress"
-                )
                 legacyExtendedPartCount -> decodeNullableField(
                     parts[15],
                     "wifiDirectDeviceAddress"
                 )
-                else -> null
+                else -> decodeExtendedNullableField(
+                    parts = parts,
+                    index = 16,
+                    fieldName = "wifiDirectDeviceAddress"
+                )
             },
             wifiDirectDeviceName = when (parts.size) {
-                extendedPartCount -> decodeNullableField(
-                    parts[17],
-                    "wifiDirectDeviceName"
-                )
                 legacyExtendedPartCount -> decodeNullableField(
                     parts[16],
                     "wifiDirectDeviceName"
                 )
-                else -> null
+                else -> decodeExtendedNullableField(
+                    parts = parts,
+                    index = 17,
+                    fieldName = "wifiDirectDeviceName"
+                )
             },
             groupOwnerAddress = decodeNullableField(parts[6], "groupOwnerAddress"),
             socketPort = socketPort,
+            diagnosticsStepNumber = decodeExtendedNullableInt(
+                parts = parts,
+                index = 18,
+                fieldName = "diagnosticsStepNumber"
+            ),
+            diagnosticsPhaseState = decodeExtendedNullableField(
+                parts = parts,
+                index = 19,
+                fieldName = "diagnosticsPhaseState"
+            ),
+            diagnosticsAttemptNumber = decodeExtendedNullableInt(
+                parts = parts,
+                index = 20,
+                fieldName = "diagnosticsAttemptNumber"
+            ),
+            diagnosticsApplicationProbePayload = decodeExtendedNullableField(
+                parts = parts,
+                index = 21,
+                fieldName = "diagnosticsApplicationProbePayload"
+            ),
             createdAtMillis = createdAtMillis,
             associatedSessionId = decodeNullableField(parts[9], "associatedSessionId"),
             expiresAtMillis = expiresAtMillis,
@@ -173,6 +210,24 @@ object HybridTransportControlCodec {
         } else {
             decodeNullableField(parts[index], fieldName)
         }
+    }
+
+    private fun decodeExtendedNullableInt(
+        parts: List<String>,
+        index: Int,
+        fieldName: String
+    ): Int? {
+        if (parts.size <= index) {
+            return null
+        }
+        val token = parts[index]
+        if (token == nullToken) {
+            return null
+        }
+        return token.toIntOrNull()
+            ?: throw IllegalArgumentException(
+                "Invalid hybrid transport $fieldName: $token."
+            )
     }
 
     private fun decodeField(

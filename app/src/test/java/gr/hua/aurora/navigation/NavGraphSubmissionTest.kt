@@ -11,6 +11,8 @@ import gr.hua.aurora.protocol.PrivateChatMessageSendResult
 import gr.hua.aurora.state.PrivateChatTransportSubmission
 import gr.hua.aurora.state.AuroraStateHolder
 import gr.hua.aurora.state.SampleAuroraState
+import gr.hua.aurora.state.submitGlobalQueuedMessage
+import gr.hua.aurora.state.submitPrivateQueuedMessage
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -64,6 +66,29 @@ class NavGraphSubmissionTest {
             result
         )
         assertEquals(listOf(queuedMessage.messageId to "Chris"), wifiDirectInvocations)
+    }
+
+    @Test
+    fun globalSubmitInvokesRuntimeSubmissionExactlyOnce() = runBlocking {
+        val queuedMessage = sampleOutgoingMessage(threadId = "global")
+        var runtimeSubmitCount = 0
+
+        val result = submitGlobalQueuedMessage(
+            queuedMessage = queuedMessage,
+            currentUsername = { "Chris" },
+            submitTransport = { message, senderId ->
+                runtimeSubmitCount += 1
+                assertEquals(queuedMessage, message)
+                assertEquals("Chris", senderId)
+                GlobalMeshDeliveryResult.QueuedToActivePeer("peer-123")
+            }
+        )
+
+        assertEquals(1, runtimeSubmitCount)
+        assertEquals(
+            GlobalMeshDeliveryResult.QueuedToActivePeer("peer-123"),
+            result
+        )
     }
 
     @Test
@@ -217,6 +242,36 @@ class NavGraphSubmissionTest {
         )
 
         assertEquals(listOf("chat-old", "chat-new"), submittedChatIds)
+    }
+
+    @Test
+    fun privateSubmitInvokesEncryptedRuntimeSubmissionExactlyOnceWithResolvedChatId() = runBlocking {
+        val queuedMessage = sampleOutgoingMessage(threadId = "private:alex")
+        var resolvePrivateChatIdCount = 0
+        var runtimeSubmitCount = 0
+
+        val result = submitPrivateQueuedMessage(
+            queuedMessage = queuedMessage,
+            peerId = "alex",
+            currentUsername = { "Chris" },
+            resolvePrivateChatId = {
+                resolvePrivateChatIdCount += 1
+                "chat-alex"
+            },
+            submitTransport = { message, senderId, privateChatId ->
+                runtimeSubmitCount += 1
+                assertEquals(queuedMessage, message)
+                assertEquals("Chris", senderId)
+                assertEquals("chat-alex", privateChatId)
+                PrivateChatTransportSubmission(
+                    result = PrivateChatMessageSendResult.SubmittedLocally
+                )
+            }
+        )
+
+        assertEquals(1, resolvePrivateChatIdCount)
+        assertEquals(1, runtimeSubmitCount)
+        assertEquals(PrivateChatMessageSendResult.SubmittedLocally, result)
     }
 
     @Test

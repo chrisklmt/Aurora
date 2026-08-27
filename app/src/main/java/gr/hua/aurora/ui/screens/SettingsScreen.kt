@@ -1,5 +1,6 @@
 package gr.hua.aurora.ui.screens
 
+import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -24,6 +25,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import gr.hua.aurora.ui.components.AuroraTopBar
 import gr.hua.aurora.ui.components.AuroraTopBarAction
@@ -40,6 +42,7 @@ fun SettingsScreen(
     onClearLocalData: () -> Unit,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
     var draftUsername by rememberSaveable(currentUsername) { mutableStateOf(currentUsername) }
     var showClearDialog by rememberSaveable { mutableStateOf(false) }
     val currentGlobalChatUsername = if (useCustomUsernameInGlobalChat) {
@@ -47,11 +50,13 @@ fun SettingsScreen(
     } else {
         generatedUsername
     }
+    val appVersionDisplayLabel = appVersionLabel(currentAppVersionName(context))
 
     Scaffold(
         topBar = {
             AuroraTopBar(
                 title = "Settings",
+                username = appVersionDisplayLabel,
                 rightAction = AuroraTopBarAction.BACK,
                 onRightActionClick = onBack
             )
@@ -208,4 +213,23 @@ fun SettingsScreen(
             }
         )
     }
+}
+
+@Suppress("DEPRECATION")
+internal fun currentAppVersionName(
+    context: Context
+): String {
+    return runCatching {
+        context.packageManager.getPackageInfo(context.packageName, 0).versionName.orEmpty()
+    }.getOrDefault("")
+}
+
+internal fun appVersionLabel(
+    versionName: String
+): String {
+    val trimmedVersionName = versionName.trim()
+    if (trimmedVersionName.isEmpty()) {
+        return "Version unavailable"
+    }
+    return "v. $trimmedVersionName"
 }

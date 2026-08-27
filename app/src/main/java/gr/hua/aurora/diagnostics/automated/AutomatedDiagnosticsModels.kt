@@ -1,5 +1,8 @@
 package gr.hua.aurora.diagnostics.automated
 
+import gr.hua.aurora.state.AuroraAvailabilityPreference
+import gr.hua.aurora.wifidirect.controller.WifiDirectEnabledState
+
 enum class AutomatedDiagnosticStepStatus {
     WAITING,
     RUNNING,
@@ -47,6 +50,46 @@ data class AutomatedDiagnosticsRequiredAction(
     }
 }
 
+enum class AutomatedDiagnosticsPreparationItemStatus {
+    READY,
+    WAITING
+}
+
+data class AutomatedDiagnosticsPreparationItem(
+    val label: String,
+    val status: AutomatedDiagnosticsPreparationItemStatus,
+    val detail: String
+) {
+    init {
+        require(label.isNotBlank()) {
+            "Automated diagnostics preparation label must not be blank."
+        }
+        require(detail.isNotBlank()) {
+            "Automated diagnostics preparation detail must not be blank."
+        }
+    }
+}
+
+data class AutomatedDiagnosticsPreparationState(
+    val isReady: Boolean,
+    val summary: String,
+    val requiredAction: AutomatedDiagnosticsRequiredAction? = null,
+    val items: List<AutomatedDiagnosticsPreparationItem> = emptyList()
+) {
+    init {
+        require(summary.isNotBlank()) {
+            "Automated diagnostics preparation summary must not be blank."
+        }
+    }
+}
+
+internal enum class AutomatedDiagnosticsPreparationCommand {
+    NONE,
+    START_RUN,
+    REQUEST_BLUETOOTH_PERMISSIONS,
+    REQUEST_WIFI_DIRECT_PERMISSIONS
+}
+
 enum class AutomatedDiagnosticStepId(
     val stepNumber: Int,
     val title: String
@@ -67,7 +110,11 @@ enum class AutomatedDiagnosticStepId(
     HYBRID_BOOTSTRAP_OFFER(14, "Hybrid bootstrap offer"),
     HYBRID_BOOTSTRAP_ACCEPT(15, "Hybrid bootstrap accept"),
     HYBRID_BOOTSTRAP_SOCKET_HINT(16, "Hybrid bootstrap socket hint"),
-    HYBRID_BOOTSTRAP_TRIGGER(17, "Hybrid bootstrap trigger")
+    HYBRID_BOOTSTRAP_TRIGGER(17, "Hybrid bootstrap trigger"),
+    GLOBAL_MESSAGE_PROBE(18, "Global message probe"),
+    PRIVATE_ENCRYPTED_MESSAGE_PROBE(19, "Private encrypted message probe"),
+    REVERSE_DIRECTION_MESSAGING_PROBE(20, "Reverse-direction messaging probe"),
+    FINAL_END_TO_END_VALIDATION(21, "Final end-to-end validation")
 }
 
 data class AutomatedDiagnosticEvidenceValue(
@@ -153,6 +200,29 @@ data class AutomatedDiagnosticStepResult(
     )
 }
 
+enum class AutomatedDiagnosticsPhase(
+    val title: String,
+    val reportTitle: String,
+    val stepRange: IntRange
+) {
+    PHASE_1("Phase 1", "Phase 1 Report", 1..10),
+    PHASE_2("Phase 2", "Phase 2 Report", 11..17),
+    PHASE_3("Phase 3", "Phase 3 Report", 18..21)
+}
+
+data class AutomatedDiagnosticsPhaseSection(
+    val phase: AutomatedDiagnosticsPhase,
+    val steps: List<AutomatedDiagnosticStepResult>,
+    val aggregatedStatus: AutomatedDiagnosticStepStatus,
+    val reportText: String
+) {
+    init {
+        require(steps.isNotEmpty()) {
+            "Automated diagnostics phase section must contain at least one step."
+        }
+    }
+}
+
 data class AutomatedDiagnosticsRunState(
     val overallStatus: AutomatedDiagnosticsOverallStatus,
     val currentStepNumber: Int?,
@@ -175,7 +245,7 @@ data class AutomatedDiagnosticsRunState(
     val sharedRunExpiresAtMillis: Long? = null,
     val sharedRunCanonicalPeerPair: String? = null,
     val steps: List<AutomatedDiagnosticStepResult>,
-    val phaseTwoSummary: String = automatedDiagnosticsPhaseTwoSummary,
+    val phaseTwoSummary: String = "",
     val reportText: String = ""
 ) {
     init {
@@ -190,9 +260,6 @@ data class AutomatedDiagnosticsRunState(
         }
         require(steps.size == totalSteps) {
             "Automated diagnostics steps size must match totalSteps."
-        }
-        require(phaseTwoSummary.isNotBlank()) {
-            "Automated diagnostics phaseTwoSummary must not be blank."
         }
     }
 
@@ -218,15 +285,12 @@ data class AutomatedDiagnosticsRunState(
                     sharedRunCanonicalPeerPair = null,
                     elapsedMillis = 0L,
                     steps = steps,
-                    phaseTwoSummary = automatedDiagnosticsPhaseTwoSummary
+                    phaseTwoSummary = ""
                 )
             )
         }
     }
 }
-
-const val automatedDiagnosticsPhaseTwoSummary: String =
-    "Phase 2 automates Wi-Fi Direct discovery/group, socket setup, bridges, and hybrid bootstrap validation. Global and Private probe messages remain for the next phase."
 
 fun automatedDiagnosticsCompactSummaryText(
     state: AutomatedDiagnosticsRunState
@@ -247,11 +311,17 @@ fun automatedDiagnosticsCompactSummaryText(
 }
 
 fun automatedDiagnosticsShouldAutoExpand(
+    status: AutomatedDiagnosticStepStatus
+): Boolean {
+    return status == AutomatedDiagnosticStepStatus.RUNNING ||
+        status == AutomatedDiagnosticStepStatus.FAIL ||
+        status == AutomatedDiagnosticStepStatus.BLOCKED
+}
+
+fun automatedDiagnosticsShouldAutoExpand(
     step: AutomatedDiagnosticStepResult
 ): Boolean {
-    return step.status == AutomatedDiagnosticStepStatus.RUNNING ||
-        step.status == AutomatedDiagnosticStepStatus.FAIL ||
-        step.status == AutomatedDiagnosticStepStatus.BLOCKED
+    return automatedDiagnosticsShouldAutoExpand(step.status)
 }
 
 fun automatedDiagnosticsCurrentRequiredActionStepOrNull(
@@ -263,6 +333,199 @@ fun automatedDiagnosticsCurrentRequiredActionStepOrNull(
                 step.status == AutomatedDiagnosticStepStatus.BLOCKED ||
                     step.status == AutomatedDiagnosticStepStatus.RUNNING
                 )
+    }
+}
+
+internal fun automatedDiagnosticsPreparationState(
+    snapshot: AutomatedDiagnosticsRuntimeSnapshot
+): AutomatedDiagnosticsPreparationState {
+    val bluetoothPermissionsReady = snapshot.bluetoothPermissionStatus.allRequiredGranted
+    val bluetoothEnabled = snapshot.bluetoothPermissionStatus.isBluetoothEnabled == true
+    val locationEnabled = snapshot.bluetoothPermissionStatus.isLocationEnabled == true
+    val wifiDirectSupported = snapshot.wifiDirectRuntimeStatus.permissionStatus.isWifiDirectSupported
+    val wifiDirectPermissionsReady =
+        snapshot.wifiDirectRuntimeStatus.permissionStatus.allRequiredGranted
+    val wifiEnabled =
+        snapshot.wifiDirectRuntimeStatus.permissionStatus.enabledState ==
+            WifiDirectEnabledState.ENABLED
+    val runtimeHosted = snapshot.runtimeEvidence.bleRuntimeHosted
+    val javaNetRuntimeEnabled = snapshot.hybridBootstrapJavaNetRuntimeEnabled
+    val desiredAvailabilityReady =
+        snapshot.desiredAvailability == AuroraAvailabilityPreference.ONLINE
+
+    val requiredAction = when {
+        !bluetoothPermissionsReady ->
+            AutomatedDiagnosticsRequiredAction(
+                kind = AutomatedDiagnosticsRequiredActionKind.REQUEST_BLUETOOTH_PERMISSIONS,
+                title = "Bluetooth permissions required",
+                buttonLabel = "Grant Bluetooth permissions"
+            )
+        !bluetoothEnabled ->
+            AutomatedDiagnosticsRequiredAction(
+                kind = AutomatedDiagnosticsRequiredActionKind.OPEN_BLUETOOTH_SETTINGS,
+                title = "Bluetooth is disabled",
+                buttonLabel = "Open Bluetooth settings"
+            )
+        !locationEnabled ->
+            AutomatedDiagnosticsRequiredAction(
+                kind = AutomatedDiagnosticsRequiredActionKind.OPEN_LOCATION_SETTINGS,
+                title = "Location/GPS is disabled",
+                buttonLabel = "Open Location settings"
+            )
+        !wifiDirectSupported -> null
+        !wifiDirectPermissionsReady ->
+            AutomatedDiagnosticsRequiredAction(
+                kind = AutomatedDiagnosticsRequiredActionKind.REQUEST_WIFI_DIRECT_PERMISSIONS,
+                title = "Wi-Fi Direct permission required",
+                buttonLabel = "Grant Wi-Fi Direct permission"
+            )
+        snapshot.wifiDirectRuntimeStatus.permissionStatus.enabledState ==
+            WifiDirectEnabledState.DISABLED ->
+            AutomatedDiagnosticsRequiredAction(
+                kind = AutomatedDiagnosticsRequiredActionKind.OPEN_WIFI_SETTINGS,
+                title = "Wi-Fi is disabled",
+                buttonLabel = "Open Wi-Fi settings"
+            )
+        else -> null
+    }
+
+    val isReady =
+        bluetoothPermissionsReady &&
+            bluetoothEnabled &&
+            locationEnabled &&
+            wifiDirectSupported &&
+            wifiDirectPermissionsReady &&
+            wifiEnabled &&
+            runtimeHosted &&
+            javaNetRuntimeEnabled &&
+            desiredAvailabilityReady
+
+    val summary = when {
+        isReady -> "Ready to start automated diagnostics."
+        requiredAction?.kind == AutomatedDiagnosticsRequiredActionKind.REQUEST_BLUETOOTH_PERMISSIONS ->
+            "Requesting Bluetooth permissions before starting the test."
+        requiredAction?.kind == AutomatedDiagnosticsRequiredActionKind.REQUEST_WIFI_DIRECT_PERMISSIONS ->
+            "Requesting Wi-Fi Direct permission before starting the test."
+        !wifiDirectSupported -> "Wi-Fi Direct is unsupported on this device."
+        !wifiEnabled -> "Enable Wi-Fi before starting the test."
+        !runtimeHosted -> "Waiting for the BLE runtime host."
+        !javaNetRuntimeEnabled -> "JavaNet runtime is unavailable."
+        !desiredAvailabilityReady -> "Set availability to Online before starting the test."
+        else -> "Preparing automated test."
+    }
+
+    return AutomatedDiagnosticsPreparationState(
+        isReady = isReady,
+        summary = summary,
+        requiredAction = requiredAction,
+        items = listOf(
+            AutomatedDiagnosticsPreparationItem(
+                label = "Bluetooth permissions",
+                status = if (bluetoothPermissionsReady) {
+                    AutomatedDiagnosticsPreparationItemStatus.READY
+                } else {
+                    AutomatedDiagnosticsPreparationItemStatus.WAITING
+                },
+                detail = if (bluetoothPermissionsReady) "Ready" else "Waiting"
+            ),
+            AutomatedDiagnosticsPreparationItem(
+                label = "Wi-Fi Direct permission",
+                status = if (!wifiDirectSupported || wifiDirectPermissionsReady) {
+                    AutomatedDiagnosticsPreparationItemStatus.READY
+                } else {
+                    AutomatedDiagnosticsPreparationItemStatus.WAITING
+                },
+                detail = when {
+                    !wifiDirectSupported -> "Unsupported"
+                    wifiDirectPermissionsReady -> "Ready"
+                    else -> "Waiting"
+                }
+            ),
+            AutomatedDiagnosticsPreparationItem(
+                label = "Bluetooth",
+                status = if (bluetoothEnabled) {
+                    AutomatedDiagnosticsPreparationItemStatus.READY
+                } else {
+                    AutomatedDiagnosticsPreparationItemStatus.WAITING
+                },
+                detail = if (bluetoothEnabled) "Enabled" else "Waiting"
+            ),
+            AutomatedDiagnosticsPreparationItem(
+                label = "Location/GPS",
+                status = if (locationEnabled) {
+                    AutomatedDiagnosticsPreparationItemStatus.READY
+                } else {
+                    AutomatedDiagnosticsPreparationItemStatus.WAITING
+                },
+                detail = if (locationEnabled) "Enabled" else "Waiting"
+            ),
+            AutomatedDiagnosticsPreparationItem(
+                label = "Wi-Fi",
+                status = if (!wifiDirectSupported || wifiEnabled) {
+                    AutomatedDiagnosticsPreparationItemStatus.READY
+                } else {
+                    AutomatedDiagnosticsPreparationItemStatus.WAITING
+                },
+                detail = when {
+                    !wifiDirectSupported -> "Unsupported"
+                    wifiEnabled -> "Enabled"
+                    else -> "Waiting"
+                }
+            ),
+            AutomatedDiagnosticsPreparationItem(
+                label = "Runtime hosted",
+                status = if (runtimeHosted) {
+                    AutomatedDiagnosticsPreparationItemStatus.READY
+                } else {
+                    AutomatedDiagnosticsPreparationItemStatus.WAITING
+                },
+                detail = if (runtimeHosted) "Ready" else "Waiting"
+            ),
+            AutomatedDiagnosticsPreparationItem(
+                label = "JavaNet runtime",
+                status = if (javaNetRuntimeEnabled) {
+                    AutomatedDiagnosticsPreparationItemStatus.READY
+                } else {
+                    AutomatedDiagnosticsPreparationItemStatus.WAITING
+                },
+                detail = if (javaNetRuntimeEnabled) "Ready" else "Waiting"
+            )
+        )
+    )
+}
+
+internal fun automatedDiagnosticsPreparationCommand(
+    isPreparationPending: Boolean,
+    currentOverallStatus: AutomatedDiagnosticsOverallStatus,
+    preparationState: AutomatedDiagnosticsPreparationState,
+    bluetoothPermissionRequestAttempted: Boolean,
+    wifiDirectPermissionRequestAttempted: Boolean,
+    startWhenReady: Boolean = true
+): AutomatedDiagnosticsPreparationCommand {
+    if (!isPreparationPending || currentOverallStatus == AutomatedDiagnosticsOverallStatus.RUNNING) {
+        return AutomatedDiagnosticsPreparationCommand.NONE
+    }
+    if (preparationState.isReady) {
+        return if (startWhenReady) {
+            AutomatedDiagnosticsPreparationCommand.START_RUN
+        } else {
+            AutomatedDiagnosticsPreparationCommand.NONE
+        }
+    }
+    return when (preparationState.requiredAction?.kind) {
+        AutomatedDiagnosticsRequiredActionKind.REQUEST_BLUETOOTH_PERMISSIONS ->
+            if (bluetoothPermissionRequestAttempted) {
+                AutomatedDiagnosticsPreparationCommand.NONE
+            } else {
+                AutomatedDiagnosticsPreparationCommand.REQUEST_BLUETOOTH_PERMISSIONS
+            }
+        AutomatedDiagnosticsRequiredActionKind.REQUEST_WIFI_DIRECT_PERMISSIONS ->
+            if (wifiDirectPermissionRequestAttempted) {
+                AutomatedDiagnosticsPreparationCommand.NONE
+            } else {
+                AutomatedDiagnosticsPreparationCommand.REQUEST_WIFI_DIRECT_PERMISSIONS
+            }
+        else -> AutomatedDiagnosticsPreparationCommand.NONE
     }
 }
 
@@ -280,10 +543,11 @@ fun automatedDiagnosticsPlainTextReport(
     sharedRunCanonicalPeerPair: String? = null,
     elapsedMillis: Long,
     steps: List<AutomatedDiagnosticStepResult>,
-    phaseTwoSummary: String
+    phaseTwoSummary: String,
+    reportTitle: String = "Automated Aurora Test"
 ): String {
     val headerLines = buildList {
-        add("Automated Aurora Test")
+        add(reportTitle)
         add("Overall: ${overallStatus.name}")
         add("Elapsed: ${formatAutomatedDiagnosticsDuration(elapsedMillis)}")
         add("Peer: ${selectedPeerId ?: "none"}")
@@ -319,7 +583,98 @@ fun automatedDiagnosticsPlainTextReport(
         }
     }
 
-    return (headerLines + stepLines + listOf("", phaseTwoSummary)).joinToString(separator = "\n")
+    val footerLines = if (phaseTwoSummary.isBlank()) {
+        emptyList()
+    } else {
+        listOf("", phaseTwoSummary)
+    }
+
+    return (headerLines + stepLines + footerLines).joinToString(separator = "\n")
+}
+
+fun automatedDiagnosticsPhaseForStep(
+    step: AutomatedDiagnosticStepResult
+): AutomatedDiagnosticsPhase {
+    return automatedDiagnosticsPhaseForStep(step.stepId)
+}
+
+fun automatedDiagnosticsPhaseForStep(
+    stepId: AutomatedDiagnosticStepId
+): AutomatedDiagnosticsPhase {
+    return AutomatedDiagnosticsPhase.entries.first { phase ->
+        stepId.stepNumber in phase.stepRange
+    }
+}
+
+fun automatedDiagnosticsStepsForPhase(
+    steps: List<AutomatedDiagnosticStepResult>,
+    phase: AutomatedDiagnosticsPhase
+): List<AutomatedDiagnosticStepResult> {
+    return steps.filter { automatedDiagnosticsPhaseForStep(it) == phase }
+}
+
+fun automatedDiagnosticsPhaseStatus(
+    steps: List<AutomatedDiagnosticStepResult>
+): AutomatedDiagnosticStepStatus {
+    return when {
+        steps.any { it.status == AutomatedDiagnosticStepStatus.FAIL } ->
+            AutomatedDiagnosticStepStatus.FAIL
+        steps.any { it.status == AutomatedDiagnosticStepStatus.BLOCKED } ->
+            AutomatedDiagnosticStepStatus.BLOCKED
+        steps.any { it.status == AutomatedDiagnosticStepStatus.RUNNING } ->
+            AutomatedDiagnosticStepStatus.RUNNING
+        steps.all { it.status == AutomatedDiagnosticStepStatus.PASS } ->
+            AutomatedDiagnosticStepStatus.PASS
+        steps.any { it.status == AutomatedDiagnosticStepStatus.CANCELLED } ->
+            AutomatedDiagnosticStepStatus.CANCELLED
+        steps.any { it.status == AutomatedDiagnosticStepStatus.WAITING } ->
+            AutomatedDiagnosticStepStatus.WAITING
+        steps.any { it.status == AutomatedDiagnosticStepStatus.SKIPPED } ->
+            AutomatedDiagnosticStepStatus.SKIPPED
+        else -> AutomatedDiagnosticStepStatus.WAITING
+    }
+}
+
+fun automatedDiagnosticsPhaseReport(
+    state: AutomatedDiagnosticsRunState,
+    phase: AutomatedDiagnosticsPhase
+): String {
+    val phaseSteps = automatedDiagnosticsStepsForPhase(state.steps, phase)
+    return automatedDiagnosticsPlainTextReport(
+        overallStatus = state.overallStatus,
+        selectedPeerId = state.selectedPeerId,
+        localPeerRole = state.localPeerRole,
+        localRunnerExecutionId = state.localRunnerExecutionId,
+        sharedRunId = state.sharedRunId,
+        sharedRunCoordinatorPeerId = state.sharedRunCoordinatorPeerId,
+        sharedRunParticipantPeerId = state.sharedRunParticipantPeerId,
+        sharedRunSessionAssociationId = state.sharedRunSessionAssociationId,
+        sharedRunCreatedAtMillis = state.sharedRunCreatedAtMillis,
+        sharedRunExpiresAtMillis = state.sharedRunExpiresAtMillis,
+        sharedRunCanonicalPeerPair = state.sharedRunCanonicalPeerPair,
+        elapsedMillis = state.elapsedMillis,
+        steps = phaseSteps,
+        phaseTwoSummary = if (phase == AutomatedDiagnosticsPhase.PHASE_2) {
+            state.phaseTwoSummary
+        } else {
+            ""
+        },
+        reportTitle = "Automated Aurora Test - ${phase.reportTitle}"
+    )
+}
+
+fun automatedDiagnosticsPhaseSections(
+    state: AutomatedDiagnosticsRunState
+): List<AutomatedDiagnosticsPhaseSection> {
+    return AutomatedDiagnosticsPhase.entries.map { phase ->
+        val phaseSteps = automatedDiagnosticsStepsForPhase(state.steps, phase)
+        AutomatedDiagnosticsPhaseSection(
+            phase = phase,
+            steps = phaseSteps,
+            aggregatedStatus = automatedDiagnosticsPhaseStatus(phaseSteps),
+            reportText = automatedDiagnosticsPhaseReport(state, phase)
+        )
+    }
 }
 
 fun formatAutomatedDiagnosticsDuration(

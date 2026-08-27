@@ -24,14 +24,20 @@ class BleTransportReceiveBuffer(
             )
         if (chunk.totalChunks > maxFramesPerGroup) {
             return BufferResult.BufferOverflow(
-                reason = "Transport chunk group ${chunk.groupId} has ${chunk.totalChunks} chunks and exceeds the receive frame limit of $maxFramesPerGroup."
+                reason = "Transport chunk group ${chunk.groupId} has ${chunk.totalChunks} chunks and exceeds the receive frame limit of $maxFramesPerGroup.",
+                groupId = chunk.groupId,
+                receivedChunks = 0,
+                expectedChunks = chunk.totalChunks
             )
         }
 
         val existingGroup = groups[chunk.groupId]
         if (existingGroup == null && groups.size >= maxGroups) {
             return BufferResult.BufferOverflow(
-                reason = "Transport receive buffer already tracks $maxGroups active groups."
+                reason = "Transport receive buffer already tracks $maxGroups active groups.",
+                groupId = chunk.groupId,
+                receivedChunks = 0,
+                expectedChunks = chunk.totalChunks
             )
         }
 
@@ -43,13 +49,19 @@ class BleTransportReceiveBuffer(
         if (group.expectedChunks != chunk.totalChunks) {
             groups.remove(chunk.groupId)
             return BufferResult.InvalidChunk(
-                reason = "Transport chunk group ${chunk.groupId} changed totalChunks from ${group.expectedChunks} to ${chunk.totalChunks}."
+                reason = "Transport chunk group ${chunk.groupId} changed totalChunks from ${group.expectedChunks} to ${chunk.totalChunks}.",
+                groupId = chunk.groupId,
+                receivedChunks = group.framesByIndex.size,
+                expectedChunks = group.expectedChunks
             )
         }
         if (group.sourceDeviceAddress != frame.sanitizedSourceDeviceAddress) {
             groups.remove(chunk.groupId)
             return BufferResult.InvalidChunk(
-                reason = "Transport chunk group ${chunk.groupId} changed source device address."
+                reason = "Transport chunk group ${chunk.groupId} changed source device address.",
+                groupId = chunk.groupId,
+                receivedChunks = group.framesByIndex.size,
+                expectedChunks = group.expectedChunks
             )
         }
         if (group.framesByIndex.containsKey(chunk.chunkIndex)) {
@@ -61,7 +73,10 @@ class BleTransportReceiveBuffer(
         if (group.framesByIndex.size >= maxFramesPerGroup) {
             groups.remove(chunk.groupId)
             return BufferResult.BufferOverflow(
-                reason = "Transport chunk group ${chunk.groupId} exceeded the receive frame limit of $maxFramesPerGroup."
+                reason = "Transport chunk group ${chunk.groupId} exceeded the receive frame limit of $maxFramesPerGroup.",
+                groupId = chunk.groupId,
+                receivedChunks = group.framesByIndex.size,
+                expectedChunks = group.expectedChunks
             )
         }
 
@@ -115,11 +130,17 @@ class BleTransportReceiveBuffer(
         ) : BufferResult
 
         data class InvalidChunk(
-            val reason: String
+            val reason: String,
+            val groupId: Int? = null,
+            val receivedChunks: Int? = null,
+            val expectedChunks: Int? = null
         ) : BufferResult
 
         data class BufferOverflow(
-            val reason: String
+            val reason: String,
+            val groupId: Int? = null,
+            val receivedChunks: Int? = null,
+            val expectedChunks: Int? = null
         ) : BufferResult
     }
 

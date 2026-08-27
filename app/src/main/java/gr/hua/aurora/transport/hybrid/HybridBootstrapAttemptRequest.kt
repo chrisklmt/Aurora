@@ -31,8 +31,5 @@ data class HybridBootstrapAttemptRequest(
         require(requestedAtMillis >= 0L) {
             "Hybrid bootstrap attempt request requestedAtMillis must be non-negative."
         }
-        require(requestedAtMillis >= latestCreatedAtMillis) {
-            "Hybrid bootstrap attempt request requestedAtMillis must be greater than or equal to latestCreatedAtMillis."
-        }
     }
 }

@@ -13,6 +13,10 @@ data class HybridTransportControlMessage(
     val wifiDirectDeviceName: String? = null,
     val groupOwnerAddress: String? = null,
     val socketPort: Int? = null,
+    val diagnosticsStepNumber: Int? = null,
+    val diagnosticsPhaseState: String? = null,
+    val diagnosticsAttemptNumber: Int? = null,
+    val diagnosticsApplicationProbePayload: String? = null,
     val createdAtMillis: Long,
     val associatedSessionId: String? = null,
     val expiresAtMillis: Long? = null,
@@ -52,6 +56,18 @@ data class HybridTransportControlMessage(
         }
         require(socketPort == null || socketPort in 1..65535) {
             "Hybrid transport socket port must be within 1..65535 when provided."
+        }
+        require(diagnosticsStepNumber == null || diagnosticsStepNumber > 0) {
+            "Hybrid transport diagnostics step number must be positive when provided."
+        }
+        require(diagnosticsPhaseState?.isBlank() != true) {
+            "Hybrid transport diagnostics phase state must not be blank when provided."
+        }
+        require(diagnosticsAttemptNumber == null || diagnosticsAttemptNumber > 0) {
+            "Hybrid transport diagnostics attempt number must be positive when provided."
+        }
+        require(diagnosticsApplicationProbePayload?.isBlank() != true) {
+            "Hybrid transport diagnostics application probe payload must not be blank when provided."
         }
         require(associatedSessionId?.isBlank() != true) {
             "Hybrid transport associated session id must not be blank when provided."

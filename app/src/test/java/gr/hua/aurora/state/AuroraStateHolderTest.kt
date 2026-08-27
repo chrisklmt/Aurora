@@ -997,6 +997,56 @@ class AuroraStateHolderTest {
     }
 
     @Test
+    fun removeMessagesByIdsRemovesOnlyExactKnownIdsAndKeepsMarkerLookingUserMessages() {
+        val holder = createHolder(
+            store = FakeProfileStore(),
+            generatedUsername = "PIAIUFN1"
+        )
+        val markerLookingGlobal = requireNotNull(
+            holder.sendGlobalPreviewMessage("AURORA_DIAG|user|text|that|must|stay")
+        )
+        val removableGlobal = requireNotNull(
+            holder.sendGlobalPreviewMessage("phase 3 removable global")
+        )
+        prepareReadyPrivateChat(holder, peerId = "peer-123")
+        val removablePrivate = requireNotNull(
+            holder.sendPrivateChatMessage("peer-123", "phase 3 removable private")
+        )
+        val markerLookingPrivate = requireNotNull(
+            holder.sendPrivateChatMessage("peer-123", "AURORA_DIAG|user|private|text|must|stay")
+        )
+
+        val removedIds = holder.removeMessagesByIds(
+            setOf(removableGlobal.messageId, removablePrivate.messageId)
+        )
+
+        assertEquals(
+            setOf(removableGlobal.messageId, removablePrivate.messageId),
+            removedIds
+        )
+        assertTrue(holder.uiState.globalMessages.any { it.id == markerLookingGlobal.messageId })
+        assertTrue(holder.uiState.globalMessages.none { it.id == removableGlobal.messageId })
+        assertTrue(
+            holder.privateMessagesForPeerId("peer-123").any { it.id == markerLookingPrivate.messageId }
+        )
+        assertTrue(
+            holder.privateMessagesForPeerId("peer-123").none { it.id == removablePrivate.messageId }
+        )
+        assertTrue(
+            holder.uiState.pendingOutgoingMessages.any { it.messageId == markerLookingGlobal.messageId }
+        )
+        assertTrue(
+            holder.uiState.pendingOutgoingMessages.any { it.messageId == markerLookingPrivate.messageId }
+        )
+        assertTrue(
+            holder.uiState.pendingOutgoingMessages.none { pending ->
+                pending.messageId == removableGlobal.messageId ||
+                    pending.messageId == removablePrivate.messageId
+            }
+        )
+    }
+
+    @Test
     fun delayedMessagesAreOrderedByTimestampThenMessageId() {
         val holder = createHolder(
             store = FakeProfileStore(),

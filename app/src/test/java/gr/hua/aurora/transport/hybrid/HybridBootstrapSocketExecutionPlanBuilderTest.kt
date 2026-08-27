@@ -215,23 +215,6 @@ class HybridBootstrapSocketExecutionPlanBuilderTest {
     }
 
     @Test
-    fun requestedAtMillisBeforeLatestCreatedAtMillisReturnsInvalidCommand() {
-        val result = HybridBootstrapSocketExecutionPlanBuilder.build(
-            command = invalidCommand(
-                latestCreatedAtMillis = 1_735_000_020L,
-                requestedAtMillis = 1_735_000_019L
-            )
-        )
-
-        assertEquals(
-            HybridBootstrapSocketExecutionPlanBuildResult.InvalidCommand(
-                reason = "Hybrid bootstrap socket execution plan requestedAtMillis must be greater than or equal to latestCreatedAtMillis."
-            ),
-            result
-        )
-    }
-
-    @Test
     fun commandCreatedAtMillisBeforeRequestedAtMillisReturnsInvalidCommand() {
         val result = HybridBootstrapSocketExecutionPlanBuilder.build(
             command = invalidCommand(

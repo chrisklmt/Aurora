@@ -35,9 +35,6 @@ data class HybridBootstrapAttemptCommand(
         require(commandCreatedAtMillis >= 0L) {
             "Hybrid bootstrap attempt command commandCreatedAtMillis must be non-negative."
         }
-        require(requestedAtMillis >= latestCreatedAtMillis) {
-            "Hybrid bootstrap attempt command requestedAtMillis must be greater than or equal to latestCreatedAtMillis."
-        }
         require(commandCreatedAtMillis >= requestedAtMillis) {
             "Hybrid bootstrap attempt command commandCreatedAtMillis must be greater than or equal to requestedAtMillis."
         }

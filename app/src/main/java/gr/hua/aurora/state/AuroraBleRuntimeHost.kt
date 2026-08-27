@@ -40,14 +40,34 @@ import gr.hua.aurora.ble.permissions.BluetoothPermissionStatus
 import gr.hua.aurora.ble.transport.AndroidBleTransportSender
 import gr.hua.aurora.ble.transport.BleGattTransportFrame
 import gr.hua.aurora.ble.transport.BleGattTransportFrameWriter
+import gr.hua.aurora.ble.transport.BleTransportLocalSendTrace
 import gr.hua.aurora.ble.transport.BleTransportFrameBridge
 import gr.hua.aurora.ble.transport.BleTransportFrameReceiver
 import gr.hua.aurora.ble.transport.BleTransportReceiveResult
 import gr.hua.aurora.ble.transport.BleTransportSendResult
 import gr.hua.aurora.ble.transport.BleTransportSender
 import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsActivityLifecycleState
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsApplicationProbeObservation
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsApplicationProbeAssociationOutcome
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsApplicationProbeMarker
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsApplicationProbeTransportReceiveEvent
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsApplicationProbeReceiveDiagnostic
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsApplicationProbeSourceResolution
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsApplicationProbeSourceResolutionSource
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsApplicationProbeSelectedSecurePeerGate
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsPhaseApplicationProbeDescriptor
+import gr.hua.aurora.diagnostics.automated.automatedDiagnosticsApplicationProbeExpectedMessageType
+import gr.hua.aurora.diagnostics.automated.automatedDiagnosticsApplicationProbeMarkerOrNull
+import gr.hua.aurora.diagnostics.automated.automatedDiagnosticsPhaseApplicationProbeDescriptors
+import gr.hua.aurora.diagnostics.automated.automatedDiagnosticsPhaseApplicationProbePayloadOrNull
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticStepId
 import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsParticipantJoin
 import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsParticipantJoinSendResult
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsHybridAcceptObservation
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsHybridSocketHintObservation
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsPhaseSignal
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsPhaseState
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsPhaseStateSendResult
 import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsRunAnnouncement
 import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsRunAnnouncementSendResult
 import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsWifiDirectPeerReadySendResult
@@ -55,14 +75,18 @@ import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsWifiDirectPeerRea
 import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsServerReadySignal
 import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsServerReadySendResult
 import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsSharedRun
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsTimingPolicy
 import gr.hua.aurora.diagnostics.automated.automatedDiagnosticsParticipantJoinSendStatusText
 import gr.hua.aurora.diagnostics.automated.automatedDiagnosticsParticipantJoinStatusText
+import gr.hua.aurora.diagnostics.automated.automatedDiagnosticsPhaseStateSendStatusText
+import gr.hua.aurora.diagnostics.automated.automatedDiagnosticsPhaseStateStatusText
 import gr.hua.aurora.diagnostics.automated.automatedDiagnosticsRunAnnouncementSendStatusText
 import gr.hua.aurora.diagnostics.automated.automatedDiagnosticsRunAnnouncementStatusText
 import gr.hua.aurora.diagnostics.automated.automatedDiagnosticsWifiDirectPeerReadySendStatusText
 import gr.hua.aurora.diagnostics.automated.automatedDiagnosticsWifiDirectPeerReadyStatusText
 import gr.hua.aurora.diagnostics.automated.automatedDiagnosticsServerReadySendStatusText
 import gr.hua.aurora.diagnostics.automated.automatedDiagnosticsServerReadyStatusText
+import gr.hua.aurora.diagnostics.automated.mergeAutomatedDiagnosticsPhaseSignal
 import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsRuntimeEvidence
 import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsRuntimeEvent
 import gr.hua.aurora.diagnostics.automated.SystemMonotonicClock
@@ -113,6 +137,7 @@ import gr.hua.aurora.transport.hybrid.HybridBootstrapDiagnostics
 import gr.hua.aurora.transport.hybrid.HybridBootstrapDiagnosticsFormatter
 import gr.hua.aurora.transport.hybrid.HybridBootstrapDecisionProvider
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCandidate
+import gr.hua.aurora.transport.hybrid.HybridBootstrapCandidateSelection
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommandBuildResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommandBuilder
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptDecision
@@ -120,6 +145,7 @@ import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptPolicy
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutorConfig
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutionResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutorMode
+import gr.hua.aurora.transport.hybrid.HybridBootstrapSocketConnector
 import gr.hua.aurora.transport.hybrid.HybridBootstrapManualAcceptSendResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapManualOfferSendResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapManualSocketHintSendResult
@@ -129,6 +155,7 @@ import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandTriggerController
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandTriggerResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapSocketEndpointResolution
 import gr.hua.aurora.transport.hybrid.HybridBootstrapSocketEndpointResolver
+import gr.hua.aurora.transport.hybrid.HybridBootstrapSocketHintObservation
 import gr.hua.aurora.transport.hybrid.HybridTransportControlFrameFactory
 import gr.hua.aurora.transport.hybrid.HybridTransportControlMessage
 import gr.hua.aurora.transport.hybrid.HybridTransportControlStore
@@ -154,10 +181,17 @@ import java.security.PrivateKey
 import java.nio.charset.StandardCharsets.UTF_8
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.withContext
 
 private const val auroraBleRuntimeLogTag = "AuroraBleRuntime"
 private const val automatedDiagnosticsRuntimeEventLimit = 32
+private const val automatedDiagnosticsApplicationProbeObservationLimit = 64
+private const val automatedDiagnosticsApplicationProbeReceiveDiagnosticLimit = 64
+private const val automatedDiagnosticsApplicationProbeTransportReceiveEventLimit = 128
+private const val automatedDiagnosticsBleTransportLocalSendTraceLimit = 64
 
 data class AuroraBleRuntimeState(
     val bluetoothPermissionStatus: BluetoothPermissionStatus,
@@ -203,14 +237,29 @@ data class AuroraBleRuntimeState(
     val latestAutomatedDiagnosticsParticipantJoin: AutomatedDiagnosticsParticipantJoin?,
     val latestAutomatedDiagnosticsWifiDirectPeerReadySignal:
     AutomatedDiagnosticsWifiDirectPeerReadySignal?,
+    val latestAutomatedDiagnosticsPhaseSignal: AutomatedDiagnosticsPhaseSignal?,
+    val latestAutomatedDiagnosticsPhaseSignalsByStep:
+    Map<AutomatedDiagnosticStepId, AutomatedDiagnosticsPhaseSignal>,
     val latestAutomatedDiagnosticsServerReadySignal: AutomatedDiagnosticsServerReadySignal?,
+    val latestAutomatedDiagnosticsHybridAcceptObservation:
+    AutomatedDiagnosticsHybridAcceptObservation?,
+    val latestAutomatedDiagnosticsHybridSocketHintObservation:
+    AutomatedDiagnosticsHybridSocketHintObservation?,
+    val recentBleTransportLocalSendTraces: List<BleTransportLocalSendTrace>,
+    val recentAutomatedDiagnosticsApplicationProbeObservations:
+    List<AutomatedDiagnosticsApplicationProbeObservation>,
+    val recentAutomatedDiagnosticsApplicationProbeTransportReceiveEvents:
+    List<AutomatedDiagnosticsApplicationProbeTransportReceiveEvent>,
+    val recentAutomatedDiagnosticsApplicationProbeReceiveDiagnostics:
+    List<AutomatedDiagnosticsApplicationProbeReceiveDiagnostic>,
     val lastAutomatedDiagnosticsCoordinationStatus: String?,
     val lastAutomatedDiagnosticsWifiDirectPeerReadyStatus: String?,
+    val lastAutomatedDiagnosticsPhaseStatus: String?,
     val lastAutomatedDiagnosticsServerReadyStatus: String?,
     val clearAutomatedDiagnosticsSharedRunCoordinationState: () -> Unit,
     val clearAutomatedDiagnosticsCoordinationState: () -> Unit,
     val hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
-    val onHybridBootstrapManualTriggerRequested: () -> HybridBootstrapCommandTriggerResult,
+    val onHybridBootstrapManualTriggerRequested: suspend () -> HybridBootstrapCommandTriggerResult,
     val hybridBootstrapManualAcceptAvailable: Boolean,
     val hybridBootstrapManualAcceptBlockedReason: String?,
     val lastHybridBootstrapManualAcceptStatus: String?,
@@ -231,6 +280,15 @@ data class AuroraBleRuntimeState(
         String,
         String?
     ) -> AutomatedDiagnosticsWifiDirectPeerReadySendResult,
+    val onAutomatedDiagnosticsPhaseStateRequested:
+    suspend (
+        AutomatedDiagnosticsSharedRun,
+        String,
+        AutomatedDiagnosticStepId,
+        AutomatedDiagnosticsPhaseState,
+        Int,
+        List<AutomatedDiagnosticsPhaseApplicationProbeDescriptor>
+    ) -> AutomatedDiagnosticsPhaseStateSendResult,
     val onAutomatedDiagnosticsServerReadyRequested:
     suspend (AutomatedDiagnosticsSharedRun, String, String, Int, Long) -> AutomatedDiagnosticsServerReadySendResult,
     val onHybridBootstrapManualSocketHintRequested:
@@ -248,6 +306,12 @@ data class AuroraBleRuntimeState(
         { message, senderId, _ ->
             submitGlobalMeshMessage(message, senderId)
         }
+
+    internal var setHybridBootstrapSocketConnectorOverride:
+        (HybridBootstrapSocketConnector?) -> Unit = {}
+
+    internal var recordAcceptedAutomatedDiagnosticsPhaseSignalSourceAssociation:
+        (AutomatedDiagnosticsPhaseSignal) -> Unit = {}
 }
 
 data class PrivateChatTransportSubmission(
@@ -297,8 +361,21 @@ fun rememberAuroraBleRuntimeState(
         BleScanAggregator()
     }
     val resolvedTransportFrameWriter = transportFrameWriter ?: bleConnector
+    var recentBleTransportLocalSendTraces by remember(runtimeGeneration) {
+        mutableStateOf<List<BleTransportLocalSendTrace>>(emptyList())
+    }
     val bleTransportSender = remember(resolvedTransportFrameWriter) {
-        createAuroraBleTransportSender(resolvedTransportFrameWriter)
+        createAuroraBleTransportSender(
+            transportFrameWriter = resolvedTransportFrameWriter,
+            onLocalSendTraceReady = { trace ->
+                recentBleTransportLocalSendTraces =
+                    appendBleTransportLocalSendTrace(
+                        traces = recentBleTransportLocalSendTraces,
+                        trace = trace,
+                        limit = automatedDiagnosticsBleTransportLocalSendTraceLimit
+                    )
+            }
+        )
     }
     val transportSenderSourceLabel = remember(bleTransportSender) {
         auroraTransportSenderSourceLabel(bleTransportSender)
@@ -546,6 +623,9 @@ fun rememberAuroraBleRuntimeState(
     val hybridBootstrapCommandExecutorConfig = remember(runtimeGeneration) {
         currentHybridBootstrapCommandExecutorConfig()
     }
+    var hybridBootstrapSocketConnectorOverride by remember(runtimeGeneration) {
+        mutableStateOf<HybridBootstrapSocketConnector?>(null)
+    }
     val hybridBootstrapDecisionProvider = remember(hybridTransportControlStore) {
         HybridBootstrapDecisionProvider(hybridTransportControlStore)
     }
@@ -582,10 +662,50 @@ fun rememberAuroraBleRuntimeState(
     ) {
         mutableStateOf<AutomatedDiagnosticsWifiDirectPeerReadySignal?>(null)
     }
+    var latestAutomatedDiagnosticsPhaseSignal by remember(
+        runtimeGeneration
+    ) {
+        mutableStateOf<AutomatedDiagnosticsPhaseSignal?>(null)
+    }
+    var latestAutomatedDiagnosticsPhaseSignalsByStep by remember(
+        runtimeGeneration
+    ) {
+        mutableStateOf<Map<AutomatedDiagnosticStepId, AutomatedDiagnosticsPhaseSignal>>(emptyMap())
+    }
     var latestAutomatedDiagnosticsServerReadySignal by remember(
         runtimeGeneration
     ) {
         mutableStateOf<AutomatedDiagnosticsServerReadySignal?>(null)
+    }
+    var latestAutomatedDiagnosticsHybridAcceptObservation by remember(
+        runtimeGeneration
+    ) {
+        mutableStateOf<AutomatedDiagnosticsHybridAcceptObservation?>(null)
+    }
+    var latestAutomatedDiagnosticsHybridSocketHintObservation by remember(
+        runtimeGeneration
+    ) {
+        mutableStateOf<AutomatedDiagnosticsHybridSocketHintObservation?>(null)
+    }
+    var recentAutomatedDiagnosticsApplicationProbeObservations by remember(
+        runtimeGeneration
+    ) {
+        mutableStateOf<List<AutomatedDiagnosticsApplicationProbeObservation>>(emptyList())
+    }
+    var recentAutomatedDiagnosticsApplicationProbeTransportReceiveEvents by remember(
+        runtimeGeneration
+    ) {
+        mutableStateOf<List<AutomatedDiagnosticsApplicationProbeTransportReceiveEvent>>(emptyList())
+    }
+    var recentAutomatedDiagnosticsApplicationProbeReceiveDiagnostics by remember(
+        runtimeGeneration
+    ) {
+        mutableStateOf<List<AutomatedDiagnosticsApplicationProbeReceiveDiagnostic>>(emptyList())
+    }
+    var automatedDiagnosticsAcceptedSourceAssociationsByAddress by remember(
+        runtimeGeneration
+    ) {
+        mutableStateOf<Map<String, AutomatedDiagnosticsAcceptedSourceAssociation>>(emptyMap())
     }
     var lastAutomatedDiagnosticsCoordinationStatus by remember(
         runtimeGeneration
@@ -593,6 +713,11 @@ fun rememberAuroraBleRuntimeState(
         mutableStateOf<String?>(null)
     }
     var lastAutomatedDiagnosticsWifiDirectPeerReadyStatus by remember(
+        runtimeGeneration
+    ) {
+        mutableStateOf<String?>(null)
+    }
+    var lastAutomatedDiagnosticsPhaseStatus by remember(
         runtimeGeneration
     ) {
         mutableStateOf<String?>(null)
@@ -606,10 +731,19 @@ fun rememberAuroraBleRuntimeState(
         runtimeGeneration
     ) {
         mutableStateOf(
-            HybridBootstrapSocketEndpointResolver.resolve(initialHybridBootstrapDecision)
+            currentHybridBootstrapSocketEndpointResolution(
+                provider = hybridBootstrapDecisionProvider,
+                socketHintObservationsByKey = emptyMap()
+            )
         )
     }
     val hybridBootstrapRequestedAtMillis = System::currentTimeMillis
+    val hybridBootstrapCurrentMonotonicMillis = SystemMonotonicClock::nowMillis
+    var hybridBootstrapSocketHintObservationsByKey by remember(
+        runtimeGeneration
+    ) {
+        mutableStateOf<Map<String, HybridBootstrapSocketHintObservation>>(emptyMap())
+    }
     var latestHybridBootstrapAttemptDecision by remember(
         runtimeGeneration
     ) {
@@ -617,6 +751,7 @@ fun rememberAuroraBleRuntimeState(
             HybridBootstrapAttemptPolicy.decide(
                 resolution = latestHybridBootstrapSocketEndpointResolution,
                 requestedAtMillis = hybridBootstrapRequestedAtMillis(),
+                currentMonotonicMillis = hybridBootstrapCurrentMonotonicMillis(),
                 maxEndpointAgeMillis = HybridBootstrapAttemptPolicy.DEFAULT_MAX_ENDPOINT_AGE_MILLIS
             )
         )
@@ -629,16 +764,6 @@ fun rememberAuroraBleRuntimeState(
             HybridBootstrapAttemptCommandBuilder.build(
                 decision = latestHybridBootstrapAttemptDecision,
                 commandCreatedAtMillis = hybridBootstrapCommandCreatedAtMillis()
-            )
-        )
-    }
-    val hybridBootstrapCommandTriggerController = remember(
-        runtimeGeneration,
-        hybridBootstrapCommandExecutorConfig
-    ) {
-        HybridBootstrapCommandTriggerController(
-            executor = HybridBootstrapCommandExecutorFactory.create(
-                hybridBootstrapCommandExecutorConfig
             )
         )
     }
@@ -675,6 +800,36 @@ fun rememberAuroraBleRuntimeState(
         runtimeGeneration
     ) {
         mutableStateOf<String?>(null)
+    }
+    fun applyLatestHybridBootstrapDecision(
+        decision: HybridBootstrapDecision
+    ) {
+        latestHybridBootstrapDecision = decision
+        latestHybridBootstrapDiagnostics = HybridBootstrapDiagnosticsFormatter.format(decision)
+        latestHybridBootstrapSocketEndpointResolution =
+            HybridBootstrapSocketEndpointResolver.resolve(
+                decision = decision,
+                socketHintObservation = currentHybridBootstrapSocketHintObservationForDecision(
+                    decision = decision,
+                    socketHintObservationsByKey = hybridBootstrapSocketHintObservationsByKey
+                )
+            )
+        latestHybridBootstrapAttemptDecision = HybridBootstrapAttemptPolicy.decide(
+            resolution = latestHybridBootstrapSocketEndpointResolution,
+            requestedAtMillis = hybridBootstrapRequestedAtMillis(),
+            currentMonotonicMillis = hybridBootstrapCurrentMonotonicMillis(),
+            maxEndpointAgeMillis = HybridBootstrapAttemptPolicy.DEFAULT_MAX_ENDPOINT_AGE_MILLIS
+        )
+        latestHybridBootstrapAttemptCommandBuildResult =
+            HybridBootstrapAttemptCommandBuilder.build(
+                decision = latestHybridBootstrapAttemptDecision,
+                commandCreatedAtMillis = hybridBootstrapCommandCreatedAtMillis()
+            )
+        latestHybridBootstrapManualTriggerSnapshot =
+            currentHybridBootstrapManualTriggerSnapshot(
+                commandBuildResult = latestHybridBootstrapAttemptCommandBuildResult,
+                latestTriggerResult = latestHybridBootstrapCommandTriggerResult
+            )
     }
     val hybridBootstrapManualAcceptAvailable = remember(
         runtimeGeneration,
@@ -747,14 +902,17 @@ fun rememberAuroraBleRuntimeState(
     @Suppress("UNUSED_VARIABLE")
     val hybridBootstrapManualTriggerAction = remember(
         runtimeGeneration,
-        hybridBootstrapCommandTriggerController
+        hybridBootstrapCommandExecutorConfig
     ) {
         createHybridBootstrapManualTriggerAction(
             buildResultProvider = {
                 latestHybridBootstrapAttemptCommandBuildResult
             },
             controllerProvider = {
-                hybridBootstrapCommandTriggerController
+                currentHybridBootstrapCommandTriggerController(
+                    config = hybridBootstrapCommandExecutorConfig,
+                    socketConnectorOverride = hybridBootstrapSocketConnectorOverride
+                )
             },
             recordResult = { result ->
                 latestHybridBootstrapCommandTriggerResult = result
@@ -792,17 +950,36 @@ fun rememberAuroraBleRuntimeState(
         activeTransportPeerId,
         bleTransportSender,
         peerSessionDiagnostics,
-        localPeerId
+        localPeerId,
+        hybridTransportControlStore,
+        hybridBootstrapDecisionProvider
     ) {
         createHybridBootstrapManualOfferRequestCallback {
+            val createdAtMillis = hybridBootstrapManualOfferCreatedAtMillis()
             val result = submitHybridBootstrapManualOffer(
                 bleConnectionStatus = bleConnectionStatus,
                 activeTransportPeerId = activeTransportPeerId,
                 peerSessionDiagnostics = peerSessionDiagnostics,
                 transportSender = bleTransportSender,
                 localPeerId = localPeerId,
-                createdAtMillis = hybridBootstrapManualOfferCreatedAtMillis()
+                createdAtMillis = createdAtMillis
             )
+            if (result is HybridBootstrapManualOfferSendResult.Sent) {
+                val localSenderPeerId = localPeerId?.trim()?.takeIf { it.isNotEmpty() }
+                if (localSenderPeerId != null) {
+                    applyLatestHybridBootstrapDecision(
+                        recordLocallySentHybridBootstrapControlMessage(
+                            targetPeerId = result.peerId,
+                            message = createHybridBootstrapManualOfferMessage(
+                                localPeerId = localSenderPeerId,
+                                createdAtMillis = createdAtMillis
+                            ),
+                            hybridControlStore = hybridTransportControlStore,
+                            provider = hybridBootstrapDecisionProvider
+                        )
+                    )
+                }
+            }
             lastHybridBootstrapManualOfferStatus =
                 hybridBootstrapManualOfferRuntimeStatusText(result)
             result
@@ -815,9 +992,12 @@ fun rememberAuroraBleRuntimeState(
         activeTransportPeerId,
         bleTransportSender,
         peerSessionDiagnostics,
-        localPeerId
+        localPeerId,
+        hybridTransportControlStore,
+        hybridBootstrapDecisionProvider
     ) {
         createHybridBootstrapManualAcceptRequestCallback {
+            val createdAtMillis = hybridBootstrapManualAcceptCreatedAtMillis()
             val result = submitHybridBootstrapManualAccept(
                 decision = latestHybridBootstrapDecision,
                 bleConnectionStatus = bleConnectionStatus,
@@ -825,8 +1005,25 @@ fun rememberAuroraBleRuntimeState(
                 peerSessionDiagnostics = peerSessionDiagnostics,
                 transportSender = bleTransportSender,
                 localPeerId = localPeerId,
-                createdAtMillis = hybridBootstrapManualAcceptCreatedAtMillis()
+                createdAtMillis = createdAtMillis
             )
+            if (result is HybridBootstrapManualAcceptSendResult.Sent) {
+                val localSenderPeerId = localPeerId?.trim()?.takeIf { it.isNotEmpty() }
+                if (localSenderPeerId != null) {
+                    applyLatestHybridBootstrapDecision(
+                        recordLocallySentHybridBootstrapControlMessage(
+                            targetPeerId = result.peerId,
+                            message = createHybridBootstrapManualAcceptMessage(
+                                localPeerId = localSenderPeerId,
+                                sessionId = result.sessionId,
+                                createdAtMillis = createdAtMillis
+                            ),
+                            hybridControlStore = hybridTransportControlStore,
+                            provider = hybridBootstrapDecisionProvider
+                        )
+                    )
+                }
+            }
             lastHybridBootstrapManualAcceptStatus =
                 hybridBootstrapManualAcceptRuntimeStatusText(result)
             result
@@ -840,9 +1037,12 @@ fun rememberAuroraBleRuntimeState(
         peerSessionDiagnostics,
         bleTransportSender,
         localPeerId,
-        wifiDirectRuntimeStatus.connectionStatus
+        wifiDirectRuntimeStatus.connectionStatus,
+        hybridTransportControlStore,
+        hybridBootstrapDecisionProvider
     ) {
         createHybridBootstrapManualSocketHintRequestCallback {
+            val createdAtMillis = hybridBootstrapManualSocketHintCreatedAtMillis()
             val result = submitHybridBootstrapManualSocketHint(
                 decision = latestHybridBootstrapDecision,
                 bleConnectionStatus = bleConnectionStatus,
@@ -852,8 +1052,27 @@ fun rememberAuroraBleRuntimeState(
                 localPeerId = localPeerId,
                 wifiDirectConnectionStatus = wifiDirectRuntimeStatus.connectionStatus,
                 socketPort = wifiDirectDebugSocketPort,
-                createdAtMillis = hybridBootstrapManualSocketHintCreatedAtMillis()
+                createdAtMillis = createdAtMillis
             )
+            if (result is HybridBootstrapManualSocketHintSendResult.Sent) {
+                val localSenderPeerId = localPeerId?.trim()?.takeIf { it.isNotEmpty() }
+                if (localSenderPeerId != null) {
+                    applyLatestHybridBootstrapDecision(
+                        recordLocallySentHybridBootstrapControlMessage(
+                            targetPeerId = result.peerId,
+                            message = createHybridBootstrapManualSocketHintMessage(
+                                localPeerId = localSenderPeerId,
+                                sessionId = result.sessionId,
+                                groupOwnerAddress = result.groupOwnerAddress,
+                                socketPort = result.socketPort,
+                                createdAtMillis = createdAtMillis
+                            ),
+                            hybridControlStore = hybridTransportControlStore,
+                            provider = hybridBootstrapDecisionProvider
+                        )
+                    )
+                }
+            }
             lastHybridBootstrapManualSocketHintStatus =
                 hybridBootstrapManualSocketHintRuntimeStatusText(result)
             result
@@ -926,9 +1145,35 @@ fun rememberAuroraBleRuntimeState(
             clearAutomatedDiagnosticsSharedRunCoordinationState()
             latestAutomatedDiagnosticsWifiDirectPeerReadySignal = null
             lastAutomatedDiagnosticsWifiDirectPeerReadyStatus = null
+            latestAutomatedDiagnosticsPhaseSignal = null
+            latestAutomatedDiagnosticsPhaseSignalsByStep = emptyMap()
+            lastAutomatedDiagnosticsPhaseStatus = null
             latestAutomatedDiagnosticsServerReadySignal = null
+            latestAutomatedDiagnosticsHybridAcceptObservation = null
+            latestAutomatedDiagnosticsHybridSocketHintObservation = null
+            recentBleTransportLocalSendTraces = emptyList()
+            recentAutomatedDiagnosticsApplicationProbeObservations = emptyList()
+            recentAutomatedDiagnosticsApplicationProbeTransportReceiveEvents = emptyList()
+            recentAutomatedDiagnosticsApplicationProbeReceiveDiagnostics = emptyList()
+            automatedDiagnosticsAcceptedSourceAssociationsByAddress = emptyMap()
             lastAutomatedDiagnosticsServerReadyStatus = null
             wifiDirectRuntimeState.clearAutomatedDiagnosticsServiceDiscovery()
+        }
+    }
+    val recordAcceptedAutomatedDiagnosticsPhaseSignalSourceAssociation: (
+        AutomatedDiagnosticsPhaseSignal
+    ) -> Unit = remember(runtimeGeneration) {
+        { signal ->
+            val sourceDeviceAddress = signal.sourceDeviceAddress
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?: return@remember
+            automatedDiagnosticsAcceptedSourceAssociationsByAddress =
+                automatedDiagnosticsAcceptedSourceAssociationsByAddress +
+                    (
+                        sourceDeviceAddress to
+                            AutomatedDiagnosticsAcceptedSourceAssociation.from(signal)
+                        )
         }
     }
     val onAutomatedDiagnosticsWifiDirectPeerReadyRequested: suspend (
@@ -974,6 +1219,49 @@ fun rememberAuroraBleRuntimeState(
                         createdAtMillis = createdAtMillis
                     )
                 }
+                result
+        }
+        callback
+    }
+    val onAutomatedDiagnosticsPhaseStateRequested: suspend (
+        AutomatedDiagnosticsSharedRun,
+        String,
+        AutomatedDiagnosticStepId,
+        AutomatedDiagnosticsPhaseState,
+        Int,
+        List<AutomatedDiagnosticsPhaseApplicationProbeDescriptor>
+    ) -> AutomatedDiagnosticsPhaseStateSendResult = remember(
+        runtimeGeneration,
+        bleConnectionStatus,
+        activeTransportPeerId,
+        bleTransportSender,
+        localPeerId
+    ) {
+        val callback: suspend (
+            AutomatedDiagnosticsSharedRun,
+            String,
+            AutomatedDiagnosticStepId,
+            AutomatedDiagnosticsPhaseState,
+            Int,
+            List<AutomatedDiagnosticsPhaseApplicationProbeDescriptor>
+        ) -> AutomatedDiagnosticsPhaseStateSendResult =
+            { sharedRun, expectedRemotePeerId, stepId, phaseState, attemptNumber, applicationProbeDescriptors ->
+                val createdAtMillis = automatedDiagnosticsServerReadyCreatedAtMillis()
+                val result = submitAutomatedDiagnosticsPhaseStateSignal(
+                    bleConnectionStatus = bleConnectionStatus,
+                    activeTransportPeerId = activeTransportPeerId,
+                    transportSender = bleTransportSender,
+                    localPeerId = localPeerId,
+                    sharedRun = sharedRun,
+                    expectedRemotePeerId = expectedRemotePeerId,
+                    stepId = stepId,
+                    phaseState = phaseState,
+                    attemptNumber = attemptNumber,
+                    applicationProbeDescriptors = applicationProbeDescriptors,
+                    createdAtMillis = createdAtMillis
+                )
+                lastAutomatedDiagnosticsPhaseStatus =
+                    automatedDiagnosticsPhaseStateSendStatusText(result)
                 result
             }
         callback
@@ -1047,9 +1335,18 @@ fun rememberAuroraBleRuntimeState(
         result: BleTransportReceiveResult
     ) {
         Log.d(auroraBleRuntimeLogTag, "$source transport receive result: $result")
+        val currentHybridMonotonicMillis = hybridBootstrapCurrentMonotonicMillis()
         peerSessionDiagnostics = peerSessionRegistry.diagnosticsSnapshot()
         identityExchangeRuntimeStatusText(result)?.let { statusText ->
             lastIdentityExchangeStatus = statusText
+        }
+        hybridBootstrapSocketHintObservationAfterReceiveOrNull(
+            result = result,
+            observedAtMonotonicMillis = currentHybridMonotonicMillis
+        )?.let { observation ->
+            hybridBootstrapSocketHintObservationsByKey =
+                hybridBootstrapSocketHintObservationsByKey +
+                    (hybridBootstrapSocketHintObservationKey(observation) to observation)
         }
         hybridBootstrapDecisionAfterReceiveOrNull(
             result = result,
@@ -1058,10 +1355,17 @@ fun rememberAuroraBleRuntimeState(
             latestHybridBootstrapDecision = decision
             latestHybridBootstrapDiagnostics = HybridBootstrapDiagnosticsFormatter.format(decision)
             latestHybridBootstrapSocketEndpointResolution =
-                HybridBootstrapSocketEndpointResolver.resolve(decision)
+                HybridBootstrapSocketEndpointResolver.resolve(
+                    decision = decision,
+                    socketHintObservation = currentHybridBootstrapSocketHintObservationForDecision(
+                        decision = decision,
+                        socketHintObservationsByKey = hybridBootstrapSocketHintObservationsByKey
+                    )
+                )
             latestHybridBootstrapAttemptDecision = HybridBootstrapAttemptPolicy.decide(
                 resolution = latestHybridBootstrapSocketEndpointResolution,
                 requestedAtMillis = hybridBootstrapRequestedAtMillis(),
+                currentMonotonicMillis = currentHybridMonotonicMillis,
                 maxEndpointAgeMillis = HybridBootstrapAttemptPolicy.DEFAULT_MAX_ENDPOINT_AGE_MILLIS
             )
             latestHybridBootstrapAttemptCommandBuildResult =
@@ -1090,10 +1394,98 @@ fun rememberAuroraBleRuntimeState(
             lastAutomatedDiagnosticsWifiDirectPeerReadyStatus =
                 automatedDiagnosticsWifiDirectPeerReadyStatusText(signal)
         }
+        automatedDiagnosticsPhaseStateAfterReceiveOrNull(result)?.let { signal ->
+            val mergedSignal = mergeAutomatedDiagnosticsPhaseSignal(
+                current = latestAutomatedDiagnosticsPhaseSignalsByStep[signal.stepId],
+                incoming = signal
+            )
+            latestAutomatedDiagnosticsPhaseSignal = mergeAutomatedDiagnosticsPhaseSignal(
+                current = latestAutomatedDiagnosticsPhaseSignal,
+                incoming = mergedSignal
+            )
+            latestAutomatedDiagnosticsPhaseSignalsByStep =
+                latestAutomatedDiagnosticsPhaseSignalsByStep +
+                    (signal.stepId to mergedSignal)
+            lastAutomatedDiagnosticsPhaseStatus =
+                automatedDiagnosticsPhaseStateStatusText(mergedSignal)
+        }
         automatedDiagnosticsServerReadySignalAfterReceiveOrNull(result)?.let { signal ->
             latestAutomatedDiagnosticsServerReadySignal = signal
             lastAutomatedDiagnosticsServerReadyStatus =
                 automatedDiagnosticsServerReadyStatusText(signal)
+        }
+        automatedDiagnosticsHybridAcceptObservationAfterReceiveOrNull(
+            result = result,
+            observedAtMonotonicMillis = currentHybridMonotonicMillis
+        )?.let { observation ->
+            latestAutomatedDiagnosticsHybridAcceptObservation = observation
+        }
+        automatedDiagnosticsHybridSocketHintObservationAfterReceiveOrNull(
+            result = result,
+            observedAtMonotonicMillis = currentHybridMonotonicMillis
+        )?.let { observation ->
+            latestAutomatedDiagnosticsHybridSocketHintObservation = observation
+        }
+        automatedDiagnosticsApplicationProbeTransportReceiveEventAfterReceiveOrNull(
+            result = result,
+            observedAtMonotonicMillis = currentHybridMonotonicMillis,
+            observedAtWallClockMillis = System.currentTimeMillis()
+        )?.let { event ->
+            recentAutomatedDiagnosticsApplicationProbeTransportReceiveEvents =
+                appendAutomatedDiagnosticsApplicationProbeTransportReceiveEvent(
+                    events = recentAutomatedDiagnosticsApplicationProbeTransportReceiveEvents,
+                    event = event
+                )
+        }
+        val applicationProbeReceiveDiagnostic =
+            automatedDiagnosticsApplicationProbeReceiveDiagnosticAfterReceiveOrNull(
+                result = result,
+                sourceDeviceAddress = if (result is BleTransportReceiveResult.Processed) {
+                    result.sourceDeviceAddress
+                } else {
+                    null
+                },
+                activeTransportPeerId = activeTransportPeerId,
+                activeTransportDeviceAddress = activeTransportDeviceAddress,
+                reachablePeers = discoveredAuroraPeers,
+                selectedSecurePeerId = stateHolder.uiState.selectedSecurePeerId,
+                diagnosticsSourceAssociationsByAddress =
+                    automatedDiagnosticsAcceptedSourceAssociationsByAddress,
+                receiverPeerId = localPeerId,
+                observedAtMonotonicMillis = currentHybridMonotonicMillis,
+                observedAtWallClockMillis = System.currentTimeMillis()
+            )
+        applicationProbeReceiveDiagnostic?.let { diagnostic ->
+            recentAutomatedDiagnosticsApplicationProbeReceiveDiagnostics =
+                appendAutomatedDiagnosticsApplicationProbeReceiveDiagnostic(
+                    diagnostics = recentAutomatedDiagnosticsApplicationProbeReceiveDiagnostics,
+                    diagnostic = diagnostic
+                )
+            automatedDiagnosticsApplicationProbeObservationFromReceiveDiagnosticOrNull(
+                diagnostic
+            )?.let { observation ->
+                recentAutomatedDiagnosticsApplicationProbeObservations =
+                    appendAutomatedDiagnosticsApplicationProbeObservation(
+                        observations = recentAutomatedDiagnosticsApplicationProbeObservations,
+                        observation = observation
+                    )
+            }
+        }
+        val resolvedImmediateSourcePeerId = if (
+            result is BleTransportReceiveResult.Processed &&
+                (
+                    result.processingResult is IncomingTransportFrameProcessingResult.Received ||
+                        result.processingResult is IncomingTransportFrameProcessingResult.RelayOnlyEncrypted
+                    )
+        ) {
+            runtimeSourcePeerId(
+                sourceDeviceAddress = result.sourceDeviceAddress,
+                activeTransportPeerId = activeTransportPeerId,
+                activeTransportDeviceAddress = activeTransportDeviceAddress,
+                reachablePeers = discoveredAuroraPeers
+            )
+        } else {
+            null
         }
         incomingMessageRuntimeStatusText(result)?.let { statusText ->
             lastIncomingMessageStatus = statusText
@@ -1105,12 +1497,7 @@ fun rememberAuroraBleRuntimeState(
                     result.processingResult is IncomingTransportFrameProcessingResult.RelayOnlyEncrypted
                 )
         ) {
-            val immediateSourcePeerId = runtimeSourcePeerId(
-                sourceDeviceAddress = result.sourceDeviceAddress,
-                activeTransportPeerId = activeTransportPeerId,
-                activeTransportDeviceAddress = activeTransportDeviceAddress,
-                reachablePeers = discoveredAuroraPeers
-            )
+            val immediateSourcePeerId = resolvedImmediateSourcePeerId
             when (val processingResult = result.processingResult) {
                 is IncomingTransportFrameProcessingResult.Received -> {
                     when (processingResult.message.frame.type) {
@@ -1366,6 +1753,10 @@ fun rememberAuroraBleRuntimeState(
         bleGattServer.stop()
         bleGattServerStatus = BleGattServerStatus.STOPPED
         transportFrameBridge.clear()
+        automatedDiagnosticsAcceptedSourceAssociationsByAddress = emptyMap()
+        recentBleTransportLocalSendTraces = emptyList()
+        recentAutomatedDiagnosticsApplicationProbeTransportReceiveEvents = emptyList()
+        recentAutomatedDiagnosticsApplicationProbeReceiveDiagnostics = emptyList()
     }
 
     val submitGlobalMeshMessageWithOptionalWifiDirect: suspend (
@@ -1684,10 +2075,25 @@ fun rememberAuroraBleRuntimeState(
         latestAutomatedDiagnosticsParticipantJoin = latestAutomatedDiagnosticsParticipantJoin,
         latestAutomatedDiagnosticsWifiDirectPeerReadySignal =
         latestAutomatedDiagnosticsWifiDirectPeerReadySignal,
+        latestAutomatedDiagnosticsPhaseSignal = latestAutomatedDiagnosticsPhaseSignal,
+        latestAutomatedDiagnosticsPhaseSignalsByStep =
+        latestAutomatedDiagnosticsPhaseSignalsByStep,
         latestAutomatedDiagnosticsServerReadySignal = latestAutomatedDiagnosticsServerReadySignal,
+        latestAutomatedDiagnosticsHybridAcceptObservation =
+        latestAutomatedDiagnosticsHybridAcceptObservation,
+        latestAutomatedDiagnosticsHybridSocketHintObservation =
+        latestAutomatedDiagnosticsHybridSocketHintObservation,
+        recentBleTransportLocalSendTraces = recentBleTransportLocalSendTraces,
+        recentAutomatedDiagnosticsApplicationProbeObservations =
+        recentAutomatedDiagnosticsApplicationProbeObservations,
+        recentAutomatedDiagnosticsApplicationProbeTransportReceiveEvents =
+        recentAutomatedDiagnosticsApplicationProbeTransportReceiveEvents,
+        recentAutomatedDiagnosticsApplicationProbeReceiveDiagnostics =
+        recentAutomatedDiagnosticsApplicationProbeReceiveDiagnostics,
         lastAutomatedDiagnosticsCoordinationStatus = lastAutomatedDiagnosticsCoordinationStatus,
         lastAutomatedDiagnosticsWifiDirectPeerReadyStatus =
         lastAutomatedDiagnosticsWifiDirectPeerReadyStatus,
+        lastAutomatedDiagnosticsPhaseStatus = lastAutomatedDiagnosticsPhaseStatus,
         lastAutomatedDiagnosticsServerReadyStatus = lastAutomatedDiagnosticsServerReadyStatus,
         clearAutomatedDiagnosticsSharedRunCoordinationState =
         clearAutomatedDiagnosticsSharedRunCoordinationState,
@@ -1709,6 +2115,8 @@ fun rememberAuroraBleRuntimeState(
         onAutomatedDiagnosticsParticipantJoinRequested,
         onAutomatedDiagnosticsWifiDirectPeerReadyRequested =
         onAutomatedDiagnosticsWifiDirectPeerReadyRequested,
+        onAutomatedDiagnosticsPhaseStateRequested =
+        onAutomatedDiagnosticsPhaseStateRequested,
         onAutomatedDiagnosticsServerReadyRequested = onAutomatedDiagnosticsServerReadyRequested,
         onHybridBootstrapManualSocketHintRequested = onHybridBootstrapManualSocketHintRequested,
         submitGlobalMeshMessage = submitGlobalMeshMessage,
@@ -1721,6 +2129,11 @@ fun rememberAuroraBleRuntimeState(
     ).also { runtimeState ->
         runtimeState.submitGlobalMeshMessageWithOptionalWifiDirect =
             submitGlobalMeshMessageWithOptionalWifiDirect
+        runtimeState.recordAcceptedAutomatedDiagnosticsPhaseSignalSourceAssociation =
+            recordAcceptedAutomatedDiagnosticsPhaseSignalSourceAssociation
+        runtimeState.setHybridBootstrapSocketConnectorOverride = { connector ->
+            hybridBootstrapSocketConnectorOverride = connector
+        }
     }
 }
 
@@ -2686,12 +3099,16 @@ internal fun identityExchangeRecoveryStatusText(
 }
 
 internal fun createAuroraBleTransportSender(
-    transportFrameWriter: BleGattTransportFrameWriter?
+    transportFrameWriter: BleGattTransportFrameWriter?,
+    onLocalSendTraceReady: ((BleTransportLocalSendTrace) -> Unit)? = null
 ): BleTransportSender {
     return if (transportFrameWriter == null) {
         NoOpBleTransportSender()
     } else {
-        AndroidBleTransportSender(transportFrameWriter)
+        AndroidBleTransportSender(
+            frameWriter = transportFrameWriter,
+            onLocalSendTraceReady = onLocalSendTraceReady
+        )
     }
 }
 
@@ -3202,6 +3619,37 @@ internal fun automatedDiagnosticsWifiDirectPeerReadySignalAfterReceiveOrNull(
     }
 }
 
+internal fun automatedDiagnosticsPhaseStateAfterReceiveOrNull(
+    result: BleTransportReceiveResult
+): AutomatedDiagnosticsPhaseSignal? {
+    return when (result) {
+        is BleTransportReceiveResult.Processed -> {
+            when (val processingResult = result.processingResult) {
+                is IncomingTransportFrameProcessingResult.HybridControlHandled -> {
+                    hybridTransportControlMessageAsAutomatedDiagnosticsPhaseSignalOrNull(
+                        peerId = processingResult.peerId,
+                        message = processingResult.controlMessage
+                    )?.copy(
+                        sourceDeviceAddress = result.sourceDeviceAddress
+                            ?.trim()
+                            ?.takeIf { it.isNotEmpty() }
+                    )
+                }
+                is IncomingTransportFrameProcessingResult.HybridControlIgnored,
+                is IncomingTransportFrameProcessingResult.IdentityHandled,
+                is IncomingTransportFrameProcessingResult.IdentityHandlingUnavailable,
+                is IncomingTransportFrameProcessingResult.Received,
+                is IncomingTransportFrameProcessingResult.RelayOnlyEncrypted -> null
+            }
+        }
+        is BleTransportReceiveResult.Buffered,
+        is BleTransportReceiveResult.BufferOverflow,
+        is BleTransportReceiveResult.DuplicateChunk,
+        is BleTransportReceiveResult.InvalidChunk,
+        is BleTransportReceiveResult.ProcessorFailed -> null
+    }
+}
+
 internal fun automatedDiagnosticsServerReadySignalAfterReceiveOrNull(
     result: BleTransportReceiveResult
 ): AutomatedDiagnosticsServerReadySignal? {
@@ -3236,6 +3684,687 @@ internal fun automatedDiagnosticsServerReadySignalAfterReceiveOrNull(
     }
 }
 
+internal fun automatedDiagnosticsHybridAcceptObservationAfterReceiveOrNull(
+    result: BleTransportReceiveResult,
+    observedAtMonotonicMillis: Long
+): AutomatedDiagnosticsHybridAcceptObservation? {
+    return when (result) {
+        is BleTransportReceiveResult.Processed -> {
+            when (val processingResult = result.processingResult) {
+                is IncomingTransportFrameProcessingResult.HybridControlHandled -> {
+                    if (
+                        processingResult.controlMessage.messageType ==
+                        HybridTransportControlMessage.MessageType.WIFI_DIRECT_ACCEPT
+                    ) {
+                        AutomatedDiagnosticsHybridAcceptObservation(
+                            peerId = processingResult.peerId,
+                            sessionId = processingResult.controlMessage.sessionId,
+                            publicPeerIdHint = processingResult.controlMessage.publicPeerIdHint,
+                            createdAtMillis = processingResult.controlMessage.createdAtMillis,
+                            observedAtMonotonicMillis = observedAtMonotonicMillis,
+                            storeResult = processingResult.storeResult
+                        )
+                    } else {
+                        null
+                    }
+                }
+                is IncomingTransportFrameProcessingResult.HybridControlIgnored,
+                is IncomingTransportFrameProcessingResult.IdentityHandled,
+                is IncomingTransportFrameProcessingResult.IdentityHandlingUnavailable,
+                is IncomingTransportFrameProcessingResult.Received,
+                is IncomingTransportFrameProcessingResult.RelayOnlyEncrypted -> null
+            }
+        }
+        is BleTransportReceiveResult.Buffered,
+        is BleTransportReceiveResult.BufferOverflow,
+        is BleTransportReceiveResult.DuplicateChunk,
+        is BleTransportReceiveResult.InvalidChunk,
+        is BleTransportReceiveResult.ProcessorFailed -> null
+    }
+}
+
+internal fun automatedDiagnosticsHybridSocketHintObservationAfterReceiveOrNull(
+    result: BleTransportReceiveResult,
+    observedAtMonotonicMillis: Long
+): AutomatedDiagnosticsHybridSocketHintObservation? {
+    return when (result) {
+        is BleTransportReceiveResult.Processed -> {
+            when (val processingResult = result.processingResult) {
+                is IncomingTransportFrameProcessingResult.HybridControlHandled -> {
+                    if (
+                        processingResult.controlMessage.messageType ==
+                        HybridTransportControlMessage.MessageType.WIFI_DIRECT_SOCKET_HINT
+                    ) {
+                        val groupOwnerAddress = processingResult.controlMessage.groupOwnerAddress
+                            ?: return null
+                        val socketPort = processingResult.controlMessage.socketPort
+                            ?: return null
+                        AutomatedDiagnosticsHybridSocketHintObservation(
+                            peerId = processingResult.peerId,
+                            sessionId = processingResult.controlMessage.sessionId,
+                            publicPeerIdHint = processingResult.controlMessage.publicPeerIdHint,
+                            groupOwnerAddress = groupOwnerAddress,
+                            socketPort = socketPort,
+                            createdAtMillis = processingResult.controlMessage.createdAtMillis,
+                            observedAtMonotonicMillis = observedAtMonotonicMillis,
+                            storeResult = processingResult.storeResult
+                        )
+                    } else {
+                        null
+                    }
+                }
+                is IncomingTransportFrameProcessingResult.HybridControlIgnored,
+                is IncomingTransportFrameProcessingResult.IdentityHandled,
+                is IncomingTransportFrameProcessingResult.IdentityHandlingUnavailable,
+                is IncomingTransportFrameProcessingResult.Received,
+                is IncomingTransportFrameProcessingResult.RelayOnlyEncrypted -> null
+            }
+        }
+        is BleTransportReceiveResult.Buffered,
+        is BleTransportReceiveResult.BufferOverflow,
+        is BleTransportReceiveResult.DuplicateChunk,
+        is BleTransportReceiveResult.InvalidChunk,
+        is BleTransportReceiveResult.ProcessorFailed -> null
+    }
+}
+
+internal data class AutomatedDiagnosticsAcceptedSourceAssociation(
+    val sharedRunId: String,
+    val sessionAssociationId: String,
+    val peerId: String,
+    val expectedRemotePeerId: String,
+    val stepId: AutomatedDiagnosticStepId,
+    val attemptNumber: Int,
+    val sourceDeviceAddress: String
+) {
+    companion object {
+        fun from(
+            signal: AutomatedDiagnosticsPhaseSignal
+        ): AutomatedDiagnosticsAcceptedSourceAssociation {
+            val sourceDeviceAddress = signal.sourceDeviceAddress
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?: error(
+                    "Accepted automated diagnostics phase signal sourceDeviceAddress is required."
+                )
+            return AutomatedDiagnosticsAcceptedSourceAssociation(
+                sharedRunId = signal.sharedRun.runId,
+                sessionAssociationId = signal.sharedRun.sessionAssociationId,
+                peerId = signal.peerId,
+                expectedRemotePeerId = signal.expectedRemotePeerId,
+                stepId = signal.stepId,
+                attemptNumber = signal.attemptNumber,
+                sourceDeviceAddress = sourceDeviceAddress
+            )
+        }
+    }
+}
+
+internal fun automatedDiagnosticsApplicationProbeTransportReceiveEventAfterReceiveOrNull(
+    result: BleTransportReceiveResult,
+    observedAtMonotonicMillis: Long,
+    observedAtWallClockMillis: Long? = null
+): AutomatedDiagnosticsApplicationProbeTransportReceiveEvent? {
+    return when (result) {
+        is BleTransportReceiveResult.Buffered ->
+            AutomatedDiagnosticsApplicationProbeTransportReceiveEvent(
+                groupId = result.groupId,
+                sourceDeviceAddress = null,
+                observedAtMonotonicMillis = observedAtMonotonicMillis,
+                observedAtWallClockMillis = observedAtWallClockMillis,
+                transportResultKind = "Buffered",
+                receivedChunks = result.receivedChunks,
+                expectedChunks = result.expectedChunks
+            )
+
+        is BleTransportReceiveResult.DuplicateChunk ->
+            AutomatedDiagnosticsApplicationProbeTransportReceiveEvent(
+                groupId = result.groupId,
+                sourceDeviceAddress = null,
+                observedAtMonotonicMillis = observedAtMonotonicMillis,
+                observedAtWallClockMillis = observedAtWallClockMillis,
+                transportResultKind = "DuplicateChunk",
+                failureDetail = "chunkIndex=${result.chunkIndex}"
+            )
+
+        is BleTransportReceiveResult.InvalidChunk ->
+            AutomatedDiagnosticsApplicationProbeTransportReceiveEvent(
+                groupId = result.groupId,
+                sourceDeviceAddress = null,
+                observedAtMonotonicMillis = observedAtMonotonicMillis,
+                observedAtWallClockMillis = observedAtWallClockMillis,
+                transportResultKind = "InvalidChunk",
+                receivedChunks = result.receivedChunks,
+                expectedChunks = result.expectedChunks,
+                failureDetail = result.reason
+            )
+
+        is BleTransportReceiveResult.BufferOverflow ->
+            AutomatedDiagnosticsApplicationProbeTransportReceiveEvent(
+                groupId = result.groupId,
+                sourceDeviceAddress = null,
+                observedAtMonotonicMillis = observedAtMonotonicMillis,
+                observedAtWallClockMillis = observedAtWallClockMillis,
+                transportResultKind = "BufferOverflow",
+                receivedChunks = result.receivedChunks,
+                expectedChunks = result.expectedChunks,
+                failureDetail = result.reason
+            )
+
+        is BleTransportReceiveResult.ProcessorFailed -> {
+            val receiveResult = result.processingResult.receiveResult
+            AutomatedDiagnosticsApplicationProbeTransportReceiveEvent(
+                groupId = result.groupId,
+                sourceDeviceAddress = result.sourceDeviceAddress?.trim()?.takeIf { it.isNotEmpty() },
+                observedAtMonotonicMillis = observedAtMonotonicMillis,
+                observedAtWallClockMillis = observedAtWallClockMillis,
+                transportResultKind = "ProcessorFailed",
+                processingResultKind = "ReceiveFailed",
+                receiveFailureKind = receiveResult::class.simpleName,
+                failureDetail = automatedDiagnosticsIncomingTransportReceiveFailureDetail(
+                    receiveResult
+                )
+            )
+        }
+
+        is BleTransportReceiveResult.Processed -> {
+            when (val processingResult = result.processingResult) {
+                is IncomingTransportFrameProcessingResult.Received -> {
+                    val frame = processingResult.message.frame
+                    val marker = automatedDiagnosticsApplicationProbeMarkerFromFrameOrNull(frame)
+                    val expectedMessageType = marker?.let { probeMarker ->
+                        automatedDiagnosticsApplicationProbeExpectedMessageType(
+                            probeMarker.probeKind
+                        )
+                    }
+                    val messageTypeMatchedExpectedProbe = if (expectedMessageType != null) {
+                        frame.type == expectedMessageType
+                    } else {
+                        null
+                    }
+                    val ingestionResultKind = when (processingResult.ingestionResult) {
+                        is Appended -> "Appended"
+                        is Duplicate -> "Duplicate"
+                        is UnsupportedThread -> "UnsupportedThread"
+                        is UnsupportedType -> "UnsupportedType"
+                    }
+                    val failureDetail = when (val ingestionResult = processingResult.ingestionResult) {
+                        is UnsupportedThread -> ingestionResult.reason
+                        is UnsupportedType -> ingestionResult.reason
+                        else -> null
+                    }
+                    AutomatedDiagnosticsApplicationProbeTransportReceiveEvent(
+                        groupId = result.groupId,
+                        sourceDeviceAddress = result.sourceDeviceAddress?.trim()?.takeIf { it.isNotEmpty() },
+                        observedAtMonotonicMillis = observedAtMonotonicMillis,
+                        observedAtWallClockMillis = observedAtWallClockMillis,
+                        transportResultKind = "Processed",
+                        processingResultKind = "Received",
+                        ingestionResultKind = ingestionResultKind,
+                        failureDetail = failureDetail,
+                        messageId = frame.id,
+                        messageType = frame.type,
+                        marker = marker,
+                        expectedMessageType = expectedMessageType,
+                        messageTypeMatchedExpectedProbe = messageTypeMatchedExpectedProbe
+                    )
+                }
+
+                is IncomingTransportFrameProcessingResult.HybridControlHandled ->
+                    AutomatedDiagnosticsApplicationProbeTransportReceiveEvent(
+                        groupId = result.groupId,
+                        sourceDeviceAddress = result.sourceDeviceAddress?.trim()?.takeIf { it.isNotEmpty() },
+                        observedAtMonotonicMillis = observedAtMonotonicMillis,
+                        observedAtWallClockMillis = observedAtWallClockMillis,
+                        transportResultKind = "Processed",
+                        processingResultKind = "HybridControlHandled"
+                    )
+
+                is IncomingTransportFrameProcessingResult.HybridControlIgnored ->
+                    AutomatedDiagnosticsApplicationProbeTransportReceiveEvent(
+                        groupId = result.groupId,
+                        sourceDeviceAddress = result.sourceDeviceAddress?.trim()?.takeIf { it.isNotEmpty() },
+                        observedAtMonotonicMillis = observedAtMonotonicMillis,
+                        observedAtWallClockMillis = observedAtWallClockMillis,
+                        transportResultKind = "Processed",
+                        processingResultKind = "HybridControlIgnored",
+                        failureDetail = processingResult.reason
+                    )
+
+                is IncomingTransportFrameProcessingResult.IdentityHandled ->
+                    AutomatedDiagnosticsApplicationProbeTransportReceiveEvent(
+                        groupId = result.groupId,
+                        sourceDeviceAddress = result.sourceDeviceAddress?.trim()?.takeIf { it.isNotEmpty() },
+                        observedAtMonotonicMillis = observedAtMonotonicMillis,
+                        observedAtWallClockMillis = observedAtWallClockMillis,
+                        transportResultKind = "Processed",
+                        processingResultKind = "IdentityHandled"
+                    )
+
+                is IncomingTransportFrameProcessingResult.IdentityHandlingUnavailable ->
+                    AutomatedDiagnosticsApplicationProbeTransportReceiveEvent(
+                        groupId = result.groupId,
+                        sourceDeviceAddress = result.sourceDeviceAddress?.trim()?.takeIf { it.isNotEmpty() },
+                        observedAtMonotonicMillis = observedAtMonotonicMillis,
+                        observedAtWallClockMillis = observedAtWallClockMillis,
+                        transportResultKind = "Processed",
+                        processingResultKind = "IdentityHandlingUnavailable",
+                        failureDetail = processingResult.reason
+                    )
+
+                is IncomingTransportFrameProcessingResult.RelayOnlyEncrypted ->
+                    AutomatedDiagnosticsApplicationProbeTransportReceiveEvent(
+                        groupId = result.groupId,
+                        sourceDeviceAddress = result.sourceDeviceAddress?.trim()?.takeIf { it.isNotEmpty() },
+                        observedAtMonotonicMillis = observedAtMonotonicMillis,
+                        observedAtWallClockMillis = observedAtWallClockMillis,
+                        transportResultKind = "Processed",
+                        processingResultKind = "RelayOnlyEncrypted"
+                    )
+            }
+        }
+    }
+}
+
+internal fun automatedDiagnosticsApplicationProbeMarkerFromFrameOrNull(
+    frame: MessageFrame
+): AutomatedDiagnosticsApplicationProbeMarker? {
+    return when (frame.type) {
+        MessageFrameType.GLOBAL_TEXT ->
+            automatedDiagnosticsApplicationProbeMarkerOrNull(frame.payload)
+
+        MessageFrameType.PRIVATE_TEXT ->
+            PrivateChatMessagePayloadCodec.decodeOrNull(frame.payload)
+                ?.body
+                ?.let(::automatedDiagnosticsApplicationProbeMarkerOrNull)
+
+        else -> null
+    }
+}
+
+internal fun automatedDiagnosticsIncomingTransportReceiveFailureDetail(
+    result: IncomingTransportReceiveResult
+): String {
+    return when (result) {
+        is IncomingTransportReceiveResult.IncompleteChunks -> result.reason
+        is IncomingTransportReceiveResult.InvalidEnvelope -> result.reason
+        is IncomingTransportReceiveResult.SessionMaterialUnavailable -> result.reason
+        is IncomingTransportReceiveResult.UnsupportedSender -> result.reason
+        is IncomingTransportReceiveResult.InvalidSenderIdentity -> result.reason
+        is IncomingTransportReceiveResult.DecryptFailed -> result.reason
+        is IncomingTransportReceiveResult.InvalidFrame -> result.reason
+        is IncomingTransportReceiveResult.Received ->
+            "Unexpected Received result in failure branch."
+        is IncomingTransportReceiveResult.RelayOnlyEncrypted ->
+            "Unexpected RelayOnlyEncrypted result in failure branch."
+    }
+}
+
+internal fun automatedDiagnosticsApplicationProbeReceiveDiagnosticAfterReceiveOrNull(
+    result: BleTransportReceiveResult,
+    sourceDeviceAddress: String?,
+    activeTransportPeerId: String?,
+    activeTransportDeviceAddress: String?,
+    reachablePeers: List<BleDiscoveredDevice>,
+    selectedSecurePeerId: String?,
+    diagnosticsSourceAssociationsByAddress:
+    Map<String, AutomatedDiagnosticsAcceptedSourceAssociation>,
+    receiverPeerId: String?,
+    observedAtMonotonicMillis: Long,
+    observedAtWallClockMillis: Long? = null
+): AutomatedDiagnosticsApplicationProbeReceiveDiagnostic? {
+    return when (result) {
+        is BleTransportReceiveResult.Processed -> {
+            when (val processingResult = result.processingResult) {
+                is IncomingTransportFrameProcessingResult.Received -> {
+                    val appendedMessage = processingResult.ingestionResult as? Appended
+                        ?: return null
+                    val marker = automatedDiagnosticsApplicationProbeMarkerOrNull(
+                        appendedMessage.message.text
+                    ) ?: return null
+                    if (
+                        processingResult.message.frame.type !=
+                        automatedDiagnosticsApplicationProbeExpectedMessageType(marker.probeKind)
+                    ) {
+                        return null
+                    }
+                    val privateChatId = if (
+                        processingResult.message.frame.type == MessageFrameType.PRIVATE_TEXT
+                    ) {
+                        PrivateChatMessagePayloadCodec.decodeOrNull(
+                            processingResult.message.frame.payload
+                        )?.privateChatId
+                    } else {
+                        null
+                    }
+                    val sourceResolution = automatedDiagnosticsApplicationProbeSourceResolution(
+                        sourceDeviceAddress = sourceDeviceAddress,
+                        marker = marker,
+                        activeTransportPeerId = activeTransportPeerId,
+                        activeTransportDeviceAddress = activeTransportDeviceAddress,
+                        reachablePeers = reachablePeers,
+                        receiverPeerId = receiverPeerId,
+                        selectedSecurePeerId = selectedSecurePeerId,
+                        diagnosticsSourceAssociationsByAddress =
+                            diagnosticsSourceAssociationsByAddress
+                    )
+                    return AutomatedDiagnosticsApplicationProbeReceiveDiagnostic(
+                        sharedRunId = marker.sharedRunId,
+                        stepId = marker.stepId,
+                        attemptNumber = marker.attemptNumber,
+                        probeKind = marker.probeKind,
+                        direction = marker.direction,
+                        messageId = appendedMessage.message.id,
+                        applicationSenderId = appendedMessage.message.senderId,
+                        receiverPeerId = receiverPeerId?.trim()?.takeIf { it.isNotEmpty() },
+                        messageType = processingResult.message.frame.type,
+                        threadId = appendedMessage.message.threadId,
+                        privateChatId = privateChatId,
+                        transportGroupId = result.groupId,
+                        marker = marker,
+                        sourceResolution = sourceResolution,
+                        observedAtMonotonicMillis = observedAtMonotonicMillis,
+                        observedAtWallClockMillis = observedAtWallClockMillis
+                    )
+                }
+                is IncomingTransportFrameProcessingResult.HybridControlHandled,
+                is IncomingTransportFrameProcessingResult.HybridControlIgnored,
+                is IncomingTransportFrameProcessingResult.IdentityHandled,
+                is IncomingTransportFrameProcessingResult.IdentityHandlingUnavailable,
+                is IncomingTransportFrameProcessingResult.RelayOnlyEncrypted -> null
+            }
+        }
+        is BleTransportReceiveResult.Buffered,
+        is BleTransportReceiveResult.BufferOverflow,
+        is BleTransportReceiveResult.DuplicateChunk,
+        is BleTransportReceiveResult.InvalidChunk,
+        is BleTransportReceiveResult.ProcessorFailed -> null
+    }
+}
+
+internal fun automatedDiagnosticsApplicationProbeSourceResolution(
+    sourceDeviceAddress: String?,
+    marker: gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsApplicationProbeMarker,
+    activeTransportPeerId: String?,
+    activeTransportDeviceAddress: String?,
+    reachablePeers: List<BleDiscoveredDevice>,
+    receiverPeerId: String?,
+    selectedSecurePeerId: String?,
+    diagnosticsSourceAssociationsByAddress:
+    Map<String, AutomatedDiagnosticsAcceptedSourceAssociation>
+): AutomatedDiagnosticsApplicationProbeSourceResolution {
+    val sanitizedSourceDeviceAddress = sourceDeviceAddress?.trim()?.takeIf { it.isNotEmpty() }
+    val sanitizedActiveTransportPeerId =
+        activeTransportPeerId?.trim()?.takeIf { it.isNotEmpty() }
+    val sanitizedActiveTransportDeviceAddress =
+        activeTransportDeviceAddress?.trim()?.takeIf { it.isNotEmpty() }
+    val exactAddressSourcePeerId = when {
+        sanitizedSourceDeviceAddress == null -> null
+        sanitizedActiveTransportDeviceAddress == sanitizedSourceDeviceAddress ->
+            sanitizedActiveTransportPeerId
+        else ->
+            reachablePeers.firstOrNull { device ->
+                device.address.trim() == sanitizedSourceDeviceAddress
+            }?.let(::runtimeReachablePeerId)
+    }
+    val exactResolutionSource = when {
+        sanitizedSourceDeviceAddress == null -> null
+        sanitizedActiveTransportDeviceAddress == sanitizedSourceDeviceAddress &&
+            sanitizedActiveTransportPeerId != null ->
+            AutomatedDiagnosticsApplicationProbeSourceResolutionSource.EXACT_ACTIVE_ADDRESS
+        sanitizedActiveTransportDeviceAddress == sanitizedSourceDeviceAddress -> null
+        exactAddressSourcePeerId != null ->
+            AutomatedDiagnosticsApplicationProbeSourceResolutionSource.EXACT_DISCOVERED_ADDRESS
+        else -> null
+    }
+    val sanitizedReceiverPeerId = receiverPeerId?.trim()?.takeIf { it.isNotEmpty() }
+    val sanitizedSelectedSecurePeerId = selectedSecurePeerId?.trim()?.takeIf { it.isNotEmpty() }
+    val association = sanitizedSourceDeviceAddress
+        ?.let(diagnosticsSourceAssociationsByAddress::get)
+    val selectedSecurePeerGate = when {
+        sanitizedSelectedSecurePeerId == null ->
+            AutomatedDiagnosticsApplicationProbeSelectedSecurePeerGate
+                .SELECTED_SECURE_PEER_UNAVAILABLE
+        association != null &&
+            association.peerId != sanitizedSelectedSecurePeerId ->
+            AutomatedDiagnosticsApplicationProbeSelectedSecurePeerGate
+                .SELECTED_SECURE_PEER_MISMATCH
+        else ->
+            AutomatedDiagnosticsApplicationProbeSelectedSecurePeerGate.MATCH
+    }
+    val diagnosticsAssociationOutcome = when {
+        association == null ->
+            AutomatedDiagnosticsApplicationProbeAssociationOutcome
+                .NO_ASSOCIATION_FOR_SOURCE_ADDRESS
+        association.sharedRunId != marker.sharedRunId ->
+            AutomatedDiagnosticsApplicationProbeAssociationOutcome.ASSOCIATION_WRONG_RUN
+        association.stepId != marker.stepId ->
+            AutomatedDiagnosticsApplicationProbeAssociationOutcome.ASSOCIATION_WRONG_STEP
+        association.attemptNumber != marker.attemptNumber ->
+            AutomatedDiagnosticsApplicationProbeAssociationOutcome.ASSOCIATION_WRONG_ATTEMPT
+        exactAddressSourcePeerId != null &&
+            association.peerId != exactAddressSourcePeerId ->
+            AutomatedDiagnosticsApplicationProbeAssociationOutcome.ASSOCIATION_WRONG_PEER
+        sanitizedReceiverPeerId == null ||
+            association.expectedRemotePeerId != sanitizedReceiverPeerId ->
+            AutomatedDiagnosticsApplicationProbeAssociationOutcome.ASSOCIATION_WRONG_RECEIVER
+        else ->
+            AutomatedDiagnosticsApplicationProbeAssociationOutcome.RESOLVED
+    }
+    val diagnosticsAssociatedSourcePeerId = association
+        ?.takeIf { diagnosticsAssociationOutcome == AutomatedDiagnosticsApplicationProbeAssociationOutcome.RESOLVED }
+        ?.peerId
+    return when {
+        exactResolutionSource != null ->
+            AutomatedDiagnosticsApplicationProbeSourceResolution(
+                sourceDeviceAddress = sanitizedSourceDeviceAddress,
+                exactAddressSourcePeerId = exactAddressSourcePeerId,
+                diagnosticsAssociatedSourcePeerId = diagnosticsAssociatedSourcePeerId,
+                resolvedSourcePeerId = exactAddressSourcePeerId,
+                resolutionSource = exactResolutionSource,
+                associationLookupHit = association != null,
+                storedAssociationPeerId = association?.peerId,
+                storedAssociationSharedRunId = association?.sharedRunId,
+                storedAssociationStepId = association?.stepId,
+                storedAssociationAttemptNumber = association?.attemptNumber,
+                storedAssociationExpectedRemotePeerId = association?.expectedRemotePeerId,
+                selectedSecurePeerId = sanitizedSelectedSecurePeerId,
+                diagnosticsAssociationOutcome = diagnosticsAssociationOutcome,
+                selectedSecurePeerGate = selectedSecurePeerGate
+            )
+        diagnosticsAssociatedSourcePeerId != null ->
+            AutomatedDiagnosticsApplicationProbeSourceResolution(
+                sourceDeviceAddress = sanitizedSourceDeviceAddress,
+                exactAddressSourcePeerId = exactAddressSourcePeerId,
+                diagnosticsAssociatedSourcePeerId = diagnosticsAssociatedSourcePeerId,
+                resolvedSourcePeerId = diagnosticsAssociatedSourcePeerId,
+                resolutionSource =
+                    AutomatedDiagnosticsApplicationProbeSourceResolutionSource
+                        .CURRENT_RUN_DIAGNOSTICS_ASSOCIATION,
+                associationLookupHit = true,
+                storedAssociationPeerId = association?.peerId,
+                storedAssociationSharedRunId = association?.sharedRunId,
+                storedAssociationStepId = association?.stepId,
+                storedAssociationAttemptNumber = association?.attemptNumber,
+                storedAssociationExpectedRemotePeerId = association?.expectedRemotePeerId,
+                selectedSecurePeerId = sanitizedSelectedSecurePeerId,
+                diagnosticsAssociationOutcome = diagnosticsAssociationOutcome,
+                selectedSecurePeerGate = selectedSecurePeerGate
+            )
+        else ->
+            AutomatedDiagnosticsApplicationProbeSourceResolution(
+                sourceDeviceAddress = sanitizedSourceDeviceAddress,
+                exactAddressSourcePeerId = exactAddressSourcePeerId,
+                diagnosticsAssociatedSourcePeerId = diagnosticsAssociatedSourcePeerId,
+                resolvedSourcePeerId = null,
+                resolutionSource =
+                    AutomatedDiagnosticsApplicationProbeSourceResolutionSource.UNRESOLVED,
+                associationLookupHit = association != null,
+                storedAssociationPeerId = association?.peerId,
+                storedAssociationSharedRunId = association?.sharedRunId,
+                storedAssociationStepId = association?.stepId,
+                storedAssociationAttemptNumber = association?.attemptNumber,
+                storedAssociationExpectedRemotePeerId = association?.expectedRemotePeerId,
+                selectedSecurePeerId = sanitizedSelectedSecurePeerId,
+                diagnosticsAssociationOutcome = diagnosticsAssociationOutcome,
+                selectedSecurePeerGate = selectedSecurePeerGate
+            )
+    }
+}
+
+internal fun automatedDiagnosticsApplicationProbeObservationFromReceiveDiagnosticOrNull(
+    diagnostic: AutomatedDiagnosticsApplicationProbeReceiveDiagnostic
+): AutomatedDiagnosticsApplicationProbeObservation? {
+    val senderPeerId = diagnostic.sourceResolution.resolvedSourcePeerId
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: return null
+    val receiverPeerId = diagnostic.receiverPeerId
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: return null
+    return AutomatedDiagnosticsApplicationProbeObservation(
+        sharedRunId = diagnostic.sharedRunId,
+        stepId = diagnostic.stepId,
+        attemptNumber = diagnostic.attemptNumber,
+        probeKind = diagnostic.probeKind,
+        direction = diagnostic.direction,
+        messageId = diagnostic.messageId,
+        senderPeerId = senderPeerId,
+        applicationSenderId = diagnostic.applicationSenderId,
+        receiverPeerId = receiverPeerId,
+        messageType = diagnostic.messageType,
+        threadId = diagnostic.threadId,
+        privateChatId = diagnostic.privateChatId,
+        transportGroupId = diagnostic.transportGroupId,
+        marker = diagnostic.marker,
+        observedAtMonotonicMillis = diagnostic.observedAtMonotonicMillis,
+        observedAtWallClockMillis = diagnostic.observedAtWallClockMillis,
+        acceptanceResult = diagnostic.acceptanceResult
+    )
+}
+
+internal fun automatedDiagnosticsApplicationProbeObservationAfterReceiveOrNull(
+    result: BleTransportReceiveResult,
+    sourcePeerId: String?,
+    receiverPeerId: String?,
+    observedAtMonotonicMillis: Long,
+    observedAtWallClockMillis: Long? = null
+): AutomatedDiagnosticsApplicationProbeObservation? {
+    val sanitizedSourcePeerId = sourcePeerId
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: return null
+    val sanitizedReceiverPeerId = receiverPeerId
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: return null
+    return when (result) {
+        is BleTransportReceiveResult.Processed -> {
+            when (val processingResult = result.processingResult) {
+                is IncomingTransportFrameProcessingResult.Received -> {
+                    val appendedMessage = processingResult.ingestionResult as? Appended
+                        ?: return null
+                    val marker = automatedDiagnosticsApplicationProbeMarkerOrNull(
+                        appendedMessage.message.text
+                    ) ?: return null
+                    if (
+                        processingResult.message.frame.type !=
+                        automatedDiagnosticsApplicationProbeExpectedMessageType(marker.probeKind)
+                    ) {
+                        return null
+                    }
+                    val privateChatId = if (
+                        processingResult.message.frame.type == MessageFrameType.PRIVATE_TEXT
+                    ) {
+                        PrivateChatMessagePayloadCodec.decodeOrNull(
+                            processingResult.message.frame.payload
+                        )?.privateChatId
+                    } else {
+                        null
+                    }
+                    AutomatedDiagnosticsApplicationProbeObservation(
+                        sharedRunId = marker.sharedRunId,
+                        stepId = marker.stepId,
+                        attemptNumber = marker.attemptNumber,
+                        probeKind = marker.probeKind,
+                        direction = marker.direction,
+                        messageId = appendedMessage.message.id,
+                        senderPeerId = sanitizedSourcePeerId,
+                        applicationSenderId = appendedMessage.message.senderId,
+                        receiverPeerId = sanitizedReceiverPeerId,
+                        messageType = processingResult.message.frame.type,
+                        threadId = appendedMessage.message.threadId,
+                        privateChatId = privateChatId,
+                        marker = marker,
+                        observedAtMonotonicMillis = observedAtMonotonicMillis,
+                        observedAtWallClockMillis = observedAtWallClockMillis
+                    )
+                }
+                is IncomingTransportFrameProcessingResult.HybridControlHandled,
+                is IncomingTransportFrameProcessingResult.HybridControlIgnored,
+                is IncomingTransportFrameProcessingResult.IdentityHandled,
+                is IncomingTransportFrameProcessingResult.IdentityHandlingUnavailable,
+                is IncomingTransportFrameProcessingResult.RelayOnlyEncrypted -> null
+            }
+        }
+        is BleTransportReceiveResult.Buffered,
+        is BleTransportReceiveResult.BufferOverflow,
+        is BleTransportReceiveResult.DuplicateChunk,
+        is BleTransportReceiveResult.InvalidChunk,
+        is BleTransportReceiveResult.ProcessorFailed -> null
+    }
+}
+
+internal fun appendAutomatedDiagnosticsApplicationProbeObservation(
+    observations: List<AutomatedDiagnosticsApplicationProbeObservation>,
+    observation: AutomatedDiagnosticsApplicationProbeObservation,
+    limit: Int = automatedDiagnosticsApplicationProbeObservationLimit
+): List<AutomatedDiagnosticsApplicationProbeObservation> {
+    return (observations + observation).takeLast(limit.coerceAtLeast(1))
+}
+
+internal fun appendBleTransportLocalSendTrace(
+    traces: List<BleTransportLocalSendTrace>,
+    trace: BleTransportLocalSendTrace,
+    limit: Int = automatedDiagnosticsBleTransportLocalSendTraceLimit
+): List<BleTransportLocalSendTrace> {
+    val deduplicated = traces.filterNot { existing ->
+        existing.messageId == trace.messageId &&
+            existing.groupId == trace.groupId
+    }
+    return (deduplicated + trace).takeLast(limit.coerceAtLeast(1))
+}
+
+internal fun appendAutomatedDiagnosticsApplicationProbeReceiveDiagnostic(
+    diagnostics: List<AutomatedDiagnosticsApplicationProbeReceiveDiagnostic>,
+    diagnostic: AutomatedDiagnosticsApplicationProbeReceiveDiagnostic,
+    limit: Int = automatedDiagnosticsApplicationProbeReceiveDiagnosticLimit
+): List<AutomatedDiagnosticsApplicationProbeReceiveDiagnostic> {
+    return (diagnostics + diagnostic).takeLast(limit.coerceAtLeast(1))
+}
+
+internal fun appendAutomatedDiagnosticsApplicationProbeTransportReceiveEvent(
+    events: List<AutomatedDiagnosticsApplicationProbeTransportReceiveEvent>,
+    event: AutomatedDiagnosticsApplicationProbeTransportReceiveEvent,
+    limit: Int = automatedDiagnosticsApplicationProbeTransportReceiveEventLimit
+): List<AutomatedDiagnosticsApplicationProbeTransportReceiveEvent> {
+    return (events + event).takeLast(limit.coerceAtLeast(1))
+}
+
+internal fun recordLocallySentHybridBootstrapControlMessage(
+    targetPeerId: String,
+    message: HybridTransportControlMessage,
+    hybridControlStore: HybridTransportControlStore,
+    provider: HybridBootstrapDecisionProvider
+): HybridBootstrapDecision {
+    hybridControlStore.record(
+        peerId = targetPeerId,
+        message = message
+    )
+    return provider.currentDecision()
+}
+
 internal fun currentHybridBootstrapDiagnostics(
     provider: HybridBootstrapDecisionProvider
 ): HybridBootstrapDiagnostics {
@@ -3254,48 +4383,118 @@ internal fun hybridBootstrapDiagnosticsAfterReceiveOrNull(
     return HybridBootstrapDiagnosticsFormatter.format(decision)
 }
 
+internal fun hybridBootstrapSocketHintObservationKey(
+    observation: HybridBootstrapSocketHintObservation
+): String {
+    return hybridBootstrapSocketHintObservationKey(
+        peerId = observation.peerId,
+        sessionId = observation.sessionId,
+        groupOwnerAddress = observation.groupOwnerAddress,
+        socketPort = observation.socketPort
+    )
+}
+
+internal fun hybridBootstrapSocketHintObservationKey(
+    peerId: String,
+    sessionId: String,
+    groupOwnerAddress: String,
+    socketPort: Int
+): String {
+    return listOf(
+        peerId.trim(),
+        sessionId.trim(),
+        groupOwnerAddress.trim(),
+        socketPort.toString()
+    ).joinToString("|")
+}
+
+internal fun currentHybridBootstrapSocketHintObservationForDecision(
+    decision: HybridBootstrapDecision,
+    socketHintObservationsByKey: Map<String, HybridBootstrapSocketHintObservation>
+): HybridBootstrapSocketHintObservation? {
+    val selectedCandidate = (decision.selection as? HybridBootstrapCandidateSelection.Selected)
+        ?.candidate
+        ?: return null
+    val groupOwnerAddress = selectedCandidate.groupOwnerAddress ?: return null
+    val socketPort = selectedCandidate.socketPort ?: return null
+    return socketHintObservationsByKey[
+        hybridBootstrapSocketHintObservationKey(
+            peerId = selectedCandidate.peerId,
+            sessionId = selectedCandidate.sessionId,
+            groupOwnerAddress = groupOwnerAddress,
+            socketPort = socketPort
+        )
+    ]
+}
+
 internal fun currentHybridBootstrapSocketEndpointResolution(
-    provider: HybridBootstrapDecisionProvider
+    provider: HybridBootstrapDecisionProvider,
+    socketHintObservationsByKey: Map<String, HybridBootstrapSocketHintObservation> = emptyMap()
 ): HybridBootstrapSocketEndpointResolution {
-    return HybridBootstrapSocketEndpointResolver.resolve(provider.currentDecision())
+    val decision = provider.currentDecision()
+    return HybridBootstrapSocketEndpointResolver.resolve(
+        decision = decision,
+        socketHintObservation = currentHybridBootstrapSocketHintObservationForDecision(
+            decision = decision,
+            socketHintObservationsByKey = socketHintObservationsByKey
+        )
+    )
 }
 
 internal fun currentHybridBootstrapAttemptDecision(
     provider: HybridBootstrapDecisionProvider,
-    requestedAtMillis: Long
+    requestedAtMillis: Long,
+    currentMonotonicMillis: Long = requestedAtMillis,
+    socketHintObservationsByKey: Map<String, HybridBootstrapSocketHintObservation> = emptyMap()
 ): HybridBootstrapAttemptDecision {
     return HybridBootstrapAttemptPolicy.decide(
-        resolution = currentHybridBootstrapSocketEndpointResolution(provider),
+        resolution = currentHybridBootstrapSocketEndpointResolution(
+            provider = provider,
+            socketHintObservationsByKey = socketHintObservationsByKey
+        ),
         requestedAtMillis = requestedAtMillis,
+        currentMonotonicMillis = currentMonotonicMillis,
         maxEndpointAgeMillis = HybridBootstrapAttemptPolicy.DEFAULT_MAX_ENDPOINT_AGE_MILLIS
     )
 }
 
 internal fun hybridBootstrapSocketEndpointResolutionAfterReceiveOrNull(
     result: BleTransportReceiveResult,
-    provider: HybridBootstrapDecisionProvider
+    provider: HybridBootstrapDecisionProvider,
+    socketHintObservation: HybridBootstrapSocketHintObservation? = null
 ): HybridBootstrapSocketEndpointResolution? {
     val decision = hybridBootstrapDecisionAfterReceiveOrNull(
         result = result,
         provider = provider
     ) ?: return null
 
-    return HybridBootstrapSocketEndpointResolver.resolve(decision)
+    return HybridBootstrapSocketEndpointResolver.resolve(
+        decision = decision,
+        socketHintObservation = socketHintObservation
+    )
 }
 
 internal fun hybridBootstrapAttemptDecisionAfterReceiveOrNull(
     result: BleTransportReceiveResult,
     provider: HybridBootstrapDecisionProvider,
-    requestedAtMillis: Long
+    requestedAtMillis: Long,
+    currentMonotonicMillis: Long = requestedAtMillis,
+    socketHintObservation: HybridBootstrapSocketHintObservation? = null
 ): HybridBootstrapAttemptDecision? {
     val resolution = hybridBootstrapSocketEndpointResolutionAfterReceiveOrNull(
         result = result,
-        provider = provider
+        provider = provider,
+        socketHintObservation =
+            socketHintObservation ?: hybridBootstrapSocketHintObservationAfterReceiveOrNull(
+                result = result,
+                observedAtMonotonicMillis = currentMonotonicMillis
+            )
     ) ?: return null
 
     return HybridBootstrapAttemptPolicy.decide(
         resolution = resolution,
         requestedAtMillis = requestedAtMillis,
+        currentMonotonicMillis = currentMonotonicMillis,
         maxEndpointAgeMillis = HybridBootstrapAttemptPolicy.DEFAULT_MAX_ENDPOINT_AGE_MILLIS
     )
 }
@@ -3303,15 +4502,62 @@ internal fun hybridBootstrapAttemptDecisionAfterReceiveOrNull(
 internal fun currentHybridBootstrapAttemptCommandBuildResult(
     provider: HybridBootstrapDecisionProvider,
     requestedAtMillis: Long,
-    commandCreatedAtMillis: Long
+    currentMonotonicMillis: Long = requestedAtMillis,
+    commandCreatedAtMillis: Long,
+    socketHintObservationsByKey: Map<String, HybridBootstrapSocketHintObservation> = emptyMap()
 ): HybridBootstrapAttemptCommandBuildResult {
     return HybridBootstrapAttemptCommandBuilder.build(
         decision = currentHybridBootstrapAttemptDecision(
             provider = provider,
-            requestedAtMillis = requestedAtMillis
+            requestedAtMillis = requestedAtMillis,
+            currentMonotonicMillis = currentMonotonicMillis,
+            socketHintObservationsByKey = socketHintObservationsByKey
         ),
         commandCreatedAtMillis = commandCreatedAtMillis
     )
+}
+
+internal fun hybridBootstrapSocketHintObservationAfterReceiveOrNull(
+    result: BleTransportReceiveResult,
+    observedAtMonotonicMillis: Long
+): HybridBootstrapSocketHintObservation? {
+    return when (result) {
+        is BleTransportReceiveResult.Processed -> {
+            when (val processingResult = result.processingResult) {
+                is IncomingTransportFrameProcessingResult.HybridControlHandled -> {
+                    if (
+                        processingResult.controlMessage.messageType ==
+                        HybridTransportControlMessage.MessageType.WIFI_DIRECT_SOCKET_HINT
+                    ) {
+                        val groupOwnerAddress = processingResult.controlMessage.groupOwnerAddress
+                            ?: return null
+                        val socketPort = processingResult.controlMessage.socketPort
+                            ?: return null
+                        HybridBootstrapSocketHintObservation(
+                            peerId = processingResult.peerId,
+                            sessionId = processingResult.controlMessage.sessionId,
+                            groupOwnerAddress = groupOwnerAddress,
+                            socketPort = socketPort,
+                            createdAtMillis = processingResult.controlMessage.createdAtMillis,
+                            observedAtMonotonicMillis = observedAtMonotonicMillis
+                        )
+                    } else {
+                        null
+                    }
+                }
+                is IncomingTransportFrameProcessingResult.HybridControlIgnored,
+                is IncomingTransportFrameProcessingResult.IdentityHandled,
+                is IncomingTransportFrameProcessingResult.IdentityHandlingUnavailable,
+                is IncomingTransportFrameProcessingResult.Received,
+                is IncomingTransportFrameProcessingResult.RelayOnlyEncrypted -> null
+            }
+        }
+        is BleTransportReceiveResult.Buffered,
+        is BleTransportReceiveResult.BufferOverflow,
+        is BleTransportReceiveResult.DuplicateChunk,
+        is BleTransportReceiveResult.InvalidChunk,
+        is BleTransportReceiveResult.ProcessorFailed -> null
+    }
 }
 
 internal fun hybridBootstrapJavaNetRuntimeEnabled(): Boolean = true
@@ -3330,10 +4576,14 @@ internal fun currentHybridBootstrapCommandExecutorConfig(): HybridBootstrapComma
     )
 }
 
-internal fun currentHybridBootstrapCommandTriggerController(): HybridBootstrapCommandTriggerController {
+internal fun currentHybridBootstrapCommandTriggerController(
+    config: HybridBootstrapCommandExecutorConfig = currentHybridBootstrapCommandExecutorConfig(),
+    socketConnectorOverride: HybridBootstrapSocketConnector? = null
+): HybridBootstrapCommandTriggerController {
     return HybridBootstrapCommandTriggerController(
         executor = HybridBootstrapCommandExecutorFactory.create(
-            currentHybridBootstrapCommandExecutorConfig()
+            config = config,
+            socketConnectorOverride = socketConnectorOverride
         )
     )
 }
@@ -3405,10 +4655,13 @@ internal fun triggerHybridBootstrapManuallyIfAvailable(
 }
 
 internal fun createHybridBootstrapManualTriggerRequestCallback(
-    guardedManualTriggerAction: () -> HybridBootstrapCommandTriggerResult
-): () -> HybridBootstrapCommandTriggerResult {
+    guardedManualTriggerAction: () -> HybridBootstrapCommandTriggerResult,
+    blockingExecutionDispatcher: CoroutineDispatcher = Dispatchers.IO
+): suspend () -> HybridBootstrapCommandTriggerResult {
     return {
-        guardedManualTriggerAction()
+        withContext(blockingExecutionDispatcher) {
+            guardedManualTriggerAction()
+        }
     }
 }
 
@@ -3977,6 +5230,77 @@ internal suspend fun submitAutomatedDiagnosticsWifiDirectPeerReadySignal(
     }
 }
 
+internal suspend fun submitAutomatedDiagnosticsPhaseStateSignal(
+    bleConnectionStatus: BleConnectionStatus,
+    activeTransportPeerId: String?,
+    transportSender: BleTransportSender,
+    localPeerId: String?,
+    sharedRun: AutomatedDiagnosticsSharedRun,
+    expectedRemotePeerId: String,
+    stepId: AutomatedDiagnosticStepId,
+    phaseState: AutomatedDiagnosticsPhaseState,
+    attemptNumber: Int,
+    applicationProbeDescriptors: List<AutomatedDiagnosticsPhaseApplicationProbeDescriptor> =
+        emptyList(),
+    createdAtMillis: Long
+): AutomatedDiagnosticsPhaseStateSendResult {
+    if (bleConnectionStatus != BleConnectionStatus.CONNECTED) {
+        return AutomatedDiagnosticsPhaseStateSendResult.NoActivePeer
+    }
+    val targetPeerId = activeTransportPeerId?.trim()?.takeIf { it.isNotEmpty() }
+        ?: return AutomatedDiagnosticsPhaseStateSendResult.NoActivePeer
+    val senderPeerId = localPeerId?.trim()?.takeIf { it.isNotEmpty() }
+        ?: return AutomatedDiagnosticsPhaseStateSendResult.InvalidSignal(
+            "Local peer identity unavailable."
+        )
+    val phaseStateLeaseMillis =
+        AutomatedDiagnosticsTimingPolicy.default().automatedDiagnosticsPhaseStateLeaseMillis
+    val signal = runCatching {
+        AutomatedDiagnosticsPhaseSignal(
+            sharedRun = sharedRun,
+            peerId = senderPeerId,
+            expectedRemotePeerId = expectedRemotePeerId,
+            stepId = stepId,
+            phaseState = phaseState,
+            attemptNumber = attemptNumber,
+            applicationProbeDescriptors = applicationProbeDescriptors,
+            createdAtMillis = createdAtMillis,
+            expiresAtMillis = createdAtMillis + phaseStateLeaseMillis
+        )
+    }.getOrElse { error ->
+        return AutomatedDiagnosticsPhaseStateSendResult.InvalidSignal(
+            error.message ?: "Automated diagnostics phase state is invalid."
+        )
+    }
+    val frame = runCatching {
+        createAutomatedDiagnosticsPhaseStateFrame(
+            signal = signal.copy(peerId = senderPeerId),
+            targetPeerId = targetPeerId
+        )
+    }.getOrElse { error ->
+        return AutomatedDiagnosticsPhaseStateSendResult.InvalidSignal(
+            error.message ?: "Automated diagnostics phase state is invalid."
+        )
+    }
+
+    return when (
+        val sendResult = MessageFrameTransportSendUseCase.sendPublic(
+            frame = frame,
+            transportSender = transportSender,
+            targetPeerId = targetPeerId
+        )
+    ) {
+        BleTransportSendResult.QueuedLocally ->
+            AutomatedDiagnosticsPhaseStateSendResult.Sent(signal.copy(peerId = senderPeerId))
+
+        BleTransportSendResult.NotAvailable ->
+            AutomatedDiagnosticsPhaseStateSendResult.WriterUnavailable
+
+        is BleTransportSendResult.Failed ->
+            AutomatedDiagnosticsPhaseStateSendResult.SendFailed(sendResult.reason)
+    }
+}
+
 internal suspend fun submitAutomatedDiagnosticsServerReadySignal(
     bleConnectionStatus: BleConnectionStatus,
     activeTransportPeerId: String?,
@@ -4043,12 +5367,11 @@ internal suspend fun submitAutomatedDiagnosticsServerReadySignal(
     }
 }
 
-internal fun createHybridBootstrapManualOfferFrame(
+internal fun createHybridBootstrapManualOfferMessage(
     localPeerId: String,
-    targetPeerId: String,
     createdAtMillis: Long
-): MessageFrame {
-    val message = HybridTransportControlMessage(
+): HybridTransportControlMessage {
+    return HybridTransportControlMessage(
         messageType = HybridTransportControlMessage.MessageType.WIFI_DIRECT_OFFER,
         sessionId = localPeerId,
         publicPeerIdHint = localPeerId,
@@ -4057,6 +5380,17 @@ internal fun createHybridBootstrapManualOfferFrame(
             HybridTransportControlMessage.CapabilityFlag.WIFI_DIRECT_BOOTSTRAP,
             HybridTransportControlMessage.CapabilityFlag.BLE_FALLBACK
         )
+    )
+}
+
+internal fun createHybridBootstrapManualOfferFrame(
+    localPeerId: String,
+    targetPeerId: String,
+    createdAtMillis: Long
+): MessageFrame {
+    val message = createHybridBootstrapManualOfferMessage(
+        localPeerId = localPeerId,
+        createdAtMillis = createdAtMillis
     )
     return HybridTransportControlFrameFactory.create(
         message = message,
@@ -4069,13 +5403,12 @@ internal fun createHybridBootstrapManualOfferFrame(
     )
 }
 
-internal fun createHybridBootstrapManualAcceptFrame(
+internal fun createHybridBootstrapManualAcceptMessage(
     localPeerId: String,
-    targetPeerId: String,
     sessionId: String,
     createdAtMillis: Long
-): MessageFrame {
-    val message = HybridTransportControlMessage(
+): HybridTransportControlMessage {
+    return HybridTransportControlMessage(
         messageType = HybridTransportControlMessage.MessageType.WIFI_DIRECT_ACCEPT,
         sessionId = sessionId,
         publicPeerIdHint = localPeerId,
@@ -4084,6 +5417,19 @@ internal fun createHybridBootstrapManualAcceptFrame(
             HybridTransportControlMessage.CapabilityFlag.WIFI_DIRECT_BOOTSTRAP,
             HybridTransportControlMessage.CapabilityFlag.BLE_FALLBACK
         )
+    )
+}
+
+internal fun createHybridBootstrapManualAcceptFrame(
+    localPeerId: String,
+    targetPeerId: String,
+    sessionId: String,
+    createdAtMillis: Long
+): MessageFrame {
+    val message = createHybridBootstrapManualAcceptMessage(
+        localPeerId = localPeerId,
+        sessionId = sessionId,
+        createdAtMillis = createdAtMillis
     )
     return HybridTransportControlFrameFactory.create(
         message = message,
@@ -4096,15 +5442,14 @@ internal fun createHybridBootstrapManualAcceptFrame(
     )
 }
 
-internal fun createHybridBootstrapManualSocketHintFrame(
+internal fun createHybridBootstrapManualSocketHintMessage(
     localPeerId: String,
-    targetPeerId: String,
     sessionId: String,
     groupOwnerAddress: String,
     socketPort: Int,
     createdAtMillis: Long
-): MessageFrame {
-    val message = HybridTransportControlMessage(
+): HybridTransportControlMessage {
+    return HybridTransportControlMessage(
         messageType = HybridTransportControlMessage.MessageType.WIFI_DIRECT_SOCKET_HINT,
         sessionId = sessionId,
         publicPeerIdHint = localPeerId,
@@ -4116,6 +5461,23 @@ internal fun createHybridBootstrapManualSocketHintFrame(
             HybridTransportControlMessage.CapabilityFlag.WIFI_DIRECT_SOCKET_HINT,
             HybridTransportControlMessage.CapabilityFlag.BLE_FALLBACK
         )
+    )
+}
+
+internal fun createHybridBootstrapManualSocketHintFrame(
+    localPeerId: String,
+    targetPeerId: String,
+    sessionId: String,
+    groupOwnerAddress: String,
+    socketPort: Int,
+    createdAtMillis: Long
+): MessageFrame {
+    val message = createHybridBootstrapManualSocketHintMessage(
+        localPeerId = localPeerId,
+        sessionId = sessionId,
+        groupOwnerAddress = groupOwnerAddress,
+        socketPort = socketPort,
+        createdAtMillis = createdAtMillis
     )
     return HybridTransportControlFrameFactory.create(
         message = message,
@@ -4216,6 +5578,48 @@ internal fun createAutomatedDiagnosticsWifiDirectPeerReadyFrame(
     )
 }
 
+internal fun createAutomatedDiagnosticsPhaseStateFrame(
+    signal: AutomatedDiagnosticsPhaseSignal,
+    targetPeerId: String
+): MessageFrame {
+    val applicationProbePayload =
+        automatedDiagnosticsPhaseApplicationProbePayloadOrNull(
+            signal.applicationProbeDescriptors
+        )
+    val message = HybridTransportControlMessage(
+        messageType = HybridTransportControlMessage.MessageType.AUTOMATED_DIAGNOSTICS_PHASE_READY,
+        sessionId = signal.sharedRun.runId,
+        publicPeerIdHint = signal.sharedRun.coordinatorPeerId,
+        relatedPeerIdHint = signal.sharedRun.participantPeerId,
+        senderPeerIdHint = signal.peerId,
+        expectedPeerIdHint = signal.expectedRemotePeerId,
+        diagnosticsStepNumber = signal.stepId.stepNumber,
+        diagnosticsPhaseState = signal.phaseState.name,
+        diagnosticsAttemptNumber = signal.attemptNumber,
+        diagnosticsApplicationProbePayload = applicationProbePayload,
+        createdAtMillis = signal.createdAtMillis,
+        associatedSessionId = signal.sharedRun.sessionAssociationId,
+        expiresAtMillis = signal.expiresAtMillis,
+        capabilityFlags = setOf(
+            HybridTransportControlMessage.CapabilityFlag.BLE_FALLBACK
+        )
+    )
+    return HybridTransportControlFrameFactory.create(
+        message = message,
+        frameId = automatedDiagnosticsPhaseStateFrameId(
+            localPeerId = signal.peerId,
+            runId = signal.sharedRun.runId,
+            stepNumber = signal.stepId.stepNumber,
+            attemptNumber = signal.attemptNumber,
+            phaseState = signal.phaseState,
+            applicationProbePayload = applicationProbePayload,
+            createdAtMillis = signal.createdAtMillis
+        ),
+        senderId = signal.peerId,
+        recipientId = targetPeerId
+    )
+}
+
 internal fun createAutomatedDiagnosticsServerReadyFrame(
     signal: AutomatedDiagnosticsServerReadySignal,
     targetPeerId: String
@@ -4223,8 +5627,10 @@ internal fun createAutomatedDiagnosticsServerReadyFrame(
     val message = HybridTransportControlMessage(
         messageType = HybridTransportControlMessage.MessageType.AUTOMATED_DIAGNOSTICS_SERVER_READY,
         sessionId = signal.sharedRun.runId,
-        publicPeerIdHint = signal.peerId,
-        relatedPeerIdHint = signal.expectedClientPeerId,
+        publicPeerIdHint = signal.sharedRun.coordinatorPeerId,
+        relatedPeerIdHint = signal.sharedRun.participantPeerId,
+        senderPeerIdHint = signal.peerId,
+        expectedPeerIdHint = signal.expectedClientPeerId,
         groupOwnerAddress = signal.groupOwnerAddress,
         socketPort = signal.socketPort,
         createdAtMillis = signal.createdAtMillis,
@@ -4290,6 +5696,19 @@ internal fun automatedDiagnosticsWifiDirectPeerReadyFrameId(
     createdAtMillis: Long
 ): String {
     return "diag-peer-ready-$localPeerId-$runId-$createdAtMillis"
+}
+
+internal fun automatedDiagnosticsPhaseStateFrameId(
+    localPeerId: String,
+    runId: String,
+    stepNumber: Int,
+    attemptNumber: Int,
+    phaseState: AutomatedDiagnosticsPhaseState,
+    applicationProbePayload: String?,
+    createdAtMillis: Long
+): String {
+    val payloadFingerprint = applicationProbePayload?.hashCode()?.toString() ?: "none"
+    return "diag-phase-$localPeerId-$runId-$stepNumber-$attemptNumber-${phaseState.name}-$payloadFingerprint-$createdAtMillis"
 }
 
 internal fun automatedDiagnosticsServerReadyFrameId(
@@ -4399,6 +5818,53 @@ internal fun hybridTransportControlMessageAsWifiDirectPeerReadySignalOrNull(
     }.getOrNull()
 }
 
+internal fun hybridTransportControlMessageAsAutomatedDiagnosticsPhaseSignalOrNull(
+    peerId: String,
+    message: HybridTransportControlMessage
+): AutomatedDiagnosticsPhaseSignal? {
+    if (
+        message.messageType !=
+        HybridTransportControlMessage.MessageType.AUTOMATED_DIAGNOSTICS_PHASE_READY
+    ) {
+        return null
+    }
+    val stepNumber = message.diagnosticsStepNumber ?: return null
+    val phaseStateName = message.diagnosticsPhaseState?.trim()?.takeIf { it.isNotEmpty() }
+        ?: return null
+    if (message.wifiDirectCorrelationToken != null) {
+        return null
+    }
+    val stepId = AutomatedDiagnosticStepId.entries.firstOrNull { it.stepNumber == stepNumber }
+        ?: return null
+    val phaseState = runCatching {
+        AutomatedDiagnosticsPhaseState.valueOf(phaseStateName)
+    }.getOrNull() ?: return null
+    val sharedRun = automatedDiagnosticsSharedRunFromMessageOrNull(message) ?: return null
+    val senderPeerId = message.senderPeerIdHint?.trim()?.takeIf { it.isNotEmpty() }
+        ?: peerId.trim().takeIf { it.isNotEmpty() }
+        ?: return null
+    val expectedRemotePeerId = message.expectedPeerIdHint?.trim()?.takeIf { it.isNotEmpty() }
+        ?: return null
+    val attemptNumber = message.diagnosticsAttemptNumber ?: return null
+    val applicationProbeDescriptors =
+        automatedDiagnosticsPhaseApplicationProbeDescriptors(
+            message.diagnosticsApplicationProbePayload
+        )
+    return runCatching {
+        AutomatedDiagnosticsPhaseSignal(
+            sharedRun = sharedRun,
+            peerId = senderPeerId,
+            expectedRemotePeerId = expectedRemotePeerId,
+            stepId = stepId,
+            phaseState = phaseState,
+            attemptNumber = attemptNumber,
+            applicationProbeDescriptors = applicationProbeDescriptors,
+            createdAtMillis = message.createdAtMillis,
+            expiresAtMillis = message.expiresAtMillis ?: return null
+        )
+    }.getOrNull()
+}
+
 internal fun hybridTransportControlMessageAsServerReadySignalOrNull(
     peerId: String,
     message: HybridTransportControlMessage
@@ -4409,13 +5875,11 @@ internal fun hybridTransportControlMessageAsServerReadySignalOrNull(
     ) {
         return null
     }
-    val sharedRun = automatedDiagnosticsSharedRunFromMessageOrNull(
-        message = message,
-        fallbackCoordinatorPeerId = message.publicPeerIdHint,
-        fallbackParticipantPeerId = message.relatedPeerIdHint
-    ) ?: return null
-    val sanitizedPeerId = peerId.trim().ifEmpty { message.publicPeerIdHint?.trim().orEmpty() }
-    val expectedClientPeerId = message.relatedPeerIdHint?.trim()?.takeIf { it.isNotEmpty() }
+    val sharedRun = automatedDiagnosticsSharedRunFromMessageOrNull(message) ?: return null
+    val sanitizedPeerId = peerId.trim().takeIf { it.isNotEmpty() }
+        ?: message.senderPeerIdHint?.trim()?.takeIf { it.isNotEmpty() }
+        ?: return null
+    val expectedClientPeerId = message.expectedPeerIdHint?.trim()?.takeIf { it.isNotEmpty() }
         ?: return null
     val groupOwnerAddress = message.groupOwnerAddress?.trim()?.takeIf { it.isNotEmpty() }
         ?: return null
@@ -4555,12 +6019,18 @@ internal fun hybridBootstrapAttemptCommandBuildResultAfterReceiveOrNull(
     result: BleTransportReceiveResult,
     provider: HybridBootstrapDecisionProvider,
     requestedAtMillis: Long,
+    currentMonotonicMillis: Long = requestedAtMillis,
     commandCreatedAtMillis: Long
 ): HybridBootstrapAttemptCommandBuildResult? {
     val decision = hybridBootstrapAttemptDecisionAfterReceiveOrNull(
         result = result,
         provider = provider,
-        requestedAtMillis = requestedAtMillis
+        requestedAtMillis = requestedAtMillis,
+        currentMonotonicMillis = currentMonotonicMillis,
+        socketHintObservation = hybridBootstrapSocketHintObservationAfterReceiveOrNull(
+            result = result,
+            observedAtMonotonicMillis = currentMonotonicMillis
+        )
     ) ?: return null
 
     return HybridBootstrapAttemptCommandBuilder.build(

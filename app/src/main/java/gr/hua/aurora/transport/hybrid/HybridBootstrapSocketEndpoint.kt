@@ -6,7 +6,8 @@ data class HybridBootstrapSocketEndpoint(
     val bootstrapIdentifier: String,
     val groupOwnerAddress: String,
     val socketPort: Int,
-    val latestCreatedAtMillis: Long
+    val latestCreatedAtMillis: Long,
+    val localSocketHintObservedAtMonotonicMillis: Long? = null
 ) {
     init {
         require(peerId.isNotBlank()) {
@@ -26,6 +27,9 @@ data class HybridBootstrapSocketEndpoint(
         }
         require(latestCreatedAtMillis >= 0L) {
             "Hybrid bootstrap socket endpoint latestCreatedAtMillis must be non-negative."
+        }
+        require(localSocketHintObservedAtMonotonicMillis == null || localSocketHintObservedAtMonotonicMillis >= 0L) {
+            "Hybrid bootstrap socket endpoint localSocketHintObservedAtMonotonicMillis must be non-negative when present."
         }
     }
 }

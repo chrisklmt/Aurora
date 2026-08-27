@@ -64,9 +64,6 @@ object HybridBootstrapSocketExecutionPlanBuilder {
         if (command.latestCreatedAtMillis < 0L) {
             return "Hybrid bootstrap socket execution plan latestCreatedAtMillis must be non-negative."
         }
-        if (command.requestedAtMillis < command.latestCreatedAtMillis) {
-            return "Hybrid bootstrap socket execution plan requestedAtMillis must be greater than or equal to latestCreatedAtMillis."
-        }
         if (command.commandCreatedAtMillis < command.requestedAtMillis) {
             return "Hybrid bootstrap socket execution plan commandCreatedAtMillis must be greater than or equal to requestedAtMillis."
         }

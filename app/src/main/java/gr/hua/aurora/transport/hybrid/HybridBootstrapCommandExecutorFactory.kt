@@ -2,7 +2,8 @@ package gr.hua.aurora.transport.hybrid
 
 object HybridBootstrapCommandExecutorFactory {
     fun create(
-        config: HybridBootstrapCommandExecutorConfig = HybridBootstrapCommandExecutorConfig()
+        config: HybridBootstrapCommandExecutorConfig = HybridBootstrapCommandExecutorConfig(),
+        socketConnectorOverride: HybridBootstrapSocketConnector? = null
     ): HybridBootstrapCommandExecutor {
         return when (config.mode) {
             HybridBootstrapCommandExecutorMode.NO_OP -> noOp(
@@ -17,7 +18,8 @@ object HybridBootstrapCommandExecutorFactory {
             }
             HybridBootstrapCommandExecutorMode.SOCKET_PLAN_JAVANET -> {
                 HybridBootstrapSocketPlanCommandExecutor(
-                    connector = HybridBootstrapSocketConnectorFactory.javaNet()
+                    connector = socketConnectorOverride
+                        ?: HybridBootstrapSocketConnectorFactory.javaNet()
                 )
             }
         }

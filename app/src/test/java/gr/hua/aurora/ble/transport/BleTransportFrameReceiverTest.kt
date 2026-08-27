@@ -62,6 +62,10 @@ class BleTransportFrameReceiverTest {
         assertTrue(firstResult is BleTransportReceiveResult.Buffered)
         assertTrue(secondResult is BleTransportReceiveResult.Buffered)
         assertTrue(thirdResult is BleTransportReceiveResult.Processed)
+        assertEquals(1, (firstResult as BleTransportReceiveResult.Buffered).receivedChunks)
+        assertEquals(3, firstResult.expectedChunks)
+        assertEquals(2, (secondResult as BleTransportReceiveResult.Buffered).receivedChunks)
+        assertEquals(3, secondResult.expectedChunks)
         assertEquals(1, processorCalls)
         assertEquals(0, receiver.activeGroupCount())
     }
@@ -138,6 +142,36 @@ class BleTransportFrameReceiverTest {
     }
 
     @Test
+    fun invalidChunkPreservesKnownGroupProgressWhenChunkShapeChanges() {
+        val receiver = BleTransportFrameReceiver(
+            processFrames = {
+                receivedProcessingResult(messageId = "incoming-invalid-shape")
+            }
+        )
+        val firstFrame = groupFrame(
+            groupId = 0x4110,
+            chunkIndex = 0,
+            totalChunks = 2,
+            payloadByte = 0x61
+        )
+        val mismatchedFrame = groupFrame(
+            groupId = 0x4110,
+            chunkIndex = 1,
+            totalChunks = 3,
+            payloadByte = 0x62
+        )
+
+        val firstResult = receiver.receive(firstFrame)
+        val invalidResult = receiver.receive(mismatchedFrame)
+
+        assertTrue(firstResult is BleTransportReceiveResult.Buffered)
+        assertTrue(invalidResult is BleTransportReceiveResult.InvalidChunk)
+        assertEquals(0x4110, (invalidResult as BleTransportReceiveResult.InvalidChunk).groupId)
+        assertEquals(1, invalidResult.receivedChunks)
+        assertEquals(2, invalidResult.expectedChunks)
+    }
+
+    @Test
     fun completedGroupIsClearedAfterProcessing() {
         val receiver = BleTransportFrameReceiver(
             processFrames = {
@@ -207,6 +241,32 @@ class BleTransportFrameReceiverTest {
         assertTrue(firstResult is BleTransportReceiveResult.Buffered)
         assertTrue(overflowResult is BleTransportReceiveResult.BufferOverflow)
         assertEquals(1, receiver.activeGroupCount())
+    }
+
+    @Test
+    fun oversizedChunkGroupOverflowPreservesGroupMetadata() {
+        val receiver = BleTransportFrameReceiver(
+            processFrames = {
+                receivedProcessingResult(messageId = "incoming-overflow-shape")
+            },
+            buffer = BleTransportReceiveBuffer(
+                maxGroups = 2,
+                maxFramesPerGroup = 2
+            )
+        )
+        val oversizedGroupFirstFrame = groupFrame(
+            groupId = 0x4111,
+            chunkIndex = 0,
+            totalChunks = 3,
+            payloadByte = 0x71
+        )
+
+        val overflowResult = receiver.receive(oversizedGroupFirstFrame)
+
+        assertTrue(overflowResult is BleTransportReceiveResult.BufferOverflow)
+        assertEquals(0x4111, (overflowResult as BleTransportReceiveResult.BufferOverflow).groupId)
+        assertEquals(0, overflowResult.receivedChunks)
+        assertEquals(3, overflowResult.expectedChunks)
     }
 
     @Test

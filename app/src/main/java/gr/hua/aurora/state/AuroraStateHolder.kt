@@ -397,6 +397,54 @@ class AuroraStateHolder(
         return privateChatDisplayNameForPeerId(peerId)
     }
 
+    fun removeMessagesByIds(
+        messageIds: Set<String>
+    ): Set<String> {
+        val sanitizedMessageIds = messageIds
+            .asSequence()
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .toSet()
+        if (sanitizedMessageIds.isEmpty()) {
+            return emptySet()
+        }
+
+        val currentGlobalMessages = uiState.globalMessages
+        val currentPrivateMessages = uiState.privateMessagesByPeerId
+        val removedIds = buildSet {
+            currentGlobalMessages.forEach { message ->
+                if (message.id in sanitizedMessageIds) {
+                    add(message.id)
+                }
+            }
+            currentPrivateMessages.values.forEach { messages ->
+                messages.forEach { message ->
+                    if (message.id in sanitizedMessageIds) {
+                        add(message.id)
+                    }
+                }
+            }
+        }
+        if (removedIds.isEmpty()) {
+            return emptySet()
+        }
+
+        val updatedGlobalMessages = currentGlobalMessages.filterNot { it.id in sanitizedMessageIds }
+        val updatedPrivateMessages = currentPrivateMessages.mapValues { (_, messages) ->
+            messages.filterNot { it.id in sanitizedMessageIds }
+        }
+        val updatedPendingOutgoingMessages =
+            uiState.pendingOutgoingMessages.filterNot { it.messageId in sanitizedMessageIds }
+
+        uiState = uiState.copy(
+            globalMessages = updatedGlobalMessages,
+            privateMessagesByPeerId = updatedPrivateMessages,
+            pendingOutgoingMessages = updatedPendingOutgoingMessages
+        )
+        persistRestorableState()
+        return removedIds
+    }
+
     fun latestPrivateChatDeliveryResultForPeerId(
         peerId: String
     ): PrivateChatMessageSendResult? {

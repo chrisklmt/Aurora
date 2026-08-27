@@ -76,6 +76,50 @@ class HybridBootstrapSocketEndpointResolverTest {
     }
 
     @Test
+    fun matchingSocketHintObservationIsPreservedOnResolvedEndpoint() {
+        val candidate = candidate(
+            peerId = "peer-ready",
+            sessionId = "session-ready",
+            bootstrapIdentifier = "bootstrap-ready",
+            groupOwnerAddress = "192.168.49.10",
+            socketPort = 8988,
+            latestCreatedAtMillis = 1_726_000_011L,
+            socketReady = true
+        )
+        val decision = decision(
+            candidates = listOf(candidate),
+            selection = HybridBootstrapCandidateSelection.Selected(candidate)
+        )
+
+        val result = HybridBootstrapSocketEndpointResolver.resolve(
+            decision = decision,
+            socketHintObservation = HybridBootstrapSocketHintObservation(
+                peerId = "peer-ready",
+                sessionId = "session-ready",
+                groupOwnerAddress = "192.168.49.10",
+                socketPort = 8988,
+                createdAtMillis = 1_726_000_011L,
+                observedAtMonotonicMillis = 4_321L
+            )
+        )
+
+        assertEquals(
+            HybridBootstrapSocketEndpointResolution.Resolved(
+                HybridBootstrapSocketEndpoint(
+                    peerId = "peer-ready",
+                    sessionId = "session-ready",
+                    bootstrapIdentifier = "bootstrap-ready",
+                    groupOwnerAddress = "192.168.49.10",
+                    socketPort = 8988,
+                    latestCreatedAtMillis = 1_726_000_011L,
+                    localSocketHintObservedAtMonotonicMillis = 4_321L
+                )
+            ),
+            result
+        )
+    }
+
+    @Test
     fun resolvedEndpointPreservesPeerSessionBootstrapAddressPortAndTimestampExactly() {
         val candidate = candidate(
             peerId = "peer/Alpha+01",

@@ -10,10 +10,15 @@ import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandTriggerResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapManualAcceptSendResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapManualOfferSendResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapManualSocketHintSendResult
+import gr.hua.aurora.transport.hybrid.HybridTransportControlStore
+import gr.hua.aurora.protocol.GlobalMeshDeliveryResult
 import gr.hua.aurora.protocol.PeerIdentityExchangeSendResult
+import gr.hua.aurora.protocol.PrivateChatMessageSendResult
 import gr.hua.aurora.protocol.canonicalPeerIdFor
 import gr.hua.aurora.protocol.hasSessionForPeer
 import gr.hua.aurora.state.AuroraAvailabilityPreference
+import gr.hua.aurora.state.GlobalQueuedChatSubmissionResult
+import gr.hua.aurora.state.PrivateQueuedChatSubmissionResult
 import gr.hua.aurora.wifidirect.controller.automatedDiagnosticsWifiDirectDnsSdProtocolTxtKey
 import gr.hua.aurora.wifidirect.controller.automatedDiagnosticsWifiDirectDnsSdProtocolVersion
 import gr.hua.aurora.wifidirect.controller.automatedDiagnosticsWifiDirectDnsSdServiceType
@@ -29,6 +34,7 @@ import gr.hua.aurora.wifidirect.runtime.WifiDirectDnsSdServiceResponse
 import gr.hua.aurora.wifidirect.runtime.WifiDirectLocalAddressClassification
 import gr.hua.aurora.wifidirect.runtime.WifiDirectRolePreference
 import gr.hua.aurora.wifidirect.socket.WifiDirectSocketState
+import gr.hua.aurora.wifidirect.socket.wifiDirectDebugSocketPort
 import java.security.SecureRandom
 import kotlin.math.abs
 import kotlinx.coroutines.CancellationException
@@ -53,6 +59,26 @@ internal class AutomatedDiagnosticsRunner(
     private val timingPolicy: AutomatedDiagnosticsTimingPolicy = AutomatedDiagnosticsTimingPolicy.default(),
     private val wallClockMillis: () -> Long = System::currentTimeMillis
 ) {
+    private data class PhaseThreeCleanupResult(
+        val attemptedIds: Set<String>,
+        val removedIds: Set<String>
+    ) {
+        val attemptedCount: Int
+            get() = attemptedIds.size
+
+        val removedCount: Int
+            get() = removedIds.size
+
+        val remainingIds: Set<String>
+            get() = attemptedIds - removedIds
+
+        val remainingCount: Int
+            get() = remainingIds.size
+
+        val completed: Boolean
+            get() = remainingIds.isEmpty()
+    }
+
     private companion object {
         const val validatedDnsSdTokenPeerSource = "VALIDATED_DNS_SD_TOKEN"
         private const val sharedRunIdByteLength = 12
@@ -86,8 +112,22 @@ internal class AutomatedDiagnosticsRunner(
     private var lastSharedRunGenerationFunction: String = "none"
     private var lastObservedAutomaticAnnouncementSignature: String? = null
     private var pendingParticipantAnnouncement: PendingParticipantAnnouncement? = null
+    private val capturedPhaseThreeMessageIds = linkedSetOf<String>()
 
     val state: StateFlow<AutomatedDiagnosticsRunState> = mutableState.asStateFlow()
+
+    internal fun currentPreparationState(): AutomatedDiagnosticsPreparationState {
+        return automatedDiagnosticsPreparationState(bindings.snapshot())
+    }
+
+    internal fun automaticPreparationPending(): Boolean {
+        val current = mutableState.value
+        return pendingParticipantAnnouncement != null &&
+            runJob?.isActive != true &&
+            current.overallStatus == AutomatedDiagnosticsOverallStatus.IDLE &&
+            current.localPeerRole == AutomatedDiagnosticsPeerRole.PARTICIPANT &&
+            current.sharedRunId != null
+    }
 
     fun start() {
         if (runJob?.isActive == true) {
@@ -203,6 +243,7 @@ internal class AutomatedDiagnosticsRunner(
     fun resetReport() {
         runJob?.cancel()
         runJob = null
+        removeCapturedPhaseThreeMessages()
         clearPendingParticipantAnnouncement("resetReport")
         manualStartInvocationCount = 0
         participantStartInvocationCount = 0
@@ -260,13 +301,17 @@ internal class AutomatedDiagnosticsRunner(
     }
 
     private fun clearPendingParticipantAnnouncement(
-        cause: String
+        cause: String,
+        syncIdleState: Boolean = true
     ) {
         if (pendingParticipantAnnouncement != null) {
             announcementClearedCount += 1
         }
         pendingParticipantAnnouncement = null
         lastAnnouncementClearCause = cause
+        if (syncIdleState) {
+            syncPendingParticipantAnnouncementState()
+        }
     }
 
     private fun selectedPeerPropagationState(
@@ -291,7 +336,10 @@ internal class AutomatedDiagnosticsRunner(
         }
         participantStartInvocationCount += 1
         participantJobGeneration += 1
-        clearPendingParticipantAnnouncement("launchParticipantRun")
+        clearPendingParticipantAnnouncement(
+            cause = "launchParticipantRun",
+            syncIdleState = false
+        )
         runJob = bindings.scope.launch {
             mutableState.value = seed.seededState
             runFromStepIndex(
@@ -308,6 +356,7 @@ internal class AutomatedDiagnosticsRunner(
         initialContextOverride: AutomatedDiagnosticsStepContext? = null
     ) {
         if (resetReport) {
+            removeCapturedPhaseThreeMessages()
             bindings.commands.clearAutomatedDiagnosticsCoordinationState()
             mutableState.value = AutomatedDiagnosticsRunState.initial().copy(
                 localRunnerExecutionId = generateRunnerExecutionId()
@@ -373,19 +422,49 @@ internal class AutomatedDiagnosticsRunner(
                     runRemoteParticipantCoordinationStep(stepId, context)
                 AutomatedDiagnosticStepId.BLE_STABILITY -> runBleStabilityStep(stepId, context)
                 AutomatedDiagnosticStepId.WIFI_DIRECT_DISCOVERY_AND_GROUP ->
-                    runWifiDirectDiscoveryAndGroupStep(stepId, context)
+                    runPhaseSynchronizedStep(stepId, context) {
+                        runWifiDirectDiscoveryAndGroupStep(stepId, context)
+                    }
                 AutomatedDiagnosticStepId.WIFI_DIRECT_SOCKET ->
-                    runWifiDirectSocketStep(stepId, context)
+                    runPhaseSynchronizedStep(stepId, context) {
+                        runWifiDirectSocketStep(stepId, context)
+                    }
                 AutomatedDiagnosticStepId.WIFI_DIRECT_BRIDGES ->
-                    runWifiDirectBridgesStep(stepId, context)
+                    runPhaseSynchronizedStep(stepId, context) {
+                        runWifiDirectBridgesStep(stepId, context)
+                    }
                 AutomatedDiagnosticStepId.HYBRID_BOOTSTRAP_OFFER ->
-                    runHybridBootstrapOfferStep(stepId, context)
+                    runPhaseSynchronizedStep(stepId, context) {
+                        runHybridBootstrapOfferStep(stepId, context)
+                    }
                 AutomatedDiagnosticStepId.HYBRID_BOOTSTRAP_ACCEPT ->
-                    runHybridBootstrapAcceptStep(stepId, context)
+                    runPhaseSynchronizedStep(stepId, context) {
+                        runHybridBootstrapAcceptStep(stepId, context)
+                    }
                 AutomatedDiagnosticStepId.HYBRID_BOOTSTRAP_SOCKET_HINT ->
-                    runHybridBootstrapSocketHintStep(stepId, context)
+                    runPhaseSynchronizedStep(stepId, context) {
+                        runHybridBootstrapSocketHintStep(stepId, context)
+                    }
                 AutomatedDiagnosticStepId.HYBRID_BOOTSTRAP_TRIGGER ->
-                    runHybridBootstrapTriggerStep(stepId, context)
+                    runPhaseSynchronizedStep(stepId, context) {
+                        runHybridBootstrapTriggerStep(stepId, context)
+                    }
+                AutomatedDiagnosticStepId.GLOBAL_MESSAGE_PROBE ->
+                    runPhaseSynchronizedStep(stepId, context) {
+                        runGlobalMessageProbeStep(stepId, context)
+                    }
+                AutomatedDiagnosticStepId.PRIVATE_ENCRYPTED_MESSAGE_PROBE ->
+                    runPhaseSynchronizedStep(stepId, context) {
+                        runPrivateEncryptedMessageProbeStep(stepId, context)
+                    }
+                AutomatedDiagnosticStepId.REVERSE_DIRECTION_MESSAGING_PROBE ->
+                    runPhaseSynchronizedStep(stepId, context) {
+                        runReverseDirectionMessagingProbeStep(stepId, context)
+                    }
+                AutomatedDiagnosticStepId.FINAL_END_TO_END_VALIDATION ->
+                    runPhaseSynchronizedStep(stepId, context) {
+                        runFinalEndToEndValidationStep(stepId, context)
+                    }
             }
             when (result) {
                 AutomatedDiagnosticStepStatus.PASS -> Unit
@@ -1334,10 +1413,635 @@ internal class AutomatedDiagnosticsRunner(
         )
     }
 
+    private suspend fun runPhaseSynchronizedStep(
+        stepId: AutomatedDiagnosticStepId,
+        context: AutomatedDiagnosticsStepContext,
+        operation: suspend () -> AutomatedDiagnosticStepStatus
+    ): AutomatedDiagnosticStepStatus {
+        phaseSynchronizedLocalPreBarrierStatusOrNull(stepId, context)?.let { status ->
+            return status
+        }
+        val sharedRun = context.sharedRun ?: return completeStep(
+            stepId = stepId,
+            status = AutomatedDiagnosticStepStatus.BLOCKED,
+            summary = "${stepId.title} blocked",
+            blocker = "Shared diagnostics run is unavailable."
+        )
+        val initialSnapshot = bindings.snapshot()
+        val localPeerId = initialSnapshot.localPeerId?.trim()?.takeIf { it.isNotEmpty() }
+            ?: return completeStep(
+                stepId = stepId,
+                status = AutomatedDiagnosticStepStatus.BLOCKED,
+                summary = "${stepId.title} blocked",
+                blocker = "Local peer identity is unavailable."
+            )
+        val remotePeerId = otherSharedRunPeerId(sharedRun, localPeerId)
+            ?: return completeStep(
+                stepId = stepId,
+                status = AutomatedDiagnosticStepStatus.BLOCKED,
+                summary = "${stepId.title} blocked",
+                blocker = "Shared diagnostics run does not include the local peer identity."
+            )
+        val attemptNumber = context.beginPhaseAttempt(
+            stepId = stepId,
+            startedAtMonotonicMillis = clock.nowMillis()
+        )
+        val barrierStatus = awaitPhaseBarrier(
+            stepId = stepId,
+            context = context,
+            sharedRun = sharedRun,
+            localPeerId = localPeerId,
+            remotePeerId = remotePeerId,
+            attemptNumber = attemptNumber
+        )
+        if (barrierStatus != null) {
+            appendPhaseBarrierEvidenceToCurrentStep(stepId, context)
+            return barrierStatus
+        }
+        requestAutomatedDiagnosticsPhaseState(
+            stepId = stepId,
+            context = context,
+            sharedRun = sharedRun,
+            remotePeerId = remotePeerId,
+            phaseState = AutomatedDiagnosticsPhaseState.RUNNING,
+            attemptNumber = attemptNumber
+        )
+        context.currentPhaseOperationalStartedAtMillis = clock.nowMillis()
+        val result = operation()
+        val terminalState = when (result) {
+            AutomatedDiagnosticStepStatus.PASS -> AutomatedDiagnosticsPhaseState.PASS
+            AutomatedDiagnosticStepStatus.FAIL -> AutomatedDiagnosticsPhaseState.FAIL
+            AutomatedDiagnosticStepStatus.BLOCKED -> AutomatedDiagnosticsPhaseState.BLOCKED
+            AutomatedDiagnosticStepStatus.CANCELLED -> AutomatedDiagnosticsPhaseState.CANCELLED
+            AutomatedDiagnosticStepStatus.RUNNING,
+            AutomatedDiagnosticStepStatus.WAITING,
+            AutomatedDiagnosticStepStatus.SKIPPED ->
+                null
+        }
+        val remoteTerminalPassAlreadyObservedBeforeLocalSend =
+            terminalState == AutomatedDiagnosticsPhaseState.PASS &&
+                context.currentPhaseObservedRemoteSignal?.phaseState ==
+                AutomatedDiagnosticsPhaseState.PASS
+        val completedStepAfterOperation = if (terminalState != null) {
+            stepResult(stepId)
+        } else {
+            null
+        }
+        if (terminalState != null) {
+            requestAutomatedDiagnosticsPhaseState(
+                stepId = stepId,
+                context = context,
+                sharedRun = sharedRun,
+                remotePeerId = remotePeerId,
+                phaseState = terminalState,
+                attemptNumber = attemptNumber,
+                applicationProbeDescriptors = context.currentPhaseApplicationProbeDescriptors
+            )
+            if (terminalState == AutomatedDiagnosticsPhaseState.PASS) {
+                val terminalHandoffStatus = awaitTerminalPhasePassHandoffIfNeeded(
+                    stepId = stepId,
+                    context = context,
+                    sharedRun = sharedRun,
+                    localPeerId = localPeerId,
+                    remotePeerId = remotePeerId,
+                    attemptNumber = attemptNumber,
+                    remoteTerminalPassAlreadyObservedBeforeLocalSend =
+                    remoteTerminalPassAlreadyObservedBeforeLocalSend
+                )
+                if (terminalHandoffStatus != null) {
+                    appendPhaseBarrierEvidenceToCurrentStep(stepId, context)
+                    return terminalHandoffStatus
+                }
+                completedStepAfterOperation?.let { completedStep ->
+                    updateStep(
+                        stepId = stepId,
+                        status = completedStep.status,
+                        startedAtMillis = completedStep.startedAtMillis,
+                        completedAtMillis = completedStep.completedAtMillis,
+                        elapsedMillis = completedStep.elapsedMillis,
+                        retryCount = completedStep.retryCount,
+                        summary = completedStep.summary,
+                        blocker = completedStep.blockerOrFailure,
+                        evidence = completedStep.evidenceValues,
+                        waitingProgressText = completedStep.waitingProgressText,
+                        stabilizationProgressText = completedStep.stabilizationProgressText,
+                        technicalDetails = completedStep.technicalDetails,
+                        requiredAction = completedStep.requiredAction
+                    )
+                }
+            }
+        }
+        appendPhaseBarrierEvidenceToCurrentStep(stepId, context)
+        return result
+    }
+
+    private fun phaseSynchronizedLocalPreBarrierStatusOrNull(
+        stepId: AutomatedDiagnosticStepId,
+        context: AutomatedDiagnosticsStepContext
+    ): AutomatedDiagnosticStepStatus? {
+        val snapshot = bindings.snapshot()
+        return when (stepId) {
+            AutomatedDiagnosticStepId.WIFI_DIRECT_DISCOVERY_AND_GROUP -> {
+                val requirement = wifiDirectReadinessRequirement(snapshot) ?: return null
+                completeStep(
+                    stepId = stepId,
+                    status = AutomatedDiagnosticStepStatus.BLOCKED,
+                    summary = "Wi-Fi Direct discovery blocked",
+                    blocker = requirement.message,
+                    evidence = wifiDirectGroupEvidence(
+                        snapshot = snapshot,
+                        selectedPeer = context.selectedWifiDirectPeer,
+                        context = context
+                    ),
+                    requiredAction = requirement.requiredAction
+                )
+            }
+
+            AutomatedDiagnosticStepId.WIFI_DIRECT_SOCKET -> {
+                if (!wifiDirectGroupReady(snapshot)) {
+                    completeStep(
+                        stepId = stepId,
+                        status = AutomatedDiagnosticStepStatus.BLOCKED,
+                        summary = "Wi-Fi Direct socket blocked",
+                        blocker = "Wi-Fi Direct group is not ready.",
+                        evidence = wifiDirectSocketEvidence(
+                            snapshot = snapshot,
+                            context = context,
+                            minimumCreatedAtMillis = currentRunStartedAtMillis()
+                        )
+                    )
+                } else if (
+                    context.wifiDirectGroupProvenance !=
+                    AutomatedDiagnosticsWifiDirectGroupProvenance.CURRENT_RUN_VALIDATED
+                ) {
+                    completeStep(
+                        stepId = stepId,
+                        status = AutomatedDiagnosticStepStatus.BLOCKED,
+                        summary = "Wi-Fi Direct socket blocked",
+                        blocker = "Step 11 did not establish current-run Wi-Fi Direct group provenance.",
+                        evidence = wifiDirectSocketEvidence(
+                            snapshot = snapshot,
+                            context = context,
+                            minimumCreatedAtMillis = currentRunStartedAtMillis()
+                        )
+                    )
+                } else {
+                    null
+                }
+            }
+
+            AutomatedDiagnosticStepId.WIFI_DIRECT_BRIDGES -> {
+                if (!wifiDirectSocketReady(snapshot)) {
+                    completeStep(
+                        stepId = stepId,
+                        status = AutomatedDiagnosticStepStatus.BLOCKED,
+                        summary = "Wi-Fi Direct bridges blocked",
+                        blocker = wifiDirectSocketBlocker(snapshot)
+                            ?: "Wi-Fi Direct socket is not ready."
+                    )
+                } else {
+                    null
+                }
+            }
+
+            else -> null
+        }
+    }
+
+    private suspend fun awaitPhaseBarrier(
+        stepId: AutomatedDiagnosticStepId,
+        context: AutomatedDiagnosticsStepContext,
+        sharedRun: AutomatedDiagnosticsSharedRun,
+        localPeerId: String,
+        remotePeerId: String,
+        attemptNumber: Int
+    ): AutomatedDiagnosticStepStatus? {
+        val startedAt = clock.nowMillis()
+        var lastPhaseRequestAtMillis: Long? = null
+        while (currentCoroutineContext().isActive) {
+            val now = clock.nowMillis()
+            val elapsed = now - startedAt
+            val snapshot = bindings.snapshot()
+            val remoteSignal = recentAcceptedAutomatedDiagnosticsPhaseSignalOrNull(
+                snapshot = snapshot,
+                expectedRun = sharedRun,
+                expectedSenderPeerId = remotePeerId,
+                expectedRecipientPeerId = localPeerId,
+                expectedStepId = stepId,
+                expectedAttemptNumber = attemptNumber,
+                context = context
+            )
+            when (remoteSignal?.phaseState) {
+                AutomatedDiagnosticsPhaseState.READY,
+                AutomatedDiagnosticsPhaseState.RUNNING,
+                AutomatedDiagnosticsPhaseState.PASS -> {
+                    context.currentPhaseObservedRemoteSignal = remoteSignal
+                    context.currentPhaseBarrierEstablished = true
+                    if (context.currentPhaseBarrierEstablishedAtMillis == null) {
+                        context.currentPhaseBarrierEstablishedAtMillis = now
+                    }
+                    return null
+                }
+
+                AutomatedDiagnosticsPhaseState.FAIL -> {
+                    return completeStep(
+                        stepId = stepId,
+                        status = AutomatedDiagnosticStepStatus.FAIL,
+                        summary = "${stepId.title} failed",
+                        blocker = "Remote device reported ${stepId.title.lowercase()} FAIL.",
+                        evidence = phaseBarrierEvidence(stepId, context)
+                    )
+                }
+
+                AutomatedDiagnosticsPhaseState.BLOCKED -> {
+                    return completeStep(
+                        stepId = stepId,
+                        status = AutomatedDiagnosticStepStatus.BLOCKED,
+                        summary = "${stepId.title} blocked",
+                        blocker = "Remote device reported ${stepId.title.lowercase()} BLOCKED.",
+                        evidence = phaseBarrierEvidence(stepId, context)
+                    )
+                }
+
+                AutomatedDiagnosticsPhaseState.CANCELLED -> {
+                    return completeStep(
+                        stepId = stepId,
+                        status = AutomatedDiagnosticStepStatus.CANCELLED,
+                        summary = "${stepId.title} cancelled",
+                        blocker = "Remote device cancelled during ${stepId.title.lowercase()}.",
+                        evidence = phaseBarrierEvidence(stepId, context)
+                    )
+                }
+
+                null -> Unit
+            }
+
+            if (
+                lastPhaseRequestAtMillis == null ||
+                now - lastPhaseRequestAtMillis >= timingPolicy.automatedDiagnosticsPhaseStateRefreshMillis
+            ) {
+                requestAutomatedDiagnosticsPhaseState(
+                    stepId = stepId,
+                    context = context,
+                    sharedRun = sharedRun,
+                    remotePeerId = remotePeerId,
+                    phaseState = AutomatedDiagnosticsPhaseState.READY,
+                    attemptNumber = attemptNumber
+                )
+                lastPhaseRequestAtMillis = now
+            }
+
+            updateStep(
+                stepId = stepId,
+                status = AutomatedDiagnosticStepStatus.RUNNING,
+                startedAtMillis = startedAt,
+                elapsedMillis = elapsed,
+                retryCount = stepResult(stepId).retryCount,
+                summary = "Waiting for synchronized ${stepId.title.lowercase()} phase",
+                blocker = phaseBarrierBlocker(stepId, context),
+                evidence = phaseBarrierEvidence(stepId, context),
+                waitingProgressText =
+                "Waiting ${formatAutomatedDiagnosticsDuration(elapsed)} / ${formatAutomatedDiagnosticsDuration(timingPolicy.phaseBarrierSync.timeoutMillis)}",
+                stabilizationProgressText = null
+            )
+            if (elapsed >= timingPolicy.phaseBarrierSync.timeoutMillis) {
+                return completeStep(
+                    stepId = stepId,
+                    status = AutomatedDiagnosticStepStatus.BLOCKED,
+                    summary = "${stepId.title} blocked",
+                    blocker = phaseBarrierBlocker(stepId, context)
+                        ?: "Timed out waiting for synchronized ${stepId.title.lowercase()} phase.",
+                    evidence = phaseBarrierEvidence(stepId, context),
+                    startedAtMillis = startedAt
+                )
+            }
+            delay.delayMillis(timingPolicy.pollIntervalMillis)
+        }
+        return completeStep(
+            stepId = stepId,
+            status = AutomatedDiagnosticStepStatus.CANCELLED,
+            summary = "Cancelled",
+            blocker = "Automated diagnostics were cancelled.",
+            evidence = phaseBarrierEvidence(stepId, context),
+            startedAtMillis = startedAt
+        )
+    }
+
+    private suspend fun requestAutomatedDiagnosticsPhaseState(
+        stepId: AutomatedDiagnosticStepId,
+        context: AutomatedDiagnosticsStepContext,
+        sharedRun: AutomatedDiagnosticsSharedRun,
+        remotePeerId: String,
+        phaseState: AutomatedDiagnosticsPhaseState,
+        attemptNumber: Int,
+        applicationProbeDescriptors: List<AutomatedDiagnosticsPhaseApplicationProbeDescriptor> =
+            emptyList()
+    ): AutomatedDiagnosticsPhaseStateSendResult {
+        context.currentPhaseLocalState = phaseState
+        context.currentPhaseSendCount += 1
+        val result = bindings.commands.requestAutomatedDiagnosticsPhaseState(
+            sharedRun,
+            remotePeerId,
+            stepId,
+            phaseState,
+            attemptNumber,
+            applicationProbeDescriptors
+        )
+        context.currentPhaseLastLocalSendStatus =
+            automatedDiagnosticsPhaseStateSendStatusText(result)
+        return result
+    }
+
+    private suspend fun awaitTerminalPhasePassHandoffIfNeeded(
+        stepId: AutomatedDiagnosticStepId,
+        context: AutomatedDiagnosticsStepContext,
+        sharedRun: AutomatedDiagnosticsSharedRun,
+        localPeerId: String,
+        remotePeerId: String,
+        attemptNumber: Int,
+        remoteTerminalPassAlreadyObservedBeforeLocalSend: Boolean
+    ): AutomatedDiagnosticStepStatus? {
+        if (stepId !in automatedDiagnosticsApplicationProbeStepIds) {
+            return null
+        }
+        val nextStepId = AutomatedDiagnosticStepId.entries.getOrNull(stepId.ordinal + 1)
+        val startedAt = clock.nowMillis()
+        var lastTerminalPassRequestAtMillis: Long? = startedAt
+        while (currentCoroutineContext().isActive) {
+            val now = clock.nowMillis()
+            val elapsed = now - startedAt
+            val snapshot = bindings.snapshot()
+            val remoteCurrentSignal = recentAcceptedAutomatedDiagnosticsPhaseSignalOrNull(
+                snapshot = snapshot,
+                expectedRun = sharedRun,
+                expectedSenderPeerId = remotePeerId,
+                expectedRecipientPeerId = localPeerId,
+                expectedStepId = stepId,
+                expectedAttemptNumber = attemptNumber,
+                context = context
+            )
+            when (remoteCurrentSignal?.phaseState) {
+                AutomatedDiagnosticsPhaseState.FAIL -> {
+                    return completeStep(
+                        stepId = stepId,
+                        status = AutomatedDiagnosticStepStatus.FAIL,
+                        summary = "${stepId.title} failed",
+                        blocker = "Remote device reported ${stepId.title.lowercase()} FAIL during terminal handoff.",
+                        evidence = phaseBarrierEvidence(stepId, context)
+                    )
+                }
+
+                AutomatedDiagnosticsPhaseState.BLOCKED -> {
+                    return completeStep(
+                        stepId = stepId,
+                        status = AutomatedDiagnosticStepStatus.BLOCKED,
+                        summary = "${stepId.title} blocked",
+                        blocker = "Remote device reported ${stepId.title.lowercase()} BLOCKED during terminal handoff.",
+                        evidence = phaseBarrierEvidence(stepId, context)
+                    )
+                }
+
+                AutomatedDiagnosticsPhaseState.CANCELLED -> {
+                    return completeStep(
+                        stepId = stepId,
+                        status = AutomatedDiagnosticStepStatus.CANCELLED,
+                        summary = "${stepId.title} cancelled",
+                        blocker = "Remote device cancelled during ${stepId.title.lowercase()} terminal handoff.",
+                        evidence = phaseBarrierEvidence(stepId, context)
+                    )
+                }
+
+                else -> Unit
+            }
+            val remoteNextStepSignal = nextStepId?.let { expectedNextStepId ->
+                recentAcceptedAutomatedDiagnosticsPhaseSignalOrNull(
+                    snapshot = snapshot,
+                    expectedRun = sharedRun,
+                    expectedSenderPeerId = remotePeerId,
+                    expectedRecipientPeerId = localPeerId,
+                    expectedStepId = expectedNextStepId,
+                    expectedAttemptNumber = 1,
+                    context = context,
+                    allowLatestFallback = false
+                )
+            }
+            val handoffComplete = if (remoteTerminalPassAlreadyObservedBeforeLocalSend) {
+                remoteNextStepSignal != null
+            } else {
+                remoteCurrentSignal?.phaseState == AutomatedDiagnosticsPhaseState.PASS
+            }
+            if (handoffComplete) {
+                return null
+            }
+            if (
+                lastTerminalPassRequestAtMillis == null ||
+                now - lastTerminalPassRequestAtMillis >=
+                timingPolicy.automatedDiagnosticsPhaseStateRefreshMillis
+            ) {
+                requestAutomatedDiagnosticsPhaseState(
+                    stepId = stepId,
+                    context = context,
+                    sharedRun = sharedRun,
+                    remotePeerId = remotePeerId,
+                    phaseState = AutomatedDiagnosticsPhaseState.PASS,
+                    attemptNumber = attemptNumber,
+                    applicationProbeDescriptors = context.currentPhaseApplicationProbeDescriptors
+                )
+                lastTerminalPassRequestAtMillis = now
+            }
+            updateStep(
+                stepId = stepId,
+                status = AutomatedDiagnosticStepStatus.RUNNING,
+                startedAtMillis = startedAt,
+                elapsedMillis = elapsed,
+                retryCount = stepResult(stepId).retryCount,
+                summary = "Completing ${stepId.title.lowercase()} handoff",
+                blocker = terminalPhasePassHandoffBlocker(
+                    stepId = stepId,
+                    nextStepId = nextStepId,
+                    remoteTerminalPassAlreadyObservedBeforeLocalSend =
+                    remoteTerminalPassAlreadyObservedBeforeLocalSend
+                ),
+                evidence = phaseBarrierEvidence(stepId, context),
+                waitingProgressText =
+                "Waiting ${formatAutomatedDiagnosticsDuration(elapsed)} / ${formatAutomatedDiagnosticsDuration(timingPolicy.sharedRunCoordination.timeoutMillis)}",
+                stabilizationProgressText = null
+            )
+            if (elapsed >= timingPolicy.sharedRunCoordination.timeoutMillis) {
+                val timeoutBlocker = if (!remoteTerminalPassAlreadyObservedBeforeLocalSend) {
+                    "Timed out waiting for remote terminal PASS for Step ${stepId.stepNumber} before entering Step ${nextStepId?.stepNumber ?: stepId.stepNumber + 1}."
+                } else {
+                    "Timed out waiting for the remote device to observe Step ${stepId.stepNumber} PASS and begin Step ${nextStepId?.stepNumber ?: stepId.stepNumber + 1}."
+                }
+                return completeStep(
+                    stepId = stepId,
+                    status = AutomatedDiagnosticStepStatus.BLOCKED,
+                    summary = "${stepId.title} blocked",
+                    blocker = timeoutBlocker,
+                    evidence = phaseBarrierEvidence(stepId, context),
+                    startedAtMillis = startedAt
+                )
+            }
+            delay.delayMillis(timingPolicy.pollIntervalMillis)
+        }
+        return completeStep(
+            stepId = stepId,
+            status = AutomatedDiagnosticStepStatus.CANCELLED,
+            summary = "Cancelled",
+            blocker = "Automated diagnostics were cancelled during terminal handoff.",
+            evidence = phaseBarrierEvidence(stepId, context),
+            startedAtMillis = startedAt
+        )
+    }
+
+    private fun terminalPhasePassHandoffBlocker(
+        stepId: AutomatedDiagnosticStepId,
+        nextStepId: AutomatedDiagnosticStepId?,
+        remoteTerminalPassAlreadyObservedBeforeLocalSend: Boolean
+    ): String {
+        return if (!remoteTerminalPassAlreadyObservedBeforeLocalSend) {
+            "Waiting for remote terminal PASS for Step ${stepId.stepNumber} before entering Step ${nextStepId?.stepNumber ?: stepId.stepNumber + 1}."
+        } else {
+            "Waiting for the remote device to observe Step ${stepId.stepNumber} PASS and begin Step ${nextStepId?.stepNumber ?: stepId.stepNumber + 1}."
+        }
+    }
+
+    private fun phaseBarrierBlocker(
+        stepId: AutomatedDiagnosticStepId,
+        context: AutomatedDiagnosticsStepContext
+    ): String? {
+        val remoteSignal = context.currentPhaseObservedRemoteSignal
+        return when {
+            context.currentPhaseBarrierEstablished ->
+                null
+            remoteSignal == null &&
+                context.currentPhaseLastRejectedReason != null ->
+                "Waiting for a fresh BLE phase state for Step ${stepId.stepNumber}. Last rejection: ${context.currentPhaseLastRejectedReason?.statusText}."
+            remoteSignal == null ->
+                "Waiting for the remote device to reach Step ${stepId.stepNumber} over BLE control."
+            remoteSignal.phaseState == AutomatedDiagnosticsPhaseState.READY ->
+                "Waiting for the BLE phase barrier to stabilize."
+            else ->
+                "Waiting for synchronized BLE phase control."
+        }
+    }
+
+    private fun phaseBarrierEvidence(
+        stepId: AutomatedDiagnosticStepId,
+        context: AutomatedDiagnosticsStepContext
+    ): List<AutomatedDiagnosticEvidenceValue> {
+        val remoteSignal = context.currentPhaseObservedRemoteSignal
+        val remoteObservationAge = context.lastObservedPhaseSignalObservedAtMonotonicMillis?.let { observedAt ->
+            (clock.nowMillis() - observedAt).coerceAtLeast(0L).toString()
+        } ?: "none"
+        val operationalElapsed = context.currentPhaseOperationalStartedAtMillis?.let { startedAt ->
+            (clock.nowMillis() - startedAt).coerceAtLeast(0L).toString()
+        } ?: "none"
+        return listOf(
+            AutomatedDiagnosticEvidenceValue("Local phase", stepId.stepNumber.toString()),
+            AutomatedDiagnosticEvidenceValue(
+                "Local phase state",
+                context.currentPhaseLocalState?.statusText ?: "none"
+            ),
+            AutomatedDiagnosticEvidenceValue(
+                "Remote phase",
+                remoteSignal?.stepId?.stepNumber?.toString() ?: "none"
+            ),
+            AutomatedDiagnosticEvidenceValue(
+                "Remote phase state",
+                remoteSignal?.phaseState?.statusText ?: "none"
+            ),
+            AutomatedDiagnosticEvidenceValue(
+                "Phase attempt number",
+                context.currentPhaseAttemptNumber.toString()
+            ),
+            AutomatedDiagnosticEvidenceValue(
+                "Barrier established",
+                context.currentPhaseBarrierEstablished.toString()
+            ),
+            AutomatedDiagnosticEvidenceValue(
+                "Barrier established timestamp",
+                context.currentPhaseBarrierEstablishedAtMillis?.toString() ?: "none"
+            ),
+            AutomatedDiagnosticEvidenceValue(
+                "Phase-state send count",
+                context.currentPhaseSendCount.toString()
+            ),
+            AutomatedDiagnosticEvidenceValue(
+                "Phase-state receive count",
+                context.currentPhaseReceiveCount.toString()
+            ),
+            AutomatedDiagnosticEvidenceValue(
+                "Phase-state accepted count",
+                context.currentPhaseAcceptedCount.toString()
+            ),
+            AutomatedDiagnosticEvidenceValue(
+                "Last phase-state rejection",
+                context.currentPhaseLastRejectedReason?.statusText ?: "none"
+            ),
+            AutomatedDiagnosticEvidenceValue(
+                "Remote state observation age",
+                remoteObservationAge
+            ),
+            AutomatedDiagnosticEvidenceValue(
+                "Operational timeout started",
+                context.currentPhaseOperationalStartedAtMillis?.toString() ?: "none"
+            ),
+            AutomatedDiagnosticEvidenceValue(
+                "Operational timeout elapsed",
+                operationalElapsed
+            ),
+            AutomatedDiagnosticEvidenceValue(
+                "Phase-state send status",
+                context.currentPhaseLastLocalSendStatus ?: "none"
+            )
+        )
+    }
+
+    private fun appendPhaseBarrierEvidenceToCurrentStep(
+        stepId: AutomatedDiagnosticStepId,
+        context: AutomatedDiagnosticsStepContext
+    ) {
+        val currentStep = stepResult(stepId)
+        updateStep(
+            stepId = stepId,
+            status = currentStep.status,
+            startedAtMillis = currentStep.startedAtMillis,
+            completedAtMillis = currentStep.completedAtMillis,
+            elapsedMillis = currentStep.elapsedMillis,
+            retryCount = currentStep.retryCount,
+            summary = currentStep.summary,
+            blocker = currentStep.blockerOrFailure,
+            evidence = mergeEvidenceValues(
+                currentStep.evidenceValues,
+                phaseBarrierEvidence(stepId, context)
+            ),
+            waitingProgressText = currentStep.waitingProgressText,
+            stabilizationProgressText = currentStep.stabilizationProgressText,
+            technicalDetails = currentStep.technicalDetails,
+            requiredAction = currentStep.requiredAction
+        )
+    }
+
+    private fun mergeEvidenceValues(
+        existing: List<AutomatedDiagnosticEvidenceValue>,
+        updates: List<AutomatedDiagnosticEvidenceValue>
+    ): List<AutomatedDiagnosticEvidenceValue> {
+        val mergedByLabel = linkedMapOf<String, AutomatedDiagnosticEvidenceValue>()
+        existing.forEach { value ->
+            mergedByLabel[value.label] = value
+        }
+        updates.forEach { value ->
+            mergedByLabel[value.label] = value
+        }
+        return mergedByLabel.values.toList()
+    }
+
     private suspend fun runWifiDirectDiscoveryAndGroupStep(
         stepId: AutomatedDiagnosticStepId,
         context: AutomatedDiagnosticsStepContext
     ): AutomatedDiagnosticStepStatus {
+        resetWifiDirectDiscoveryAttemptState(context)
         val initialSnapshot = bindings.snapshot()
         recordInitialWifiDirectState(initialSnapshot, context)
         val initialReadinessRequirement = wifiDirectReadinessRequirement(initialSnapshot)
@@ -1417,20 +2121,13 @@ internal class AutomatedDiagnosticsRunner(
                     snapshot = snapshot,
                     correlationToken = acceptedRemoteSignal?.wifiDirectCorrelationToken
                 )
-                context.acceptedWifiDirectPeerReadySignal = acceptedRemoteSignal
-                context.wifiDirectCurrentRunTokenProofReady = when (localRole) {
-                    AutomatedDiagnosticsPeerRole.COORDINATOR -> acceptedRemoteSignal != null
-                    AutomatedDiagnosticsPeerRole.PARTICIPANT ->
-                        context.wifiDirectCorrelationToken != null &&
-                            context.wifiDirectPeerReadySuccessfulSends > 0
-                }
-                context.wifiDirectCurrentRunDnsSdProofReady = when (localRole) {
-                    AutomatedDiagnosticsPeerRole.COORDINATOR -> matchingDnsSdResponses.size == 1
-                    AutomatedDiagnosticsPeerRole.PARTICIPANT ->
-                        snapshot.wifiDirectRuntimeStatus.dnsSdDiagnostics.localServiceRegistered &&
-                            context.wifiDirectDnsSdRegisteredCorrelationToken ==
-                            context.wifiDirectCorrelationToken
-                }
+                updateWifiDirectCurrentRunProofs(
+                    localRole = localRole,
+                    snapshot = snapshot,
+                    acceptedRemoteSignal = acceptedRemoteSignal,
+                    matchingDnsSdResponses = matchingDnsSdResponses,
+                    context = context
+                )
 
                 if (localRole == AutomatedDiagnosticsPeerRole.PARTICIPANT) {
                     val correlationToken = context.wifiDirectCorrelationToken
@@ -1503,11 +2200,9 @@ internal class AutomatedDiagnosticsRunner(
                     val matchedPeer = matchingDnsSdResponses.single().peer
                     context.selectedWifiDirectPeer = matchedPeer
                     context.selectedWifiDirectPeerSource = validatedDnsSdTokenPeerSource
+                    context.wifiDirectCurrentRunValidatedPeerProofReady = true
                     context.wifiDirectConnectTarget = wifiDirectPeerEvidenceText(matchedPeer)
                 }
-                context.wifiDirectCurrentRunValidatedPeerProofReady =
-                    localRole == AutomatedDiagnosticsPeerRole.COORDINATOR &&
-                        context.selectedWifiDirectPeerSource == validatedDnsSdTokenPeerSource
 
                 val blocker = wifiDirectPeerCorrelationBlocker(
                     snapshot = snapshot,
@@ -1626,20 +2321,13 @@ internal class AutomatedDiagnosticsRunner(
                     snapshot = snapshot,
                     correlationToken = acceptedRemoteSignal?.wifiDirectCorrelationToken
                 )
-                context.acceptedWifiDirectPeerReadySignal = acceptedRemoteSignal
-                context.wifiDirectCurrentRunTokenProofReady = when (localRole) {
-                    AutomatedDiagnosticsPeerRole.COORDINATOR -> acceptedRemoteSignal != null
-                    AutomatedDiagnosticsPeerRole.PARTICIPANT ->
-                        context.wifiDirectCorrelationToken != null &&
-                            context.wifiDirectPeerReadySuccessfulSends > 0
-                }
-                context.wifiDirectCurrentRunDnsSdProofReady = when (localRole) {
-                    AutomatedDiagnosticsPeerRole.COORDINATOR -> matchingDnsSdResponses.size == 1
-                    AutomatedDiagnosticsPeerRole.PARTICIPANT ->
-                        snapshot.wifiDirectRuntimeStatus.dnsSdDiagnostics.localServiceRegistered &&
-                            context.wifiDirectDnsSdRegisteredCorrelationToken ==
-                            context.wifiDirectCorrelationToken
-                }
+                updateWifiDirectCurrentRunProofs(
+                    localRole = localRole,
+                    snapshot = snapshot,
+                    acceptedRemoteSignal = acceptedRemoteSignal,
+                    matchingDnsSdResponses = matchingDnsSdResponses,
+                    context = context
+                )
                 if (
                     localRole == AutomatedDiagnosticsPeerRole.COORDINATOR &&
                     !wifiDirectGroupReady(snapshot) &&
@@ -1656,10 +2344,13 @@ internal class AutomatedDiagnosticsRunner(
                     selectedPeer = context.selectedWifiDirectPeer,
                     selectedPeerSource = context.selectedWifiDirectPeerSource
                 )
-                context.wifiDirectCurrentRunValidatedPeerProofReady =
+                if (
                     localRole == AutomatedDiagnosticsPeerRole.COORDINATOR &&
-                        visibleValidatedPeer != null &&
-                        context.selectedWifiDirectPeerSource == validatedDnsSdTokenPeerSource
+                    visibleValidatedPeer != null &&
+                    context.selectedWifiDirectPeerSource == validatedDnsSdTokenPeerSource
+                ) {
+                    context.wifiDirectCurrentRunValidatedPeerProofReady = true
+                }
                 if (
                     localRole == AutomatedDiagnosticsPeerRole.COORDINATOR &&
                     visibleValidatedPeer != null &&
@@ -2188,10 +2879,33 @@ internal class AutomatedDiagnosticsRunner(
         val localRole = context.localRole ?: return completeStep(
             stepId = stepId,
             status = AutomatedDiagnosticStepStatus.BLOCKED,
-            summary = "Hybrid bootstrap accept blocked",
-            blocker = "Local diagnostics role is unavailable."
+                summary = "Hybrid bootstrap accept blocked",
+                blocker = "Local diagnostics role is unavailable."
         )
-        val runStartedAtMillis = currentRunStartedAtMillis()
+        val snapshot = bindings.snapshot()
+        val sharedRun = context.sharedRun ?: return completeStep(
+            stepId = stepId,
+            status = AutomatedDiagnosticStepStatus.BLOCKED,
+            summary = "Hybrid bootstrap accept blocked",
+            blocker = "Shared diagnostics run is unavailable."
+        )
+        val localPeerId = snapshot.localPeerId?.trim()?.takeIf { it.isNotEmpty() } ?: return completeStep(
+            stepId = stepId,
+            status = AutomatedDiagnosticStepStatus.BLOCKED,
+            summary = "Hybrid bootstrap accept blocked",
+            blocker = "Local Aurora peer id is unavailable."
+        )
+        val remotePeerId = otherSharedRunPeerId(sharedRun, localPeerId) ?: return completeStep(
+            stepId = stepId,
+            status = AutomatedDiagnosticStepStatus.BLOCKED,
+            summary = "Hybrid bootstrap accept blocked",
+            blocker = "Remote Aurora peer id is unavailable for the shared diagnostics run."
+        )
+        val expectedSessionId = sharedRun.coordinatorPeerId
+        context.beginHybridAcceptAttempt(
+            expectedSessionId = expectedSessionId,
+            startedAtMonotonicMillis = clock.nowMillis()
+        )
         return if (localRole == AutomatedDiagnosticsPeerRole.PARTICIPANT) {
             val readiness = awaitStableSnapshotStep(
                 stepId = stepId,
@@ -2202,78 +2916,229 @@ internal class AutomatedDiagnosticsRunner(
                     it.hybridBootstrapManualAcceptBlockedReason
                         ?: "Waiting for a recent hybrid bootstrap offer."
                 },
-                successEvidence = { snapshot ->
-                    hybridBootstrapEvidence(snapshot)
+                successEvidence = { currentSnapshot ->
+                    hybridBootstrapAcceptEvidence(currentSnapshot, context)
                 },
-                isSatisfied = { snapshot ->
-                    snapshot.hybridBootstrapManualAcceptAvailable ||
-                        hasRecentHybridAccept(snapshot, runStartedAtMillis)
+                isSatisfied = { currentSnapshot ->
+                    currentSnapshot.hybridBootstrapManualAcceptAvailable
                 }
             )
             if (readiness != AutomatedDiagnosticStepStatus.PASS) {
                 return readiness
             }
-            if (hasRecentHybridAccept(bindings.snapshot(), runStartedAtMillis)) {
-                return completeStep(
-                    stepId = stepId,
-                    status = AutomatedDiagnosticStepStatus.PASS,
-                    summary = "Hybrid bootstrap accept already recorded",
-                    evidence = hybridBootstrapEvidence(bindings.snapshot())
+            val attemptNumber = context.currentPhaseAttemptNumber
+            val startedAt = clock.nowMillis()
+            var lastAcceptRefreshAtMillis: Long? = null
+            setStepRunning(
+                stepId = stepId,
+                retryCount = stepResult(stepId).retryCount,
+                summary = "Waiting for coordinator confirmation of hybrid bootstrap accept",
+                startedAtMillis = startedAt
+            )
+            while (currentCoroutineContext().isActive) {
+                val now = clock.nowMillis()
+                val currentSnapshot = bindings.snapshot()
+                val elapsed = now - startedAt
+                val remoteSignal = recentAcceptedAutomatedDiagnosticsPhaseSignalOrNull(
+                    snapshot = currentSnapshot,
+                    expectedRun = sharedRun,
+                    expectedSenderPeerId = remotePeerId,
+                    expectedRecipientPeerId = localPeerId,
+                    expectedStepId = stepId,
+                    expectedAttemptNumber = attemptNumber,
+                    context = context
                 )
-            }
-            when (val result = bindings.commands.requestHybridBootstrapManualAccept()) {
-                is HybridBootstrapManualAcceptSendResult.Sent -> completeStep(
+                when (remoteSignal?.phaseState) {
+                    AutomatedDiagnosticsPhaseState.PASS -> {
+                        return completeStep(
+                            stepId = stepId,
+                            status = AutomatedDiagnosticStepStatus.PASS,
+                            summary = "Hybrid bootstrap accept confirmed by coordinator",
+                            evidence = hybridBootstrapAcceptEvidence(currentSnapshot, context),
+                            startedAtMillis = startedAt
+                        )
+                    }
+                    AutomatedDiagnosticsPhaseState.FAIL -> {
+                        return completeStep(
+                            stepId = stepId,
+                            status = AutomatedDiagnosticStepStatus.FAIL,
+                            summary = "Hybrid bootstrap accept failed",
+                            blocker = "Coordinator reported Hybrid bootstrap accept FAIL.",
+                            evidence = hybridBootstrapAcceptEvidence(currentSnapshot, context),
+                            startedAtMillis = startedAt
+                        )
+                    }
+                    AutomatedDiagnosticsPhaseState.BLOCKED -> {
+                        return completeStep(
+                            stepId = stepId,
+                            status = AutomatedDiagnosticStepStatus.BLOCKED,
+                            summary = "Hybrid bootstrap accept blocked",
+                            blocker = "Coordinator reported Hybrid bootstrap accept BLOCKED.",
+                            evidence = hybridBootstrapAcceptEvidence(currentSnapshot, context),
+                            startedAtMillis = startedAt
+                        )
+                    }
+                    AutomatedDiagnosticsPhaseState.CANCELLED -> {
+                        return completeStep(
+                            stepId = stepId,
+                            status = AutomatedDiagnosticStepStatus.CANCELLED,
+                            summary = "Hybrid bootstrap accept cancelled",
+                            blocker = "Coordinator cancelled during Hybrid bootstrap accept.",
+                            evidence = hybridBootstrapAcceptEvidence(currentSnapshot, context),
+                            startedAtMillis = startedAt
+                        )
+                    }
+                    AutomatedDiagnosticsPhaseState.READY,
+                    AutomatedDiagnosticsPhaseState.RUNNING,
+                    null -> Unit
+                }
+                if (
+                    currentSnapshot.hybridBootstrapManualAcceptAvailable &&
+                    (
+                        lastAcceptRefreshAtMillis == null ||
+                            now - lastAcceptRefreshAtMillis >=
+                            timingPolicy.automatedDiagnosticsPhaseStateRefreshMillis
+                        )
+                ) {
+                    context.hybridAcceptSendAttemptCount += 1
+                    when (val result = bindings.commands.requestHybridBootstrapManualAccept()) {
+                        is HybridBootstrapManualAcceptSendResult.Sent -> {
+                            if (result.peerId != remotePeerId) {
+                                context.hybridAcceptLastSendResult = "wrong-peer:${result.peerId}"
+                                return completeStep(
+                                    stepId = stepId,
+                                    status = AutomatedDiagnosticStepStatus.FAIL,
+                                    summary = "Hybrid bootstrap accept failed",
+                                    blocker =
+                                        "Hybrid bootstrap accept refresh targeted ${result.peerId} instead of $remotePeerId.",
+                                    evidence = hybridBootstrapAcceptEvidence(currentSnapshot, context),
+                                    startedAtMillis = startedAt
+                                )
+                            }
+                            if (result.sessionId != expectedSessionId) {
+                                context.hybridAcceptLastSendResult =
+                                    "wrong-session:${result.sessionId}"
+                                return completeStep(
+                                    stepId = stepId,
+                                    status = AutomatedDiagnosticStepStatus.FAIL,
+                                    summary = "Hybrid bootstrap accept failed",
+                                    blocker =
+                                        "Hybrid bootstrap accept refresh targeted session ${result.sessionId} instead of $expectedSessionId.",
+                                    evidence = hybridBootstrapAcceptEvidence(currentSnapshot, context),
+                                    startedAtMillis = startedAt
+                                )
+                            }
+                            context.hybridAcceptSuccessfulSendCount += 1
+                            context.hybridAcceptLastSendResult = "sent"
+                            context.hybridAcceptLastSentPeerId = result.peerId
+                            context.hybridAcceptLastSentSessionId = result.sessionId
+                            context.hybridAcceptLastSentAtMonotonicMillis = now
+                            lastAcceptRefreshAtMillis = now
+                        }
+                        HybridBootstrapManualAcceptSendResult.NoOfferCandidate -> {
+                            context.hybridAcceptLastSendResult = "no-offer-candidate"
+                            return completeStep(
+                                stepId = stepId,
+                                status = AutomatedDiagnosticStepStatus.BLOCKED,
+                                summary = "Hybrid bootstrap accept blocked",
+                                blocker = "No recent hybrid bootstrap offer candidate is available.",
+                                evidence = hybridBootstrapAcceptEvidence(currentSnapshot, context),
+                                startedAtMillis = startedAt
+                            )
+                        }
+                        HybridBootstrapManualAcceptSendResult.NoActivePeer -> {
+                            context.hybridAcceptLastSendResult = "no-active-peer"
+                            return completeStep(
+                                stepId = stepId,
+                                status = AutomatedDiagnosticStepStatus.BLOCKED,
+                                summary = "Hybrid bootstrap accept blocked",
+                                blocker = "No active BLE peer is connected.",
+                                evidence = hybridBootstrapAcceptEvidence(currentSnapshot, context),
+                                startedAtMillis = startedAt
+                            )
+                        }
+                        HybridBootstrapManualAcceptSendResult.NoActiveSession -> {
+                            context.hybridAcceptLastSendResult = "no-active-session"
+                            return completeStep(
+                                stepId = stepId,
+                                status = AutomatedDiagnosticStepStatus.BLOCKED,
+                                summary = "Hybrid bootstrap accept blocked",
+                                blocker = "No active BLE secure session is available.",
+                                evidence = hybridBootstrapAcceptEvidence(currentSnapshot, context),
+                                startedAtMillis = startedAt
+                            )
+                        }
+                        HybridBootstrapManualAcceptSendResult.WriterUnavailable -> {
+                            context.hybridAcceptLastSendResult = "writer-unavailable"
+                            return completeStep(
+                                stepId = stepId,
+                                status = AutomatedDiagnosticStepStatus.FAIL,
+                                summary = "Hybrid bootstrap accept failed",
+                                blocker = "BLE writer unavailable.",
+                                evidence = hybridBootstrapAcceptEvidence(currentSnapshot, context),
+                                startedAtMillis = startedAt
+                            )
+                        }
+                        is HybridBootstrapManualAcceptSendResult.InvalidAccept -> {
+                            context.hybridAcceptLastSendResult = "invalid:${result.reason}"
+                            return completeStep(
+                                stepId = stepId,
+                                status = AutomatedDiagnosticStepStatus.FAIL,
+                                summary = "Hybrid bootstrap accept failed",
+                                blocker = result.reason,
+                                evidence = hybridBootstrapAcceptEvidence(currentSnapshot, context),
+                                startedAtMillis = startedAt
+                            )
+                        }
+                        is HybridBootstrapManualAcceptSendResult.SendFailed -> {
+                            context.hybridAcceptLastSendResult = "failed:${result.reason}"
+                            return completeStep(
+                                stepId = stepId,
+                                status = AutomatedDiagnosticStepStatus.FAIL,
+                                summary = "Hybrid bootstrap accept failed",
+                                blocker = result.reason,
+                                evidence = hybridBootstrapAcceptEvidence(currentSnapshot, context),
+                                startedAtMillis = startedAt
+                            )
+                        }
+                    }
+                }
+                updateStep(
                     stepId = stepId,
-                    status = AutomatedDiagnosticStepStatus.PASS,
-                    summary = "Hybrid bootstrap accept sent over BLE control",
-                    evidence = hybridBootstrapEvidence(bindings.snapshot()) + listOf(
-                        AutomatedDiagnosticEvidenceValue("Accept peer", result.peerId),
-                        AutomatedDiagnosticEvidenceValue("Accept session", result.sessionId)
-                    )
+                    status = AutomatedDiagnosticStepStatus.RUNNING,
+                    startedAtMillis = startedAt,
+                    elapsedMillis = elapsed,
+                    retryCount = stepResult(stepId).retryCount,
+                    summary = "Waiting for coordinator confirmation of hybrid bootstrap accept",
+                    blocker = participantHybridBootstrapAcceptBlocker(currentSnapshot, context),
+                    evidence = hybridBootstrapAcceptEvidence(currentSnapshot, context),
+                    waitingProgressText =
+                    "Waiting ${formatAutomatedDiagnosticsDuration(elapsed)} / ${formatAutomatedDiagnosticsDuration(timingPolicy.hybridControlDelivery.timeoutMillis)}",
+                    stabilizationProgressText = null
                 )
-                HybridBootstrapManualAcceptSendResult.NoOfferCandidate ->
-                    completeStep(
+                if (elapsed >= timingPolicy.hybridControlDelivery.timeoutMillis) {
+                    return completeStep(
                         stepId = stepId,
                         status = AutomatedDiagnosticStepStatus.BLOCKED,
                         summary = "Hybrid bootstrap accept blocked",
-                        blocker = "No recent hybrid bootstrap offer candidate is available."
+                        blocker = participantHybridBootstrapAcceptBlocker(
+                            currentSnapshot,
+                            context
+                        ),
+                        evidence = hybridBootstrapAcceptEvidence(currentSnapshot, context),
+                        startedAtMillis = startedAt
                     )
-                HybridBootstrapManualAcceptSendResult.NoActivePeer ->
-                    completeStep(
-                        stepId = stepId,
-                        status = AutomatedDiagnosticStepStatus.BLOCKED,
-                        summary = "Hybrid bootstrap accept blocked",
-                        blocker = "No active BLE peer is connected."
-                    )
-                HybridBootstrapManualAcceptSendResult.NoActiveSession ->
-                    completeStep(
-                        stepId = stepId,
-                        status = AutomatedDiagnosticStepStatus.BLOCKED,
-                        summary = "Hybrid bootstrap accept blocked",
-                        blocker = "No active BLE secure session is available."
-                    )
-                HybridBootstrapManualAcceptSendResult.WriterUnavailable ->
-                    completeStep(
-                        stepId = stepId,
-                        status = AutomatedDiagnosticStepStatus.FAIL,
-                        summary = "Hybrid bootstrap accept failed",
-                        blocker = "BLE writer unavailable."
-                    )
-                is HybridBootstrapManualAcceptSendResult.InvalidAccept ->
-                    completeStep(
-                        stepId = stepId,
-                        status = AutomatedDiagnosticStepStatus.FAIL,
-                        summary = "Hybrid bootstrap accept failed",
-                        blocker = result.reason
-                    )
-                is HybridBootstrapManualAcceptSendResult.SendFailed ->
-                    completeStep(
-                        stepId = stepId,
-                        status = AutomatedDiagnosticStepStatus.FAIL,
-                        summary = "Hybrid bootstrap accept failed",
-                        blocker = result.reason
-                    )
+                }
+                delay.delayMillis(timingPolicy.pollIntervalMillis)
             }
+            completeStep(
+                stepId = stepId,
+                status = AutomatedDiagnosticStepStatus.CANCELLED,
+                summary = "Cancelled",
+                blocker = "Automated diagnostics were cancelled.",
+                evidence = hybridBootstrapAcceptEvidence(bindings.snapshot(), context),
+                startedAtMillis = startedAt
+            )
         } else {
             awaitStableSnapshotStep(
                 stepId = stepId,
@@ -2281,13 +3146,23 @@ internal class AutomatedDiagnosticsRunner(
                 summary = "Waiting for hybrid bootstrap accept",
                 successSummary = "Hybrid bootstrap accept recorded",
                 blockingReason = {
-                    hybridBootstrapAcceptBlocker(it, runStartedAtMillis)
+                    hybridBootstrapAcceptBlocker(
+                        snapshot = it,
+                        context = context,
+                        expectedPeerId = remotePeerId,
+                        expectedSessionId = expectedSessionId
+                    )
                 },
-                successEvidence = { snapshot ->
-                    hybridBootstrapEvidence(snapshot)
+                successEvidence = { currentSnapshot ->
+                    hybridBootstrapAcceptEvidence(currentSnapshot, context)
                 },
-                isSatisfied = { snapshot ->
-                    hasRecentHybridAccept(snapshot, runStartedAtMillis)
+                isSatisfied = { currentSnapshot ->
+                    recentAcceptedHybridBootstrapAcceptObservationOrNull(
+                        snapshot = currentSnapshot,
+                        context = context,
+                        expectedPeerId = remotePeerId,
+                        expectedSessionId = expectedSessionId
+                    ) != null
                 }
             )
         }
@@ -2307,78 +3182,317 @@ internal class AutomatedDiagnosticsRunner(
                     ?: "Wi-Fi Direct socket is not ready."
             )
         }
-        val runStartedAtMillis = currentRunStartedAtMillis()
+        val sharedRun = context.sharedRun ?: return completeStep(
+            stepId = stepId,
+            status = AutomatedDiagnosticStepStatus.BLOCKED,
+            summary = "Hybrid bootstrap socket hint blocked",
+            blocker = "Shared diagnostics run is unavailable."
+        )
+        val localPeerId = snapshot.localPeerId?.trim()?.takeIf { it.isNotEmpty() } ?: return completeStep(
+            stepId = stepId,
+            status = AutomatedDiagnosticStepStatus.BLOCKED,
+            summary = "Hybrid bootstrap socket hint blocked",
+            blocker = "Local Aurora peer id is unavailable."
+        )
+        val remotePeerId = otherSharedRunPeerId(sharedRun, localPeerId) ?: return completeStep(
+            stepId = stepId,
+            status = AutomatedDiagnosticStepStatus.BLOCKED,
+            summary = "Hybrid bootstrap socket hint blocked",
+            blocker = "Remote Aurora peer id is unavailable for the shared diagnostics run."
+        )
+        val expectedSessionId = sharedRun.coordinatorPeerId
+        val expectedGroupOwnerAddress =
+            snapshot.wifiDirectRuntimeStatus.connectionStatus.groupOwnerAddress
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?: return completeStep(
+                    stepId = stepId,
+                    status = AutomatedDiagnosticStepStatus.BLOCKED,
+                    summary = "Hybrid bootstrap socket hint blocked",
+                    blocker = "No Wi-Fi Direct group-owner endpoint is available."
+                )
+        val expectedSocketPort = wifiDirectDebugSocketPort
+        context.beginHybridSocketHintAttempt(
+            expectedSessionId = expectedSessionId,
+            expectedGroupOwnerAddress = expectedGroupOwnerAddress,
+            expectedSocketPort = expectedSocketPort,
+            startedAtMonotonicMillis = clock.nowMillis()
+        )
         return when (snapshot.wifiDirectRuntimeStatus.connectionStatus.role) {
             WifiDirectConnectionRole.GROUP_OWNER -> {
-                when (val result = bindings.commands.requestHybridBootstrapManualSocketHint()) {
-                    is HybridBootstrapManualSocketHintSendResult.Sent -> completeStep(
-                        stepId = stepId,
-                        status = AutomatedDiagnosticStepStatus.PASS,
-                        summary = "Hybrid bootstrap socket hint sent over BLE control",
-                        evidence = hybridBootstrapEvidence(bindings.snapshot()) + listOf(
-                            AutomatedDiagnosticEvidenceValue("Hint peer", result.peerId),
-                            AutomatedDiagnosticEvidenceValue("Hint session", result.sessionId),
-                            AutomatedDiagnosticEvidenceValue("Hint address", result.groupOwnerAddress),
-                            AutomatedDiagnosticEvidenceValue("Hint port", result.socketPort.toString())
+                val attemptNumber = context.currentPhaseAttemptNumber
+                val startedAt = clock.nowMillis()
+                var lastSocketHintRefreshAtMillis: Long? = null
+                setStepRunning(
+                    stepId = stepId,
+                    retryCount = stepResult(stepId).retryCount,
+                    summary = "Waiting for client confirmation of hybrid bootstrap socket hint",
+                    startedAtMillis = startedAt
+                )
+                while (currentCoroutineContext().isActive) {
+                    val now = clock.nowMillis()
+                    val currentSnapshot = bindings.snapshot()
+                    val elapsed = now - startedAt
+                    if (!wifiDirectSocketReady(currentSnapshot)) {
+                        return completeStep(
+                            stepId = stepId,
+                            status = AutomatedDiagnosticStepStatus.BLOCKED,
+                            summary = "Hybrid bootstrap socket hint blocked",
+                            blocker = wifiDirectSocketBlocker(currentSnapshot)
+                                ?: "Wi-Fi Direct socket is not ready.",
+                            evidence = hybridBootstrapSocketHintEvidence(currentSnapshot, context),
+                            startedAtMillis = startedAt
                         )
+                    }
+                    val remoteSignal = recentAcceptedAutomatedDiagnosticsPhaseSignalOrNull(
+                        snapshot = currentSnapshot,
+                        expectedRun = sharedRun,
+                        expectedSenderPeerId = remotePeerId,
+                        expectedRecipientPeerId = localPeerId,
+                        expectedStepId = stepId,
+                        expectedAttemptNumber = attemptNumber,
+                        context = context
                     )
-                    HybridBootstrapManualSocketHintSendResult.NoActivePeer ->
-                        completeStep(
+                    when (remoteSignal?.phaseState) {
+                        AutomatedDiagnosticsPhaseState.PASS -> {
+                            return completeStep(
+                                stepId = stepId,
+                                status = AutomatedDiagnosticStepStatus.PASS,
+                                summary = "Hybrid bootstrap socket hint confirmed by client",
+                                evidence = hybridBootstrapSocketHintEvidence(currentSnapshot, context),
+                                startedAtMillis = startedAt
+                            )
+                        }
+                        AutomatedDiagnosticsPhaseState.FAIL -> {
+                            return completeStep(
+                                stepId = stepId,
+                                status = AutomatedDiagnosticStepStatus.FAIL,
+                                summary = "Hybrid bootstrap socket hint failed",
+                                blocker = "Client reported Hybrid bootstrap socket hint FAIL.",
+                                evidence = hybridBootstrapSocketHintEvidence(currentSnapshot, context),
+                                startedAtMillis = startedAt
+                            )
+                        }
+                        AutomatedDiagnosticsPhaseState.BLOCKED -> {
+                            return completeStep(
+                                stepId = stepId,
+                                status = AutomatedDiagnosticStepStatus.BLOCKED,
+                                summary = "Hybrid bootstrap socket hint blocked",
+                                blocker = "Client reported Hybrid bootstrap socket hint BLOCKED.",
+                                evidence = hybridBootstrapSocketHintEvidence(currentSnapshot, context),
+                                startedAtMillis = startedAt
+                            )
+                        }
+                        AutomatedDiagnosticsPhaseState.CANCELLED -> {
+                            return completeStep(
+                                stepId = stepId,
+                                status = AutomatedDiagnosticStepStatus.CANCELLED,
+                                summary = "Hybrid bootstrap socket hint cancelled",
+                                blocker = "Client cancelled during Hybrid bootstrap socket hint.",
+                                evidence = hybridBootstrapSocketHintEvidence(currentSnapshot, context),
+                                startedAtMillis = startedAt
+                            )
+                        }
+                        AutomatedDiagnosticsPhaseState.READY,
+                        AutomatedDiagnosticsPhaseState.RUNNING,
+                        null -> Unit
+                    }
+                    if (
+                        lastSocketHintRefreshAtMillis == null ||
+                            now - lastSocketHintRefreshAtMillis >=
+                            timingPolicy.automatedDiagnosticsPhaseStateRefreshMillis
+                    ) {
+                        context.hybridSocketHintSendAttemptCount += 1
+                        when (val result = bindings.commands.requestHybridBootstrapManualSocketHint()) {
+                            is HybridBootstrapManualSocketHintSendResult.Sent -> {
+                                if (result.peerId != remotePeerId) {
+                                    context.hybridSocketHintLastSendResult =
+                                        "wrong-peer:${result.peerId}"
+                                    return completeStep(
+                                        stepId = stepId,
+                                        status = AutomatedDiagnosticStepStatus.FAIL,
+                                        summary = "Hybrid bootstrap socket hint failed",
+                                        blocker =
+                                            "Hybrid bootstrap socket hint targeted ${result.peerId} instead of $remotePeerId.",
+                                        evidence = hybridBootstrapSocketHintEvidence(currentSnapshot, context),
+                                        startedAtMillis = startedAt
+                                    )
+                                }
+                                if (result.sessionId != expectedSessionId) {
+                                    context.hybridSocketHintLastSendResult =
+                                        "wrong-session:${result.sessionId}"
+                                    return completeStep(
+                                        stepId = stepId,
+                                        status = AutomatedDiagnosticStepStatus.FAIL,
+                                        summary = "Hybrid bootstrap socket hint failed",
+                                        blocker =
+                                            "Hybrid bootstrap socket hint targeted session ${result.sessionId} instead of $expectedSessionId.",
+                                        evidence = hybridBootstrapSocketHintEvidence(currentSnapshot, context),
+                                        startedAtMillis = startedAt
+                                    )
+                                }
+                                if (result.groupOwnerAddress != expectedGroupOwnerAddress) {
+                                    context.hybridSocketHintLastSendResult =
+                                        "wrong-endpoint:${result.groupOwnerAddress}"
+                                    return completeStep(
+                                        stepId = stepId,
+                                        status = AutomatedDiagnosticStepStatus.FAIL,
+                                        summary = "Hybrid bootstrap socket hint failed",
+                                        blocker =
+                                            "Hybrid bootstrap socket hint targeted address ${result.groupOwnerAddress} instead of $expectedGroupOwnerAddress.",
+                                        evidence = hybridBootstrapSocketHintEvidence(currentSnapshot, context),
+                                        startedAtMillis = startedAt
+                                    )
+                                }
+                                if (result.socketPort != expectedSocketPort) {
+                                    context.hybridSocketHintLastSendResult =
+                                        "wrong-port:${result.socketPort}"
+                                    return completeStep(
+                                        stepId = stepId,
+                                        status = AutomatedDiagnosticStepStatus.FAIL,
+                                        summary = "Hybrid bootstrap socket hint failed",
+                                        blocker =
+                                            "Hybrid bootstrap socket hint targeted port ${result.socketPort} instead of $expectedSocketPort.",
+                                        evidence = hybridBootstrapSocketHintEvidence(currentSnapshot, context),
+                                        startedAtMillis = startedAt
+                                    )
+                                }
+                                context.hybridSocketHintSuccessfulSendCount += 1
+                                context.hybridSocketHintLastSendResult = "sent"
+                                context.hybridSocketHintLastSentPeerId = result.peerId
+                                context.hybridSocketHintLastSentSessionId = result.sessionId
+                                context.hybridSocketHintLastSentGroupOwnerAddress =
+                                    result.groupOwnerAddress
+                                context.hybridSocketHintLastSentSocketPort = result.socketPort
+                                context.hybridSocketHintLastSentAtMonotonicMillis = now
+                                lastSocketHintRefreshAtMillis = now
+                            }
+                            HybridBootstrapManualSocketHintSendResult.NoActivePeer -> {
+                                context.hybridSocketHintLastSendResult = "no-active-peer"
+                                return completeStep(
+                                    stepId = stepId,
+                                    status = AutomatedDiagnosticStepStatus.BLOCKED,
+                                    summary = "Hybrid bootstrap socket hint blocked",
+                                    blocker = "No active BLE peer is connected.",
+                                    evidence = hybridBootstrapSocketHintEvidence(currentSnapshot, context),
+                                    startedAtMillis = startedAt
+                                )
+                            }
+                            HybridBootstrapManualSocketHintSendResult.NoActiveSession -> {
+                                context.hybridSocketHintLastSendResult = "no-active-session"
+                                return completeStep(
+                                    stepId = stepId,
+                                    status = AutomatedDiagnosticStepStatus.BLOCKED,
+                                    summary = "Hybrid bootstrap socket hint blocked",
+                                    blocker = "No active BLE secure session is available.",
+                                    evidence = hybridBootstrapSocketHintEvidence(currentSnapshot, context),
+                                    startedAtMillis = startedAt
+                                )
+                            }
+                            HybridBootstrapManualSocketHintSendResult.NoAcceptedCandidate -> {
+                                context.hybridSocketHintLastSendResult = "no-accepted-candidate"
+                                return completeStep(
+                                    stepId = stepId,
+                                    status = AutomatedDiagnosticStepStatus.BLOCKED,
+                                    summary = "Hybrid bootstrap socket hint blocked",
+                                    blocker = "No accepted hybrid bootstrap candidate is available.",
+                                    evidence = hybridBootstrapSocketHintEvidence(currentSnapshot, context),
+                                    startedAtMillis = startedAt
+                                )
+                            }
+                            HybridBootstrapManualSocketHintSendResult.NoSocketEndpoint -> {
+                                context.hybridSocketHintLastSendResult = "no-socket-endpoint"
+                                return completeStep(
+                                    stepId = stepId,
+                                    status = AutomatedDiagnosticStepStatus.BLOCKED,
+                                    summary = "Hybrid bootstrap socket hint blocked",
+                                    blocker = "No Wi-Fi Direct group-owner endpoint is available.",
+                                    evidence = hybridBootstrapSocketHintEvidence(currentSnapshot, context),
+                                    startedAtMillis = startedAt
+                                )
+                            }
+                            HybridBootstrapManualSocketHintSendResult.NotGroupOwner -> {
+                                context.hybridSocketHintLastSendResult = "not-group-owner"
+                                return completeStep(
+                                    stepId = stepId,
+                                    status = AutomatedDiagnosticStepStatus.BLOCKED,
+                                    summary = "Hybrid bootstrap socket hint blocked",
+                                    blocker = "This device is not the Wi-Fi Direct group owner.",
+                                    evidence = hybridBootstrapSocketHintEvidence(currentSnapshot, context),
+                                    startedAtMillis = startedAt
+                                )
+                            }
+                            HybridBootstrapManualSocketHintSendResult.WriterUnavailable -> {
+                                context.hybridSocketHintLastSendResult = "writer-unavailable"
+                                return completeStep(
+                                    stepId = stepId,
+                                    status = AutomatedDiagnosticStepStatus.FAIL,
+                                    summary = "Hybrid bootstrap socket hint failed",
+                                    blocker = "BLE writer unavailable.",
+                                    evidence = hybridBootstrapSocketHintEvidence(currentSnapshot, context),
+                                    startedAtMillis = startedAt
+                                )
+                            }
+                            is HybridBootstrapManualSocketHintSendResult.InvalidSocketHint -> {
+                                context.hybridSocketHintLastSendResult = "invalid:${result.reason}"
+                                return completeStep(
+                                    stepId = stepId,
+                                    status = AutomatedDiagnosticStepStatus.FAIL,
+                                    summary = "Hybrid bootstrap socket hint failed",
+                                    blocker = result.reason,
+                                    evidence = hybridBootstrapSocketHintEvidence(currentSnapshot, context),
+                                    startedAtMillis = startedAt
+                                )
+                            }
+                            is HybridBootstrapManualSocketHintSendResult.SendFailed -> {
+                                context.hybridSocketHintLastSendResult = "failed:${result.reason}"
+                                return completeStep(
+                                    stepId = stepId,
+                                    status = AutomatedDiagnosticStepStatus.FAIL,
+                                    summary = "Hybrid bootstrap socket hint failed",
+                                    blocker = result.reason,
+                                    evidence = hybridBootstrapSocketHintEvidence(currentSnapshot, context),
+                                    startedAtMillis = startedAt
+                                )
+                            }
+                        }
+                    }
+                    updateStep(
+                        stepId = stepId,
+                        status = AutomatedDiagnosticStepStatus.RUNNING,
+                        startedAtMillis = startedAt,
+                        elapsedMillis = elapsed,
+                        retryCount = stepResult(stepId).retryCount,
+                        summary = "Waiting for client confirmation of hybrid bootstrap socket hint",
+                        blocker = groupOwnerHybridBootstrapSocketHintBlocker(currentSnapshot, context),
+                        evidence = hybridBootstrapSocketHintEvidence(currentSnapshot, context),
+                        waitingProgressText =
+                        "Waiting ${formatAutomatedDiagnosticsDuration(elapsed)} / ${formatAutomatedDiagnosticsDuration(timingPolicy.hybridSocketHintDelivery.timeoutMillis)}",
+                        stabilizationProgressText = null
+                    )
+                    if (elapsed >= timingPolicy.hybridSocketHintDelivery.timeoutMillis) {
+                        return completeStep(
                             stepId = stepId,
                             status = AutomatedDiagnosticStepStatus.BLOCKED,
                             summary = "Hybrid bootstrap socket hint blocked",
-                            blocker = "No active BLE peer is connected."
+                            blocker = groupOwnerHybridBootstrapSocketHintBlocker(
+                                currentSnapshot,
+                                context
+                            ),
+                            evidence = hybridBootstrapSocketHintEvidence(currentSnapshot, context),
+                            startedAtMillis = startedAt
                         )
-                    HybridBootstrapManualSocketHintSendResult.NoActiveSession ->
-                        completeStep(
-                            stepId = stepId,
-                            status = AutomatedDiagnosticStepStatus.BLOCKED,
-                            summary = "Hybrid bootstrap socket hint blocked",
-                            blocker = "No active BLE secure session is available."
-                        )
-                    HybridBootstrapManualSocketHintSendResult.NoAcceptedCandidate ->
-                        completeStep(
-                            stepId = stepId,
-                            status = AutomatedDiagnosticStepStatus.BLOCKED,
-                            summary = "Hybrid bootstrap socket hint blocked",
-                            blocker = "No accepted hybrid bootstrap candidate is available."
-                        )
-                    HybridBootstrapManualSocketHintSendResult.NoSocketEndpoint ->
-                        completeStep(
-                            stepId = stepId,
-                            status = AutomatedDiagnosticStepStatus.BLOCKED,
-                            summary = "Hybrid bootstrap socket hint blocked",
-                            blocker = "No Wi-Fi Direct group-owner endpoint is available."
-                        )
-                    HybridBootstrapManualSocketHintSendResult.NotGroupOwner ->
-                        completeStep(
-                            stepId = stepId,
-                            status = AutomatedDiagnosticStepStatus.BLOCKED,
-                            summary = "Hybrid bootstrap socket hint blocked",
-                            blocker = "This device is not the Wi-Fi Direct group owner."
-                        )
-                    HybridBootstrapManualSocketHintSendResult.WriterUnavailable ->
-                        completeStep(
-                            stepId = stepId,
-                            status = AutomatedDiagnosticStepStatus.FAIL,
-                            summary = "Hybrid bootstrap socket hint failed",
-                            blocker = "BLE writer unavailable."
-                        )
-                    is HybridBootstrapManualSocketHintSendResult.InvalidSocketHint ->
-                        completeStep(
-                            stepId = stepId,
-                            status = AutomatedDiagnosticStepStatus.FAIL,
-                            summary = "Hybrid bootstrap socket hint failed",
-                            blocker = result.reason
-                        )
-                    is HybridBootstrapManualSocketHintSendResult.SendFailed ->
-                        completeStep(
-                            stepId = stepId,
-                            status = AutomatedDiagnosticStepStatus.FAIL,
-                            summary = "Hybrid bootstrap socket hint failed",
-                            blocker = result.reason
-                        )
+                    }
+                    delay.delayMillis(timingPolicy.pollIntervalMillis)
                 }
+                completeStep(
+                    stepId = stepId,
+                    status = AutomatedDiagnosticStepStatus.CANCELLED,
+                    summary = "Cancelled",
+                    blocker = "Automated diagnostics were cancelled.",
+                    evidence = hybridBootstrapSocketHintEvidence(bindings.snapshot(), context),
+                    startedAtMillis = startedAt
+                )
             }
             WifiDirectConnectionRole.CLIENT -> awaitStableSnapshotStep(
                 stepId = stepId,
@@ -2386,13 +3500,34 @@ internal class AutomatedDiagnosticsRunner(
                 summary = "Waiting for hybrid bootstrap socket hint",
                 successSummary = "Hybrid bootstrap socket hint recorded",
                 blockingReason = {
-                    hybridBootstrapSocketHintBlocker(it, runStartedAtMillis)
+                    hybridBootstrapSocketHintBlocker(
+                        snapshot = it,
+                        context = context,
+                        expectedPeerId = remotePeerId,
+                        expectedSessionId = expectedSessionId,
+                        expectedGroupOwnerAddress = expectedGroupOwnerAddress,
+                        expectedSocketPort = expectedSocketPort
+                    )
                 },
                 successEvidence = { currentSnapshot ->
-                    hybridBootstrapEvidence(currentSnapshot)
+                    hybridBootstrapSocketHintEvidence(currentSnapshot, context)
                 },
                 isSatisfied = { currentSnapshot ->
-                    hasRecentSocketReadyHybridCandidate(currentSnapshot, runStartedAtMillis)
+                    recentAcceptedHybridBootstrapSocketHintObservationOrNull(
+                        snapshot = currentSnapshot,
+                        context = context,
+                        expectedPeerId = remotePeerId,
+                        expectedSessionId = expectedSessionId,
+                        expectedGroupOwnerAddress = expectedGroupOwnerAddress,
+                        expectedSocketPort = expectedSocketPort
+                    ) != null &&
+                        matchingAcceptedSocketReadyHybridCandidateOrNull(
+                            snapshot = currentSnapshot,
+                            expectedPeerId = remotePeerId,
+                            expectedSessionId = expectedSessionId,
+                            expectedGroupOwnerAddress = expectedGroupOwnerAddress,
+                            expectedSocketPort = expectedSocketPort
+                        ) != null
                 }
             )
             WifiDirectConnectionRole.UNKNOWN -> completeStep(
@@ -2416,24 +3551,78 @@ internal class AutomatedDiagnosticsRunner(
                 summary = "Hybrid bootstrap endpoint is ready on the Wi-Fi Direct group owner",
                 evidence = hybridBootstrapEvidence(snapshot) + wifiDirectSocketEvidence(snapshot),
                 technicalDetails = listOf(
-                    "The JavaNet hybrid dial is executed from the Wi-Fi Direct client side in this phase."
+                    "The Wi-Fi Direct client executes the hybrid bootstrap trigger from the current socket-ready endpoint in this phase."
                 )
             )
             WifiDirectConnectionRole.CLIENT -> {
+                val sharedRun = context.sharedRun
+                    ?: return completeStep(
+                        stepId = stepId,
+                        status = AutomatedDiagnosticStepStatus.BLOCKED,
+                        summary = "Hybrid bootstrap trigger blocked",
+                        blocker = "The shared automated diagnostics run is unavailable."
+                    )
+                val localPeerId = snapshot.localPeerId?.trim()?.takeIf { it.isNotEmpty() }
+                    ?: return completeStep(
+                        stepId = stepId,
+                        status = AutomatedDiagnosticStepStatus.BLOCKED,
+                        summary = "Hybrid bootstrap trigger blocked",
+                        blocker = "Local Aurora peer id is unavailable."
+                    )
+                val remotePeerId = otherSharedRunPeerId(sharedRun, localPeerId)
+                    ?: return completeStep(
+                        stepId = stepId,
+                        status = AutomatedDiagnosticStepStatus.BLOCKED,
+                        summary = "Hybrid bootstrap trigger blocked",
+                        blocker = "Remote Aurora peer id is unavailable for the shared diagnostics run."
+                    )
+                val expectedSessionId = sharedRun.coordinatorPeerId
+                val expectedGroupOwnerAddress =
+                    snapshot.wifiDirectRuntimeStatus.connectionStatus.groupOwnerAddress
+                        ?.trim()
+                        ?.takeIf { it.isNotEmpty() }
+                        ?: return completeStep(
+                            stepId = stepId,
+                            status = AutomatedDiagnosticStepStatus.BLOCKED,
+                            summary = "Hybrid bootstrap trigger blocked",
+                            blocker = "No Wi-Fi Direct group-owner endpoint is available."
+                        )
+                val expectedSocketPort = wifiDirectDebugSocketPort
                 val readiness = awaitStableSnapshotStep(
                     stepId = stepId,
                     window = timingPolicy.hybridBootstrapTrigger,
                     summary = "Waiting for hybrid bootstrap trigger readiness",
                     successSummary = "Hybrid bootstrap command is ready",
                     blockingReason = {
-                        it.hybridBootstrapManualTriggerSnapshot.triggerStatusText
-                            ?: it.hybridBootstrapManualTriggerSnapshot.commandStatusText
+                        hybridBootstrapTriggerBlocker(
+                            snapshot = it,
+                            context = context,
+                            expectedPeerId = remotePeerId,
+                            expectedSessionId = expectedSessionId,
+                            expectedGroupOwnerAddress = expectedGroupOwnerAddress,
+                            expectedSocketPort = expectedSocketPort
+                        )
                     },
                     successEvidence = { currentSnapshot ->
                         hybridBootstrapEvidence(currentSnapshot)
                     },
                     isSatisfied = { currentSnapshot ->
-                        currentSnapshot.hybridBootstrapManualTriggerSnapshot.canTriggerNow
+                        currentSnapshot.hybridBootstrapManualTriggerSnapshot.canTriggerNow &&
+                            recentAcceptedHybridBootstrapSocketHintObservationOrNull(
+                                snapshot = currentSnapshot,
+                                context = context,
+                                expectedPeerId = remotePeerId,
+                                expectedSessionId = expectedSessionId,
+                                expectedGroupOwnerAddress = expectedGroupOwnerAddress,
+                                expectedSocketPort = expectedSocketPort
+                            ) != null &&
+                            matchingAcceptedSocketReadyHybridCandidateOrNull(
+                                snapshot = currentSnapshot,
+                                expectedPeerId = remotePeerId,
+                                expectedSessionId = expectedSessionId,
+                                expectedGroupOwnerAddress = expectedGroupOwnerAddress,
+                                expectedSocketPort = expectedSocketPort
+                            ) != null
                     }
                 )
                 if (readiness != AutomatedDiagnosticStepStatus.PASS) {
@@ -2445,26 +3634,29 @@ internal class AutomatedDiagnosticsRunner(
                             is HybridBootstrapCommandExecutionResult.Accepted -> completeStep(
                                 stepId = stepId,
                                 status = AutomatedDiagnosticStepStatus.PASS,
-                                summary = "Hybrid bootstrap JavaNet trigger succeeded",
-                                evidence = hybridBootstrapEvidence(bindings.snapshot()) + listOf(
-                                    AutomatedDiagnosticEvidenceValue("Dial peer", executionResult.peerId),
-                                    AutomatedDiagnosticEvidenceValue("Dial session", executionResult.sessionId),
-                                    AutomatedDiagnosticEvidenceValue(
-                                        "Dial address",
-                                        executionResult.groupOwnerAddress
-                                    ),
-                                    AutomatedDiagnosticEvidenceValue(
-                                        "Dial port",
-                                        executionResult.socketPort.toString()
+                                summary = "Hybrid bootstrap trigger succeeded",
+                                evidence = hybridBootstrapEvidence(bindings.snapshot()) +
+                                    wifiDirectSocketEvidence(bindings.snapshot(), context) +
+                                    listOf(
+                                        AutomatedDiagnosticEvidenceValue("Dial peer", executionResult.peerId),
+                                        AutomatedDiagnosticEvidenceValue("Dial session", executionResult.sessionId),
+                                        AutomatedDiagnosticEvidenceValue(
+                                            "Dial address",
+                                            executionResult.groupOwnerAddress
+                                        ),
+                                        AutomatedDiagnosticEvidenceValue(
+                                            "Dial port",
+                                            executionResult.socketPort.toString()
+                                        )
                                     )
-                                )
                             )
                             is HybridBootstrapCommandExecutionResult.Rejected -> completeStep(
                                 stepId = stepId,
                                 status = AutomatedDiagnosticStepStatus.FAIL,
                                 summary = "Hybrid bootstrap trigger failed",
                                 blocker = executionResult.reason,
-                                evidence = hybridBootstrapEvidence(bindings.snapshot())
+                                evidence = hybridBootstrapEvidence(bindings.snapshot()) +
+                                    wifiDirectSocketEvidence(bindings.snapshot(), context)
                             )
                         }
                     }
@@ -2507,6 +3699,1560 @@ internal class AutomatedDiagnosticsRunner(
                 blocker = "Wi-Fi Direct connection role is unknown."
             )
         }
+    }
+
+    private data class AutomatedDiagnosticsExpectedApplicationProbe(
+        val marker: AutomatedDiagnosticsApplicationProbeMarker,
+        val expectedSenderPeerId: String,
+        val expectedReceiverPeerId: String,
+        val expectedThreadId: String,
+        val expectedPrivateChatId: String? = null
+    ) {
+        val fingerprint: String =
+            automatedDiagnosticsApplicationProbeFingerprint(marker)
+    }
+
+    private data class AutomatedDiagnosticsProbeSubmission(
+        val spec: AutomatedDiagnosticsExpectedApplicationProbe,
+        val queuedMessageId: String,
+        val transportStatus: String,
+        val localBleTransportResult: String? = null,
+        val expectedReceiverTransportGroupId: Int? = null
+    )
+
+    private fun currentApplicationProbeDescriptors(
+        snapshot: AutomatedDiagnosticsRuntimeSnapshot,
+        submissions: List<AutomatedDiagnosticsProbeSubmission>
+    ): List<AutomatedDiagnosticsPhaseApplicationProbeDescriptor> {
+        return submissions.map { submission ->
+            automatedDiagnosticsLocalPhaseApplicationProbeDescriptor(
+                snapshot = snapshot,
+                probeKind = submission.spec.marker.probeKind,
+                messageId = submission.queuedMessageId,
+                expectedReceiverPeerId = submission.spec.expectedReceiverPeerId,
+                transportStatus = submission.transportStatus,
+                localBleTransportResult = submission.localBleTransportResult,
+                expectedReceiverTransportGroupId = submission.expectedReceiverTransportGroupId
+            )
+        }
+    }
+
+    private suspend fun runGlobalMessageProbeStep(
+        stepId: AutomatedDiagnosticStepId,
+        context: AutomatedDiagnosticsStepContext
+    ): AutomatedDiagnosticStepStatus {
+        return runApplicationProbeSetStep(
+            stepId = stepId,
+            context = context,
+            senderRole = AutomatedDiagnosticsPeerRole.COORDINATOR,
+            probeKinds = listOf(AutomatedDiagnosticsApplicationProbeKind.GLOBAL),
+            direction = AutomatedDiagnosticsApplicationProbeDirection.C2P
+        )
+    }
+
+    private suspend fun runPrivateEncryptedMessageProbeStep(
+        stepId: AutomatedDiagnosticStepId,
+        context: AutomatedDiagnosticsStepContext
+    ): AutomatedDiagnosticStepStatus {
+        return runApplicationProbeSetStep(
+            stepId = stepId,
+            context = context,
+            senderRole = AutomatedDiagnosticsPeerRole.COORDINATOR,
+            probeKinds = listOf(AutomatedDiagnosticsApplicationProbeKind.PRIVATE),
+            direction = AutomatedDiagnosticsApplicationProbeDirection.C2P
+        )
+    }
+
+    private suspend fun runReverseDirectionMessagingProbeStep(
+        stepId: AutomatedDiagnosticStepId,
+        context: AutomatedDiagnosticsStepContext
+    ): AutomatedDiagnosticStepStatus {
+        return runApplicationProbeSetStep(
+            stepId = stepId,
+            context = context,
+            senderRole = AutomatedDiagnosticsPeerRole.PARTICIPANT,
+            probeKinds = listOf(
+                AutomatedDiagnosticsApplicationProbeKind.GLOBAL,
+                AutomatedDiagnosticsApplicationProbeKind.PRIVATE
+            ),
+            direction = AutomatedDiagnosticsApplicationProbeDirection.P2C
+        )
+    }
+
+    private suspend fun runApplicationProbeSetStep(
+        stepId: AutomatedDiagnosticStepId,
+        context: AutomatedDiagnosticsStepContext,
+        senderRole: AutomatedDiagnosticsPeerRole,
+        probeKinds: List<AutomatedDiagnosticsApplicationProbeKind>,
+        direction: AutomatedDiagnosticsApplicationProbeDirection
+    ): AutomatedDiagnosticStepStatus {
+        val localRole = context.localRole ?: return completeStep(
+            stepId = stepId,
+            status = AutomatedDiagnosticStepStatus.BLOCKED,
+            summary = "${stepId.title} blocked",
+            blocker = "Local diagnostics role is unavailable."
+        )
+        val sharedRun = context.sharedRun ?: return completeStep(
+            stepId = stepId,
+            status = AutomatedDiagnosticStepStatus.BLOCKED,
+            summary = "${stepId.title} blocked",
+            blocker = "Shared diagnostics run is unavailable."
+        )
+        val snapshot = bindings.snapshot()
+        val localPeerId = snapshot.localPeerId?.trim()?.takeIf { it.isNotEmpty() } ?: return completeStep(
+            stepId = stepId,
+            status = AutomatedDiagnosticStepStatus.BLOCKED,
+            summary = "${stepId.title} blocked",
+            blocker = "Local Aurora peer id is unavailable."
+        )
+        val remotePeerId = otherSharedRunPeerId(sharedRun, localPeerId) ?: return completeStep(
+            stepId = stepId,
+            status = AutomatedDiagnosticStepStatus.BLOCKED,
+            summary = "${stepId.title} blocked",
+            blocker = "Remote Aurora peer id is unavailable for the shared diagnostics run."
+        )
+        val attemptNumber = context.currentPhaseAttemptNumber.takeIf { it > 0 } ?: return completeStep(
+            stepId = stepId,
+            status = AutomatedDiagnosticStepStatus.BLOCKED,
+            summary = "${stepId.title} blocked",
+            blocker = "Current synchronized diagnostics attempt is unavailable."
+        )
+        val expectedSenderPeerId = when (senderRole) {
+            AutomatedDiagnosticsPeerRole.COORDINATOR -> sharedRun.coordinatorPeerId
+            AutomatedDiagnosticsPeerRole.PARTICIPANT -> sharedRun.participantPeerId
+        }
+        val expectedReceiverPeerId = when (senderRole) {
+            AutomatedDiagnosticsPeerRole.COORDINATOR -> sharedRun.participantPeerId
+            AutomatedDiagnosticsPeerRole.PARTICIPANT -> sharedRun.coordinatorPeerId
+        }
+        val probeSpecs = probeKinds.map { probeKind ->
+            AutomatedDiagnosticsExpectedApplicationProbe(
+                marker = AutomatedDiagnosticsApplicationProbeMarker(
+                    sharedRunId = sharedRun.runId,
+                    stepId = stepId,
+                    attemptNumber = attemptNumber,
+                    probeKind = probeKind,
+                    direction = direction
+                ),
+                expectedSenderPeerId = expectedSenderPeerId,
+                expectedReceiverPeerId = expectedReceiverPeerId,
+                expectedThreadId = if (probeKind == AutomatedDiagnosticsApplicationProbeKind.GLOBAL) {
+                    "global"
+                } else {
+                    "private:$expectedSenderPeerId"
+                },
+                expectedPrivateChatId = if (probeKind == AutomatedDiagnosticsApplicationProbeKind.PRIVATE) {
+                    sharedRun.sessionAssociationId
+                } else {
+                    null
+                }
+            )
+        }
+        return if (localRole == senderRole) {
+            runApplicationProbeSenderStep(
+                stepId = stepId,
+                context = context,
+                localPeerId = localPeerId,
+                remotePeerId = remotePeerId,
+                probeSpecs = probeSpecs
+            )
+        } else {
+            runApplicationProbeReceiverStep(
+                stepId = stepId,
+                context = context,
+                localPeerId = localPeerId,
+                probeSpecs = probeSpecs
+            )
+        }
+    }
+
+    private suspend fun runApplicationProbeSenderStep(
+        stepId: AutomatedDiagnosticStepId,
+        context: AutomatedDiagnosticsStepContext,
+        localPeerId: String,
+        remotePeerId: String,
+        probeSpecs: List<AutomatedDiagnosticsExpectedApplicationProbe>
+    ): AutomatedDiagnosticStepStatus {
+        val startedAt = clock.nowMillis()
+        setStepRunning(
+            stepId = stepId,
+            retryCount = stepResult(stepId).retryCount,
+            summary = "Sending ${stepId.title.lowercase()}",
+            startedAtMillis = startedAt
+        )
+        val submissions = mutableListOf<AutomatedDiagnosticsProbeSubmission>()
+        for (spec in probeSpecs) {
+            val submission = sendApplicationProbe(
+                stepId = stepId,
+                spec = spec,
+                localPeerId = localPeerId,
+                remotePeerId = remotePeerId,
+                startedAtMillis = startedAt,
+                currentSubmissions = submissions
+            ) ?: return stepResult(stepId).status
+            submissions += submission
+            capturePhaseThreeMessageId(submission.queuedMessageId)
+        }
+        requireNotNull(context.sharedRun)?.let { sharedRun ->
+            val applicationProbeDescriptors = currentApplicationProbeDescriptors(
+                snapshot = bindings.snapshot(),
+                submissions = submissions
+            )
+            context.currentPhaseApplicationProbeDescriptors = applicationProbeDescriptors
+            requestAutomatedDiagnosticsPhaseState(
+                stepId = stepId,
+                context = context,
+                sharedRun = sharedRun,
+                remotePeerId = remotePeerId,
+                phaseState = AutomatedDiagnosticsPhaseState.RUNNING,
+                attemptNumber = context.currentPhaseAttemptNumber,
+                applicationProbeDescriptors = applicationProbeDescriptors
+            )
+        }
+        return awaitRemoteApplicationProbeConfirmation(
+            stepId = stepId,
+            context = context,
+            localPeerId = localPeerId,
+            remotePeerId = remotePeerId,
+            startedAtMillis = startedAt,
+            probeSpecs = probeSpecs,
+            submissions = submissions
+        )
+    }
+
+    private suspend fun sendApplicationProbe(
+        stepId: AutomatedDiagnosticStepId,
+        spec: AutomatedDiagnosticsExpectedApplicationProbe,
+        localPeerId: String,
+        remotePeerId: String,
+        startedAtMillis: Long,
+        currentSubmissions: List<AutomatedDiagnosticsProbeSubmission>
+    ): AutomatedDiagnosticsProbeSubmission? {
+        val bodyText = spec.marker.bodyText()
+        return when (spec.marker.probeKind) {
+            AutomatedDiagnosticsApplicationProbeKind.GLOBAL -> {
+                val submission = bindings.commands.sendGlobalChatMessage(bodyText)
+                    ?: return completeStep(
+                        stepId = stepId,
+                        status = AutomatedDiagnosticStepStatus.FAIL,
+                        summary = "${stepId.title} failed",
+                        blocker = "Global probe could not be queued locally.",
+                        evidence = applicationProbeEvidence(
+                            snapshot = bindings.snapshot(),
+                            probeSpecs = currentSubmissions.map { it.spec } + spec,
+                            localPeerId = localPeerId,
+                            submissions = currentSubmissions,
+                            startedAtMillis = startedAtMillis
+                        ),
+                        startedAtMillis = startedAtMillis
+                    ).let { null }
+                when (val result = submission.transportResult) {
+                    is GlobalMeshDeliveryResult.QueuedToActivePeer ->
+                        AutomatedDiagnosticsProbeSubmission(
+                            spec = spec,
+                            queuedMessageId = submission.queuedMessage.messageId,
+                            transportStatus = "queued-active:${result.peerId}",
+                            localBleTransportResult = "QueuedLocally",
+                            expectedReceiverTransportGroupId =
+                                automatedDiagnosticsApplicationProbeExpectedTransportGroupId(
+                                    messageId = submission.queuedMessage.messageId,
+                                    receiverPeerId = result.peerId
+                                )
+                        )
+                    is GlobalMeshDeliveryResult.QueuedToPeers ->
+                        AutomatedDiagnosticsProbeSubmission(
+                            spec = spec,
+                            queuedMessageId = submission.queuedMessage.messageId,
+                            transportStatus = "queued-peers:${result.peerIds.joinToString(",")}",
+                            localBleTransportResult = "QueuedLocally",
+                            expectedReceiverTransportGroupId =
+                                automatedDiagnosticsApplicationProbeExpectedTransportGroupId(
+                                    messageId = submission.queuedMessage.messageId,
+                                    receiverPeerId = remotePeerId
+                                )
+                        )
+                    GlobalMeshDeliveryResult.NoReachablePeers ->
+                        return completeStep(
+                            stepId = stepId,
+                            status = AutomatedDiagnosticStepStatus.BLOCKED,
+                            summary = "${stepId.title} blocked",
+                            blocker = "Global probe has no reachable peer.",
+                            evidence = applicationProbeEvidence(
+                                snapshot = bindings.snapshot(),
+                                probeSpecs = currentSubmissions.map { it.spec } + spec,
+                                localPeerId = localPeerId,
+                                submissions = currentSubmissions,
+                                startedAtMillis = startedAtMillis
+                            ),
+                            startedAtMillis = startedAtMillis
+                        ).let { null }
+                    GlobalMeshDeliveryResult.SenderUnavailable ->
+                        return completeStep(
+                            stepId = stepId,
+                            status = AutomatedDiagnosticStepStatus.BLOCKED,
+                            summary = "${stepId.title} blocked",
+                            blocker = "Global probe transport sender is unavailable.",
+                            evidence = applicationProbeEvidence(
+                                snapshot = bindings.snapshot(),
+                                probeSpecs = currentSubmissions.map { it.spec } + spec,
+                                localPeerId = localPeerId,
+                                submissions = currentSubmissions,
+                                startedAtMillis = startedAtMillis
+                            ),
+                            startedAtMillis = startedAtMillis
+                        ).let { null }
+                    is GlobalMeshDeliveryResult.ConnectOnSendFailed ->
+                        return completeStep(
+                            stepId = stepId,
+                            status = AutomatedDiagnosticStepStatus.FAIL,
+                            summary = "${stepId.title} failed",
+                            blocker = "Global probe connect-on-send failed for ${result.peerId}: ${result.reason}",
+                            evidence = applicationProbeEvidence(
+                                snapshot = bindings.snapshot(),
+                                probeSpecs = currentSubmissions.map { it.spec } + spec,
+                                localPeerId = localPeerId,
+                                submissions = currentSubmissions,
+                                startedAtMillis = startedAtMillis
+                            ),
+                            startedAtMillis = startedAtMillis
+                        ).let { null }
+                    is GlobalMeshDeliveryResult.Failed ->
+                        return completeStep(
+                            stepId = stepId,
+                            status = AutomatedDiagnosticStepStatus.FAIL,
+                            summary = "${stepId.title} failed",
+                            blocker = result.reason,
+                            evidence = applicationProbeEvidence(
+                                snapshot = bindings.snapshot(),
+                                probeSpecs = currentSubmissions.map { it.spec } + spec,
+                                localPeerId = localPeerId,
+                                submissions = currentSubmissions,
+                                startedAtMillis = startedAtMillis
+                            ),
+                            startedAtMillis = startedAtMillis
+                        ).let { null }
+                    is GlobalMeshDeliveryResult.SkippedDuplicate ->
+                        return completeStep(
+                            stepId = stepId,
+                            status = AutomatedDiagnosticStepStatus.FAIL,
+                            summary = "${stepId.title} failed",
+                            blocker = "Global probe message ${result.messageId} was treated as a duplicate.",
+                            evidence = applicationProbeEvidence(
+                                snapshot = bindings.snapshot(),
+                                probeSpecs = currentSubmissions.map { it.spec } + spec,
+                                localPeerId = localPeerId,
+                                submissions = currentSubmissions,
+                                startedAtMillis = startedAtMillis
+                            ),
+                            startedAtMillis = startedAtMillis
+                        ).let { null }
+                    is GlobalMeshDeliveryResult.SkippedSourcePeer ->
+                        return completeStep(
+                            stepId = stepId,
+                            status = AutomatedDiagnosticStepStatus.FAIL,
+                            summary = "${stepId.title} failed",
+                            blocker = "Global probe was skipped back to source peer ${result.peerId}.",
+                            evidence = applicationProbeEvidence(
+                                snapshot = bindings.snapshot(),
+                                probeSpecs = currentSubmissions.map { it.spec } + spec,
+                                localPeerId = localPeerId,
+                                submissions = currentSubmissions,
+                                startedAtMillis = startedAtMillis
+                            ),
+                            startedAtMillis = startedAtMillis
+                        ).let { null }
+                    is GlobalMeshDeliveryResult.SkippedTtlExpired ->
+                        return completeStep(
+                            stepId = stepId,
+                            status = AutomatedDiagnosticStepStatus.FAIL,
+                            summary = "${stepId.title} failed",
+                            blocker = "Global probe TTL expired for ${result.messageId}.",
+                            evidence = applicationProbeEvidence(
+                                snapshot = bindings.snapshot(),
+                                probeSpecs = currentSubmissions.map { it.spec } + spec,
+                                localPeerId = localPeerId,
+                                submissions = currentSubmissions,
+                                startedAtMillis = startedAtMillis
+                            ),
+                            startedAtMillis = startedAtMillis
+                        ).let { null }
+                }
+            }
+            AutomatedDiagnosticsApplicationProbeKind.PRIVATE -> {
+                val submission = bindings.commands.sendPrivateChatMessage(
+                    remotePeerId,
+                    bodyText
+                ) ?: return completeStep(
+                    stepId = stepId,
+                    status = AutomatedDiagnosticStepStatus.FAIL,
+                    summary = "${stepId.title} failed",
+                    blocker = "Private probe could not be queued locally.",
+                        evidence = applicationProbeEvidence(
+                            snapshot = bindings.snapshot(),
+                            probeSpecs = currentSubmissions.map { it.spec } + spec,
+                            localPeerId = localPeerId,
+                            submissions = currentSubmissions,
+                            startedAtMillis = startedAtMillis
+                        ),
+                    startedAtMillis = startedAtMillis
+                ).let { null }
+                when (val result = submission.transportResult) {
+                    PrivateChatMessageSendResult.SubmittedLocally ->
+                        AutomatedDiagnosticsProbeSubmission(
+                            spec = spec,
+                            queuedMessageId = submission.queuedMessage.messageId,
+                            transportStatus = "submitted",
+                            localBleTransportResult = "QueuedLocally",
+                            expectedReceiverTransportGroupId =
+                                automatedDiagnosticsApplicationProbeExpectedTransportGroupId(
+                                    messageId = submission.queuedMessage.messageId,
+                                    receiverPeerId = remotePeerId
+                                )
+                        )
+                    PrivateChatMessageSendResult.KeysUnavailable ->
+                        return completeStep(
+                            stepId = stepId,
+                            status = AutomatedDiagnosticStepStatus.BLOCKED,
+                            summary = "${stepId.title} blocked",
+                            blocker = "Private probe keys are unavailable.",
+                            evidence = applicationProbeEvidence(
+                                snapshot = bindings.snapshot(),
+                                probeSpecs = currentSubmissions.map { it.spec } + spec,
+                                localPeerId = localPeerId,
+                                submissions = currentSubmissions,
+                                startedAtMillis = startedAtMillis
+                            ),
+                            startedAtMillis = startedAtMillis
+                        ).let { null }
+                    PrivateChatMessageSendResult.ContactUnavailable ->
+                        return completeStep(
+                            stepId = stepId,
+                            status = AutomatedDiagnosticStepStatus.BLOCKED,
+                            summary = "${stepId.title} blocked",
+                            blocker = "Private probe target contact is unavailable.",
+                            evidence = applicationProbeEvidence(
+                                snapshot = bindings.snapshot(),
+                                probeSpecs = currentSubmissions.map { it.spec } + spec,
+                                localPeerId = localPeerId,
+                                submissions = currentSubmissions,
+                                startedAtMillis = startedAtMillis
+                            ),
+                            startedAtMillis = startedAtMillis
+                        ).let { null }
+                    PrivateChatMessageSendResult.ContactNotReachable ->
+                        return completeStep(
+                            stepId = stepId,
+                            status = AutomatedDiagnosticStepStatus.BLOCKED,
+                            summary = "${stepId.title} blocked",
+                            blocker = "Private probe target contact is not reachable.",
+                            evidence = applicationProbeEvidence(
+                                snapshot = bindings.snapshot(),
+                                probeSpecs = currentSubmissions.map { it.spec } + spec,
+                                localPeerId = localPeerId,
+                                submissions = currentSubmissions,
+                                startedAtMillis = startedAtMillis
+                            ),
+                            startedAtMillis = startedAtMillis
+                        ).let { null }
+                    is PrivateChatMessageSendResult.Failed ->
+                        return completeStep(
+                            stepId = stepId,
+                            status = AutomatedDiagnosticStepStatus.FAIL,
+                            summary = "${stepId.title} failed",
+                            blocker = result.reason,
+                            evidence = applicationProbeEvidence(
+                                snapshot = bindings.snapshot(),
+                                probeSpecs = currentSubmissions.map { it.spec } + spec,
+                                localPeerId = localPeerId,
+                                submissions = currentSubmissions,
+                                startedAtMillis = startedAtMillis
+                            ),
+                            startedAtMillis = startedAtMillis
+                        ).let { null }
+                }
+            }
+        }
+    }
+
+    private suspend fun awaitRemoteApplicationProbeConfirmation(
+        stepId: AutomatedDiagnosticStepId,
+        context: AutomatedDiagnosticsStepContext,
+        localPeerId: String,
+        remotePeerId: String,
+        startedAtMillis: Long,
+        probeSpecs: List<AutomatedDiagnosticsExpectedApplicationProbe>,
+        submissions: List<AutomatedDiagnosticsProbeSubmission>
+    ): AutomatedDiagnosticStepStatus {
+        val sharedRun = requireNotNull(context.sharedRun)
+        val timeoutMillis =
+            timingPolicy.applicationProbeDelivery.timeoutMillis +
+                timingPolicy.applicationProbeDuplicateObservationMillis
+        while (currentCoroutineContext().isActive) {
+            val now = clock.nowMillis()
+            val elapsed = now - startedAtMillis
+            val snapshot = bindings.snapshot()
+            val applicationProbeDescriptors = currentApplicationProbeDescriptors(
+                snapshot = snapshot,
+                submissions = submissions
+            )
+            context.currentPhaseApplicationProbeDescriptors = applicationProbeDescriptors
+            val selfReturnCount = probeSpecs.sumOf { spec ->
+                val matchingSubmission = submissions.firstOrNull { it.spec == spec }
+                matchingApplicationProbeReceiveDiagnostics(
+                    snapshot = snapshot,
+                    spec = spec.copy(
+                        expectedSenderPeerId = localPeerId,
+                        expectedReceiverPeerId = localPeerId,
+                        expectedThreadId = if (spec.marker.probeKind == AutomatedDiagnosticsApplicationProbeKind.GLOBAL) {
+                            "global"
+                        } else {
+                            "private:$localPeerId"
+                        }
+                    ),
+                    expectedMessageId = matchingSubmission?.queuedMessageId,
+                    minimumObservedAtMillis = startedAtMillis
+                ).distinctBy { diagnostic ->
+                    diagnostic.messageId
+                }.size
+            }
+            if (selfReturnCount > 0) {
+                return completeStep(
+                    stepId = stepId,
+                    status = AutomatedDiagnosticStepStatus.FAIL,
+                    summary = "${stepId.title} failed",
+                    blocker = "Probe message returned to the sender UI as an incoming message.",
+                    evidence = applicationProbeEvidence(
+                        snapshot = snapshot,
+                        probeSpecs = probeSpecs,
+                        localPeerId = localPeerId,
+                        submissions = submissions,
+                        startedAtMillis = startedAtMillis
+                    ),
+                    startedAtMillis = startedAtMillis
+                )
+            }
+            val remoteSignal = recentAcceptedAutomatedDiagnosticsPhaseSignalOrNull(
+                snapshot = snapshot,
+                expectedRun = sharedRun,
+                expectedSenderPeerId = remotePeerId,
+                expectedRecipientPeerId = localPeerId,
+                expectedStepId = stepId,
+                expectedAttemptNumber = context.currentPhaseAttemptNumber,
+                context = context
+            )
+            when (remoteSignal?.phaseState) {
+                AutomatedDiagnosticsPhaseState.PASS -> {
+                    return completeStep(
+                        stepId = stepId,
+                        status = AutomatedDiagnosticStepStatus.PASS,
+                        summary = "${stepId.title} confirmed by remote receiver",
+                        evidence = applicationProbeEvidence(
+                            snapshot = snapshot,
+                            probeSpecs = probeSpecs,
+                            localPeerId = localPeerId,
+                            submissions = submissions,
+                            startedAtMillis = startedAtMillis
+                        ),
+                        startedAtMillis = startedAtMillis
+                    )
+                }
+                AutomatedDiagnosticsPhaseState.FAIL -> {
+                    return completeStep(
+                        stepId = stepId,
+                        status = AutomatedDiagnosticStepStatus.FAIL,
+                        summary = "${stepId.title} failed",
+                        blocker = "Remote device reported ${stepId.title.lowercase()} FAIL.",
+                        evidence = applicationProbeEvidence(
+                            snapshot = snapshot,
+                            probeSpecs = probeSpecs,
+                            localPeerId = localPeerId,
+                            submissions = submissions,
+                            startedAtMillis = startedAtMillis
+                        ),
+                        startedAtMillis = startedAtMillis
+                    )
+                }
+                AutomatedDiagnosticsPhaseState.BLOCKED -> {
+                    return completeStep(
+                        stepId = stepId,
+                        status = AutomatedDiagnosticStepStatus.BLOCKED,
+                        summary = "${stepId.title} blocked",
+                        blocker = "Remote device reported ${stepId.title.lowercase()} BLOCKED.",
+                        evidence = applicationProbeEvidence(
+                            snapshot = snapshot,
+                            probeSpecs = probeSpecs,
+                            localPeerId = localPeerId,
+                            submissions = submissions,
+                            startedAtMillis = startedAtMillis
+                        ),
+                        startedAtMillis = startedAtMillis
+                    )
+                }
+                AutomatedDiagnosticsPhaseState.CANCELLED -> {
+                    return completeStep(
+                        stepId = stepId,
+                        status = AutomatedDiagnosticStepStatus.CANCELLED,
+                        summary = "${stepId.title} cancelled",
+                        blocker = "Remote device cancelled during ${stepId.title.lowercase()}.",
+                        evidence = applicationProbeEvidence(
+                            snapshot = snapshot,
+                            probeSpecs = probeSpecs,
+                            localPeerId = localPeerId,
+                            submissions = submissions,
+                            startedAtMillis = startedAtMillis
+                        ),
+                        startedAtMillis = startedAtMillis
+                    )
+                }
+                AutomatedDiagnosticsPhaseState.READY,
+                AutomatedDiagnosticsPhaseState.RUNNING,
+                null -> Unit
+            }
+            updateStep(
+                stepId = stepId,
+                status = AutomatedDiagnosticStepStatus.RUNNING,
+                startedAtMillis = startedAtMillis,
+                elapsedMillis = elapsed,
+                retryCount = stepResult(stepId).retryCount,
+                summary = "Waiting for remote confirmation of ${stepId.title.lowercase()}",
+                blocker = null,
+                evidence = applicationProbeEvidence(
+                    snapshot = snapshot,
+                    probeSpecs = probeSpecs,
+                    localPeerId = localPeerId,
+                    submissions = submissions,
+                    startedAtMillis = startedAtMillis
+                ),
+                waitingProgressText =
+                "Waiting ${formatAutomatedDiagnosticsDuration(elapsed)} / ${formatAutomatedDiagnosticsDuration(timeoutMillis)}",
+                stabilizationProgressText = null
+            )
+            if (elapsed >= timeoutMillis) {
+                return completeStep(
+                    stepId = stepId,
+                    status = AutomatedDiagnosticStepStatus.BLOCKED,
+                    summary = "${stepId.title} blocked",
+                    blocker = "Timed out waiting for remote confirmation of ${stepId.title.lowercase()}.",
+                    evidence = applicationProbeEvidence(
+                        snapshot = snapshot,
+                        probeSpecs = probeSpecs,
+                        localPeerId = localPeerId,
+                        submissions = submissions,
+                        startedAtMillis = startedAtMillis
+                    ),
+                    startedAtMillis = startedAtMillis
+                )
+            }
+            delay.delayMillis(timingPolicy.pollIntervalMillis)
+        }
+        return completeStep(
+            stepId = stepId,
+            status = AutomatedDiagnosticStepStatus.CANCELLED,
+            summary = "Cancelled",
+            blocker = "Automated diagnostics were cancelled.",
+            evidence = applicationProbeEvidence(
+                snapshot = bindings.snapshot(),
+                probeSpecs = probeSpecs,
+                localPeerId = localPeerId,
+                submissions = submissions,
+                startedAtMillis = startedAtMillis
+            ),
+            startedAtMillis = startedAtMillis
+        )
+    }
+
+    private suspend fun runApplicationProbeReceiverStep(
+        stepId: AutomatedDiagnosticStepId,
+        context: AutomatedDiagnosticsStepContext,
+        localPeerId: String,
+        probeSpecs: List<AutomatedDiagnosticsExpectedApplicationProbe>
+    ): AutomatedDiagnosticStepStatus {
+        val startedAtMillis = clock.nowMillis()
+        val observationMinimumObservedAtMillis =
+            automatedDiagnosticsApplicationProbeMinimumObservedAtMillis(
+                currentPhaseAttemptStartedAtMillis = context.currentPhaseAttemptStartedAtMillis,
+                currentPhaseBarrierEstablishedAtMillis =
+                    context.currentPhaseBarrierEstablishedAtMillis,
+                fallbackStartedAtMillis = startedAtMillis
+            )
+        val firstObservedAtByFingerprint = linkedMapOf<String, Long>()
+        val timeoutMillis =
+            timingPolicy.applicationProbeDelivery.timeoutMillis +
+                timingPolicy.applicationProbeDuplicateObservationMillis
+        setStepRunning(
+            stepId = stepId,
+            retryCount = stepResult(stepId).retryCount,
+            summary = "Waiting for ${stepId.title.lowercase()}",
+            startedAtMillis = startedAtMillis
+        )
+        while (currentCoroutineContext().isActive) {
+            val now = clock.nowMillis()
+            val elapsed = now - startedAtMillis
+            val snapshot = bindings.snapshot()
+            val matchedLogicalDiagnostics = probeSpecs.associateWith { spec ->
+                matchingApplicationProbeReceiveDiagnostics(
+                    snapshot = snapshot,
+                    spec = spec,
+                    minimumObservedAtMillis = observationMinimumObservedAtMillis
+                ).distinctBy { diagnostic ->
+                    diagnostic.messageId
+                }
+            }
+            matchedLogicalDiagnostics.values.flatten().forEach { diagnostic ->
+                capturePhaseThreeMessageId(diagnostic.messageId)
+            }
+            val duplicateObservation = matchedLogicalDiagnostics
+                .entries
+                .firstOrNull { it.value.size > 1 }
+            if (duplicateObservation != null) {
+                return completeStep(
+                    stepId = stepId,
+                    status = AutomatedDiagnosticStepStatus.FAIL,
+                    summary = "${stepId.title} failed",
+                    blocker =
+                        "Receiver observed ${duplicateObservation.value.size} logical copies for ${duplicateObservation.key.marker.probeKind.name} ${duplicateObservation.key.marker.direction.name}.",
+                    evidence = applicationProbeEvidence(
+                        snapshot = snapshot,
+                        probeSpecs = probeSpecs,
+                        localPeerId = localPeerId,
+                        submissions = emptyList(),
+                        startedAtMillis = observationMinimumObservedAtMillis
+                    ),
+                    startedAtMillis = startedAtMillis
+                )
+            }
+            matchedLogicalDiagnostics.forEach { (spec, diagnostics) ->
+                if (diagnostics.size == 1 && !firstObservedAtByFingerprint.containsKey(spec.fingerprint)) {
+                    firstObservedAtByFingerprint[spec.fingerprint] =
+                        diagnostics.single().observedAtMonotonicMillis
+                }
+            }
+            val allObserved = probeSpecs.all { spec ->
+                matchedLogicalDiagnostics[spec].orEmpty().size == 1
+            }
+            if (allObserved) {
+                val duplicateWindowSatisfied = probeSpecs.all { spec ->
+                    val firstObservedAt = firstObservedAtByFingerprint[spec.fingerprint] ?: return@all false
+                    now - firstObservedAt >= timingPolicy.applicationProbeDuplicateObservationMillis
+                }
+                if (duplicateWindowSatisfied) {
+                    return completeStep(
+                        stepId = stepId,
+                        status = AutomatedDiagnosticStepStatus.PASS,
+                        summary = "${stepId.title} observed exactly once",
+                        evidence = applicationProbeEvidence(
+                            snapshot = snapshot,
+                            probeSpecs = probeSpecs,
+                            localPeerId = localPeerId,
+                            submissions = emptyList(),
+                            startedAtMillis = observationMinimumObservedAtMillis
+                        ),
+                        startedAtMillis = startedAtMillis
+                    )
+                }
+            }
+            val stabilizationProgressText = if (allObserved) {
+                val earliestRemaining = probeSpecs.minOfOrNull { spec ->
+                    val firstObservedAt = firstObservedAtByFingerprint[spec.fingerprint]
+                        ?: return@minOfOrNull timingPolicy.applicationProbeDuplicateObservationMillis
+                    (timingPolicy.applicationProbeDuplicateObservationMillis -
+                        (now - firstObservedAt)).coerceAtLeast(0L)
+                } ?: timingPolicy.applicationProbeDuplicateObservationMillis
+                "Stable ${timingPolicy.applicationProbeDuplicateObservationMillis - earliestRemaining} / ${timingPolicy.applicationProbeDuplicateObservationMillis} ms"
+            } else {
+                null
+            }
+            updateStep(
+                stepId = stepId,
+                status = AutomatedDiagnosticStepStatus.RUNNING,
+                startedAtMillis = startedAtMillis,
+                elapsedMillis = elapsed,
+                retryCount = stepResult(stepId).retryCount,
+                summary = "Waiting for ${stepId.title.lowercase()}",
+                blocker = null,
+                evidence = applicationProbeEvidence(
+                    snapshot = snapshot,
+                    probeSpecs = probeSpecs,
+                    localPeerId = localPeerId,
+                    submissions = emptyList(),
+                    startedAtMillis = observationMinimumObservedAtMillis
+                ),
+                waitingProgressText =
+                "Waiting ${formatAutomatedDiagnosticsDuration(elapsed)} / ${formatAutomatedDiagnosticsDuration(timeoutMillis)}",
+                stabilizationProgressText = stabilizationProgressText
+            )
+            if (elapsed >= timeoutMillis) {
+                return completeStep(
+                    stepId = stepId,
+                    status = AutomatedDiagnosticStepStatus.BLOCKED,
+                    summary = "${stepId.title} blocked",
+                    blocker = "Timed out waiting for ${stepId.title.lowercase()} to appear exactly once.",
+                    evidence = applicationProbeEvidence(
+                        snapshot = snapshot,
+                        probeSpecs = probeSpecs,
+                        localPeerId = localPeerId,
+                        submissions = emptyList(),
+                        startedAtMillis = observationMinimumObservedAtMillis
+                    ),
+                    startedAtMillis = startedAtMillis
+                )
+            }
+            delay.delayMillis(timingPolicy.pollIntervalMillis)
+        }
+        return completeStep(
+            stepId = stepId,
+            status = AutomatedDiagnosticStepStatus.CANCELLED,
+            summary = "Cancelled",
+            blocker = "Automated diagnostics were cancelled.",
+            evidence = applicationProbeEvidence(
+                snapshot = bindings.snapshot(),
+                probeSpecs = probeSpecs,
+                localPeerId = localPeerId,
+                submissions = emptyList(),
+                startedAtMillis = observationMinimumObservedAtMillis
+            ),
+            startedAtMillis = startedAtMillis
+        )
+    }
+
+    private suspend fun runFinalEndToEndValidationStep(
+        stepId: AutomatedDiagnosticStepId,
+        context: AutomatedDiagnosticsStepContext
+    ): AutomatedDiagnosticStepStatus {
+        val selectedPeerId = context.selectedPeer?.identityKey ?: mutableState.value.selectedPeerId
+            ?: return completeStep(
+                stepId = stepId,
+                status = AutomatedDiagnosticStepStatus.BLOCKED,
+                summary = "Final end-to-end validation blocked",
+                blocker = "Selected diagnostics peer is unavailable."
+            )
+        val expectedLocalPhaseThreeMessageCount = 4
+        val startedAtMillis = clock.nowMillis()
+        var stableSince: Long? = null
+        setStepRunning(
+            stepId = stepId,
+            retryCount = stepResult(stepId).retryCount,
+            summary = "Validating final runtime stability",
+            startedAtMillis = startedAtMillis
+        )
+        while (currentCoroutineContext().isActive) {
+            val now = clock.nowMillis()
+            val snapshot = bindings.snapshot()
+            val elapsed = now - startedAtMillis
+            val blocker = finalValidationBlocker(
+                snapshot = snapshot,
+                selectedPeerId = selectedPeerId,
+                expectedLocalPhaseThreeMessageCount = expectedLocalPhaseThreeMessageCount
+            )
+            if (blocker == null) {
+                if (stableSince == null) {
+                    stableSince = now
+                }
+                val stableElapsed = now - stableSince
+                updateStep(
+                    stepId = stepId,
+                    status = AutomatedDiagnosticStepStatus.RUNNING,
+                    startedAtMillis = startedAtMillis,
+                    elapsedMillis = elapsed,
+                    retryCount = stepResult(stepId).retryCount,
+                    summary = "Validating final runtime stability",
+                    blocker = null,
+                    evidence = finalValidationEvidence(
+                        snapshot = snapshot,
+                        selectedPeerId = selectedPeerId,
+                        cleanedMessageCount = null
+                    ),
+                    waitingProgressText =
+                    "Waiting ${formatAutomatedDiagnosticsDuration(elapsed)} / ${formatAutomatedDiagnosticsDuration(timingPolicy.finalValidation.timeoutMillis)}",
+                    stabilizationProgressText =
+                    "Stable ${stableElapsed.coerceAtMost(timingPolicy.finalValidation.stabilizationMillis)} / ${timingPolicy.finalValidation.stabilizationMillis} ms"
+                )
+                if (stableElapsed >= timingPolicy.finalValidation.stabilizationMillis) {
+                    val finalPhaseThreeCapturedIdCount = capturedPhaseThreeMessageIds.size
+                    val finalPhaseThreeObservationCount =
+                        snapshot.recentAutomatedDiagnosticsApplicationProbeObservations
+                            .count { it.stepId in automatedDiagnosticsApplicationProbeStepIds }
+                    val cleanupResult = removeCapturedPhaseThreeMessages()
+                    if (cleanupResult.completed) {
+                        updateRunState { current ->
+                            current.copy(
+                                phaseTwoSummary =
+                                    "Phase 3 cleanup removed ${cleanupResult.removedCount} exact automated diagnostics message id(s)."
+                            )
+                        }
+                        refreshAggregateState()
+                        return completeStep(
+                            stepId = stepId,
+                            status = AutomatedDiagnosticStepStatus.PASS,
+                            summary = "Final runtime state validated and Phase 3 messages cleaned up",
+                            evidence = finalValidationEvidence(
+                                snapshot = bindings.snapshot(),
+                                selectedPeerId = selectedPeerId,
+                                cleanedMessageCount = cleanupResult.removedCount,
+                                phaseThreeCapturedIdCount = finalPhaseThreeCapturedIdCount,
+                                phaseThreeObservationCount = finalPhaseThreeObservationCount,
+                                cleanupAttemptedCount = cleanupResult.attemptedCount,
+                                cleanupRemainingCount = cleanupResult.remainingCount
+                            ),
+                            startedAtMillis = startedAtMillis
+                        )
+                    }
+                    updateRunState { current ->
+                        current.copy(
+                            phaseTwoSummary =
+                                "Phase 3 cleanup incomplete: removed ${cleanupResult.removedCount} of ${cleanupResult.attemptedCount} exact automated diagnostics message id(s)."
+                        )
+                    }
+                    refreshAggregateState()
+                    return completeStep(
+                        stepId = stepId,
+                        status = AutomatedDiagnosticStepStatus.FAIL,
+                        summary = "Final cleanup failed",
+                        blocker =
+                            "Phase 3 cleanup removed ${cleanupResult.removedCount} of ${cleanupResult.attemptedCount} exact message ids; ${cleanupResult.remainingCount} remain unconfirmed.",
+                        evidence = finalValidationEvidence(
+                            snapshot = bindings.snapshot(),
+                            selectedPeerId = selectedPeerId,
+                            cleanedMessageCount = cleanupResult.removedCount,
+                            phaseThreeCapturedIdCount = finalPhaseThreeCapturedIdCount,
+                            phaseThreeObservationCount = finalPhaseThreeObservationCount,
+                            cleanupAttemptedCount = cleanupResult.attemptedCount,
+                            cleanupRemainingCount = cleanupResult.remainingCount
+                        ),
+                        startedAtMillis = startedAtMillis
+                    )
+                }
+            } else {
+                stableSince = null
+                updateStep(
+                    stepId = stepId,
+                    status = AutomatedDiagnosticStepStatus.RUNNING,
+                    startedAtMillis = startedAtMillis,
+                    elapsedMillis = elapsed,
+                    retryCount = stepResult(stepId).retryCount,
+                    summary = "Validating final runtime stability",
+                    blocker = blocker,
+                    evidence = finalValidationEvidence(
+                        snapshot = snapshot,
+                        selectedPeerId = selectedPeerId,
+                        cleanedMessageCount = null
+                    ),
+                    waitingProgressText =
+                    "Waiting ${formatAutomatedDiagnosticsDuration(elapsed)} / ${formatAutomatedDiagnosticsDuration(timingPolicy.finalValidation.timeoutMillis)}",
+                    stabilizationProgressText = null
+                )
+            }
+            if (elapsed >= timingPolicy.finalValidation.timeoutMillis) {
+                return completeStep(
+                    stepId = stepId,
+                    status = AutomatedDiagnosticStepStatus.BLOCKED,
+                    summary = "Final end-to-end validation blocked",
+                    blocker = blocker ?: "Timed out waiting for final runtime stability.",
+                    evidence = finalValidationEvidence(
+                        snapshot = snapshot,
+                        selectedPeerId = selectedPeerId,
+                        cleanedMessageCount = null
+                    ),
+                    startedAtMillis = startedAtMillis
+                )
+            }
+            delay.delayMillis(timingPolicy.pollIntervalMillis)
+        }
+        return completeStep(
+            stepId = stepId,
+            status = AutomatedDiagnosticStepStatus.CANCELLED,
+            summary = "Cancelled",
+            blocker = "Automated diagnostics were cancelled.",
+            evidence = finalValidationEvidence(
+                snapshot = bindings.snapshot(),
+                selectedPeerId = selectedPeerId,
+                cleanedMessageCount = null
+            ),
+            startedAtMillis = startedAtMillis
+        )
+    }
+
+    private fun matchingApplicationProbeObservations(
+        snapshot: AutomatedDiagnosticsRuntimeSnapshot,
+        spec: AutomatedDiagnosticsExpectedApplicationProbe,
+        minimumObservedAtMillis: Long,
+        expectedMessageId: String? = null,
+        expectedTransportGroupId: Int? = null
+    ): List<AutomatedDiagnosticsApplicationProbeObservation> {
+        return snapshot.recentAutomatedDiagnosticsApplicationProbeObservations.filter { observation ->
+            automatedDiagnosticsApplicationProbeMatchesExpected(
+                observation = observation,
+                expectedMarker = spec.marker,
+                expectedSenderPeerId = spec.expectedSenderPeerId,
+                expectedReceiverPeerId = spec.expectedReceiverPeerId,
+                expectedThreadId = spec.expectedThreadId,
+                expectedPrivateChatId = spec.expectedPrivateChatId,
+                expectedMessageId = expectedMessageId,
+                expectedTransportGroupId = expectedTransportGroupId,
+                minimumObservedAtMillis = minimumObservedAtMillis
+            )
+        }
+    }
+
+    private fun matchingApplicationProbeReceiveDiagnostics(
+        snapshot: AutomatedDiagnosticsRuntimeSnapshot,
+        spec: AutomatedDiagnosticsExpectedApplicationProbe,
+        minimumObservedAtMillis: Long,
+        expectedMessageId: String? = null,
+        expectedTransportGroupId: Int? = null
+    ): List<AutomatedDiagnosticsApplicationProbeReceiveDiagnostic> {
+        return snapshot.recentAutomatedDiagnosticsApplicationProbeReceiveDiagnostics.filter { diagnostic ->
+            automatedDiagnosticsApplicationProbeReceiveDiagnosticMatchesExpected(
+                diagnostic = diagnostic,
+                expectedMarker = spec.marker,
+                expectedReceiverPeerId = spec.expectedReceiverPeerId,
+                expectedThreadId = spec.expectedThreadId,
+                expectedPrivateChatId = spec.expectedPrivateChatId,
+                expectedMessageId = expectedMessageId,
+                expectedTransportGroupId = expectedTransportGroupId,
+                minimumObservedAtMillis = minimumObservedAtMillis
+            )
+        }
+    }
+
+    private fun matchingApplicationProbeTransportReceiveEvents(
+        snapshot: AutomatedDiagnosticsRuntimeSnapshot,
+        spec: AutomatedDiagnosticsExpectedApplicationProbe,
+        minimumObservedAtMillis: Long,
+        expectedGroupId: Int? = null
+    ): List<AutomatedDiagnosticsApplicationProbeTransportReceiveEvent> {
+        return automatedDiagnosticsApplicationProbeMatchingTransportEvents(
+            events = snapshot.recentAutomatedDiagnosticsApplicationProbeTransportReceiveEvents,
+            minimumObservedAtMillis = minimumObservedAtMillis,
+            expectedGroupId = expectedGroupId
+        )
+    }
+
+    private fun applicationProbeReceiverFrameStatus(
+        expectedGroupId: Int?,
+        events: List<AutomatedDiagnosticsApplicationProbeTransportReceiveEvent>
+    ): String {
+        return automatedDiagnosticsApplicationProbeReceiverFrameStatus(
+            expectedGroupId = expectedGroupId,
+            matchingEvents = events
+        )
+    }
+
+    private fun applicationProbeLatestTransportResultStatus(
+        event: AutomatedDiagnosticsApplicationProbeTransportReceiveEvent?
+    ): String {
+        return event?.transportResultKind ?: "unavailable"
+    }
+
+    private fun applicationProbeReceiverProcessingStatus(
+        event: AutomatedDiagnosticsApplicationProbeTransportReceiveEvent?
+    ): String {
+        return when {
+            event == null -> "NOT_SEEN"
+            event.transportResultKind == "ProcessorFailed" && event.receiveFailureKind != null ->
+                "ReceiveFailed:${event.receiveFailureKind}"
+            event.processingResultKind != null -> event.processingResultKind
+            else -> event.transportResultKind
+        }
+    }
+
+    private fun applicationProbeReceiverIngestionStatus(
+        event: AutomatedDiagnosticsApplicationProbeTransportReceiveEvent?
+    ): String {
+        return event?.ingestionResultKind ?: "not-attempted"
+    }
+
+    private fun applicationProbeMarkerStatus(
+        event: AutomatedDiagnosticsApplicationProbeTransportReceiveEvent?
+    ): String {
+        return when {
+            event == null -> "not-attempted"
+            event.marker != null -> "VALID"
+            event.processingResultKind == "Received" -> "INVALID"
+            else -> "not-attempted"
+        }
+    }
+
+    private fun applicationProbeEvidence(
+        snapshot: AutomatedDiagnosticsRuntimeSnapshot,
+        probeSpecs: List<AutomatedDiagnosticsExpectedApplicationProbe>,
+        localPeerId: String?,
+        submissions: List<AutomatedDiagnosticsProbeSubmission>,
+        startedAtMillis: Long
+    ): List<AutomatedDiagnosticEvidenceValue> {
+        return buildList {
+            add(
+                AutomatedDiagnosticEvidenceValue(
+                    "Phase 3 captured ids",
+                    capturedPhaseThreeMessageIds.size.toString()
+                )
+            )
+            localPeerId?.let { peerId ->
+                add(AutomatedDiagnosticEvidenceValue("Local peer", peerId))
+            }
+            probeSpecs.forEach { spec ->
+                val submission = submissions.firstOrNull { it.spec == spec }
+                val phaseDescriptor =
+                    automatedDiagnosticsAuthoritativePhaseApplicationProbeDescriptorOrNull(
+                        snapshot = snapshot,
+                        expectedMarker = spec.marker,
+                        expectedSenderPeerId = spec.expectedSenderPeerId,
+                        expectedReceiverPeerId = spec.expectedReceiverPeerId,
+                        localPeerId = localPeerId,
+                        localSubmissionMessageId = submission?.queuedMessageId,
+                        localTransportStatus = submission?.transportStatus,
+                        localBleTransportResult = submission?.localBleTransportResult,
+                        localExpectedReceiverTransportGroupId =
+                            submission?.expectedReceiverTransportGroupId
+                    )
+                val senderMessageId = phaseDescriptor?.messageId
+                val expectedGroupId = phaseDescriptor?.expectedTransportGroupId
+                val matchingObservations = matchingApplicationProbeObservations(
+                    snapshot = snapshot,
+                    spec = spec,
+                    minimumObservedAtMillis = startedAtMillis,
+                    expectedMessageId = senderMessageId,
+                    expectedTransportGroupId = expectedGroupId
+                )
+                val descriptorExpectedChunkCount = phaseDescriptor?.expectedChunkCount
+                val frameByteCount = phaseDescriptor?.frameByteCount
+                val matchingTransportReceiveEvents = matchingApplicationProbeTransportReceiveEvents(
+                    snapshot = snapshot,
+                    spec = spec,
+                    minimumObservedAtMillis = startedAtMillis,
+                    expectedGroupId = expectedGroupId
+                )
+                val matchingReceiveDiagnostics = matchingApplicationProbeReceiveDiagnostics(
+                    snapshot = snapshot,
+                    spec = spec,
+                    minimumObservedAtMillis = startedAtMillis,
+                    expectedMessageId = senderMessageId,
+                    expectedTransportGroupId = expectedGroupId
+                )
+                val matchingSuccessReceiveDiagnostics = matchingApplicationProbeReceiveDiagnostics(
+                    snapshot = snapshot,
+                    spec = spec,
+                    minimumObservedAtMillis = startedAtMillis
+                )
+                val logicalMatchedReceiveDiagnostics = matchingSuccessReceiveDiagnostics.distinctBy {
+                    diagnostic -> diagnostic.messageId
+                }
+                val latestTransportEvent = matchingTransportReceiveEvents.lastOrNull()
+                val latestReceiveDiagnostic =
+                    matchingReceiveDiagnostics.lastOrNull()
+                        ?: matchingSuccessReceiveDiagnostics.lastOrNull()
+                val latestObservation = matchingObservations.lastOrNull()
+                val expectedChunkCount = automatedDiagnosticsApplicationProbeExpectedChunkCount(
+                    descriptorExpectedChunkCount = descriptorExpectedChunkCount,
+                    matchingEvents = matchingTransportReceiveEvents
+                )
+                val matchingChunkCount = automatedDiagnosticsApplicationProbeMatchingChunkCount(
+                    matchingEvents = matchingTransportReceiveEvents,
+                    expectedChunkCount = expectedChunkCount
+                )
+                val receiverFrameStatus = when {
+                    latestTransportEvent != null ->
+                        applicationProbeReceiverFrameStatus(
+                            expectedGroupId = expectedGroupId,
+                            events = matchingTransportReceiveEvents
+                        )
+                    latestReceiveDiagnostic != null -> "COMPLETE_FRAME_SEEN"
+                    else ->
+                        applicationProbeReceiverFrameStatus(
+                            expectedGroupId = expectedGroupId,
+                            events = matchingTransportReceiveEvents
+                        )
+                }
+                val transportResultStatus = latestTransportEvent?.let(
+                    ::applicationProbeLatestTransportResultStatus
+                ) ?: if (latestReceiveDiagnostic != null) {
+                    "Processed"
+                } else {
+                    "unavailable"
+                }
+                val processingStatus = latestTransportEvent?.let(
+                    ::applicationProbeReceiverProcessingStatus
+                ) ?: if (latestReceiveDiagnostic != null) {
+                    "Received"
+                } else {
+                    "NOT_SEEN"
+                }
+                val ingestionStatus = latestTransportEvent?.let(
+                    ::applicationProbeReceiverIngestionStatus
+                ) ?: if (latestReceiveDiagnostic != null) {
+                    "Appended"
+                } else {
+                    "not-attempted"
+                }
+                val markerStatus = latestTransportEvent?.let(
+                    ::applicationProbeMarkerStatus
+                ) ?: if (latestReceiveDiagnostic != null) {
+                    "VALID"
+                } else {
+                    "not-attempted"
+                }
+                val frameTypeStatus =
+                    latestTransportEvent?.messageType?.name
+                        ?: latestReceiveDiagnostic?.messageType?.name
+                        ?: "unavailable"
+                val effectiveMatchingChunkCount = if (
+                    latestTransportEvent == null &&
+                        latestReceiveDiagnostic != null &&
+                        expectedGroupId == null &&
+                        expectedChunkCount != null
+                ) {
+                    expectedChunkCount
+                } else {
+                    matchingChunkCount
+                }
+                val rawWindowEvents = automatedDiagnosticsApplicationProbeTransportEventsWithinWindow(
+                    events = snapshot.recentAutomatedDiagnosticsApplicationProbeTransportReceiveEvents,
+                    minimumObservedAtMillis = startedAtMillis
+                )
+                val rawBleGroupsSeenCount = rawWindowEvents
+                    .mapNotNull { event -> event.groupId }
+                    .distinct()
+                    .size
+                val recentRawGroupSummaries = automatedDiagnosticsRawBleGroupSummaries(
+                    events = snapshot.recentAutomatedDiagnosticsApplicationProbeTransportReceiveEvents,
+                    minimumObservedAtMillis = startedAtMillis
+                )
+                val recentRawGroupsText = automatedDiagnosticsRawBleGroupSummaryText(
+                    recentRawGroupSummaries
+                )
+                add(
+                    AutomatedDiagnosticEvidenceValue(
+                        "${spec.marker.probeKind.name} ${spec.marker.direction.name} observed",
+                        logicalMatchedReceiveDiagnostics.size.toString()
+                    )
+                )
+                add(
+                    AutomatedDiagnosticEvidenceValue(
+                        "${spec.marker.probeKind.name} ${spec.marker.direction.name} sender message id",
+                        senderMessageId ?: latestReceiveDiagnostic?.messageId ?: "unavailable"
+                    )
+                )
+                add(
+                    AutomatedDiagnosticEvidenceValue(
+                        "${spec.marker.probeKind.name} ${spec.marker.direction.name} submit",
+                        submission?.transportStatus ?: phaseDescriptor?.transportStatus ?: "unavailable"
+                    )
+                )
+                add(
+                    AutomatedDiagnosticEvidenceValue(
+                        "${spec.marker.probeKind.name} ${spec.marker.direction.name} send",
+                        submission?.localBleTransportResult
+                            ?: phaseDescriptor?.localBleTransportResult
+                            ?: "unavailable"
+                    )
+                )
+                frameByteCount?.let { bytes ->
+                    add(
+                        AutomatedDiagnosticEvidenceValue(
+                            "${spec.marker.probeKind.name} ${spec.marker.direction.name} frame bytes",
+                            bytes.toString()
+                        )
+                    )
+                }
+                phaseDescriptor?.expectedChunkCount?.let { chunkCount ->
+                    add(
+                        AutomatedDiagnosticEvidenceValue(
+                            "${spec.marker.probeKind.name} ${spec.marker.direction.name} chunk count",
+                            chunkCount.toString()
+                        )
+                    )
+                }
+                phaseDescriptor?.senderChunksQueued?.let { chunksQueued ->
+                    add(
+                        AutomatedDiagnosticEvidenceValue(
+                            "${spec.marker.probeKind.name} ${spec.marker.direction.name} chunks queued",
+                            chunksQueued.toString()
+                        )
+                    )
+                }
+                phaseDescriptor?.senderChunksWriteAttempted?.let { chunksWriteAttempted ->
+                    add(
+                        AutomatedDiagnosticEvidenceValue(
+                            "${spec.marker.probeKind.name} ${spec.marker.direction.name} chunks write-attempted",
+                            chunksWriteAttempted.toString()
+                        )
+                    )
+                }
+                phaseDescriptor?.senderLastLocalWriteResult?.let { localWriteResult ->
+                    add(
+                        AutomatedDiagnosticEvidenceValue(
+                            "${spec.marker.probeKind.name} ${spec.marker.direction.name} last local write result",
+                            localWriteResult
+                        )
+                    )
+                }
+                add(
+                    AutomatedDiagnosticEvidenceValue(
+                        "${spec.marker.probeKind.name} ${spec.marker.direction.name} expected group id",
+                        expectedGroupId?.toString() ?: "unavailable"
+                    )
+                )
+                add(
+                    AutomatedDiagnosticEvidenceValue(
+                        "${spec.marker.probeKind.name} ${spec.marker.direction.name} correlation",
+                        if (expectedGroupId != null) "AVAILABLE" else "UNAVAILABLE"
+                    )
+                )
+                add(
+                    AutomatedDiagnosticEvidenceValue(
+                        "${spec.marker.probeKind.name} ${spec.marker.direction.name} raw BLE groups seen",
+                        rawBleGroupsSeenCount.toString()
+                    )
+                )
+                recentRawGroupsText?.let { summary ->
+                    add(
+                        AutomatedDiagnosticEvidenceValue(
+                            "${spec.marker.probeKind.name} ${spec.marker.direction.name} recent raw groups",
+                            summary
+                        )
+                    )
+                }
+                add(
+                    AutomatedDiagnosticEvidenceValue(
+                        "${spec.marker.probeKind.name} ${spec.marker.direction.name} receiver frame",
+                        receiverFrameStatus
+                    )
+                )
+                add(
+                    AutomatedDiagnosticEvidenceValue(
+                        "${spec.marker.probeKind.name} ${spec.marker.direction.name} transport result",
+                        transportResultStatus
+                    )
+                )
+                add(
+                    AutomatedDiagnosticEvidenceValue(
+                        "${spec.marker.probeKind.name} ${spec.marker.direction.name} matching chunks seen",
+                        effectiveMatchingChunkCount.toString()
+                    )
+                )
+                add(
+                    AutomatedDiagnosticEvidenceValue(
+                        "${spec.marker.probeKind.name} ${spec.marker.direction.name} expected chunks",
+                        expectedChunkCount?.toString() ?: "unavailable"
+                    )
+                )
+                add(
+                    AutomatedDiagnosticEvidenceValue(
+                        "${spec.marker.probeKind.name} ${spec.marker.direction.name} processing",
+                        processingStatus
+                    )
+                )
+                add(
+                    AutomatedDiagnosticEvidenceValue(
+                        "${spec.marker.probeKind.name} ${spec.marker.direction.name} ingestion",
+                        ingestionStatus
+                    )
+                )
+                add(
+                    AutomatedDiagnosticEvidenceValue(
+                        "${spec.marker.probeKind.name} ${spec.marker.direction.name} marker",
+                        markerStatus
+                    )
+                )
+                add(
+                    AutomatedDiagnosticEvidenceValue(
+                        "${spec.marker.probeKind.name} ${spec.marker.direction.name} frame type",
+                        frameTypeStatus
+                    )
+                )
+                latestTransportEvent?.failureDetail?.let { detail ->
+                    add(
+                        AutomatedDiagnosticEvidenceValue(
+                            "${spec.marker.probeKind.name} ${spec.marker.direction.name} receiver detail",
+                            detail
+                        )
+                    )
+                }
+                add(
+                    AutomatedDiagnosticEvidenceValue(
+                        "${spec.marker.probeKind.name} ${spec.marker.direction.name} source resolution attempted",
+                        (latestReceiveDiagnostic != null).toString()
+                    )
+                )
+                latestReceiveDiagnostic?.let { diagnostic ->
+                    add(
+                        AutomatedDiagnosticEvidenceValue(
+                            "${spec.marker.probeKind.name} ${spec.marker.direction.name} inbound source",
+                            diagnostic.sourceResolution.sourceDeviceAddress ?: "unavailable"
+                        )
+                    )
+                    add(
+                        AutomatedDiagnosticEvidenceValue(
+                            "${spec.marker.probeKind.name} ${spec.marker.direction.name} exact-address source",
+                            diagnostic.sourceResolution.exactAddressSourcePeerId ?: "unresolved"
+                        )
+                    )
+                    add(
+                        AutomatedDiagnosticEvidenceValue(
+                            "${spec.marker.probeKind.name} ${spec.marker.direction.name} diagnostics-associated source",
+                            diagnostic.sourceResolution.diagnosticsAssociatedSourcePeerId
+                                ?: "unresolved"
+                        )
+                    )
+                    add(
+                        AutomatedDiagnosticEvidenceValue(
+                            "${spec.marker.probeKind.name} ${spec.marker.direction.name} association expected receiver",
+                            diagnostic.sourceResolution.storedAssociationExpectedRemotePeerId
+                                ?: "unavailable"
+                        )
+                    )
+                    add(
+                        AutomatedDiagnosticEvidenceValue(
+                            "${spec.marker.probeKind.name} ${spec.marker.direction.name} association outcome",
+                            diagnostic.sourceResolution.diagnosticsAssociationOutcome?.name
+                                ?: "not-needed"
+                        )
+                    )
+                    add(
+                        AutomatedDiagnosticEvidenceValue(
+                            "${spec.marker.probeKind.name} ${spec.marker.direction.name} resolved source",
+                            diagnostic.sourceResolution.resolvedSourcePeerId ?: "unresolved"
+                        )
+                    )
+                    add(
+                        AutomatedDiagnosticEvidenceValue(
+                            "${spec.marker.probeKind.name} ${spec.marker.direction.name} resolution",
+                            diagnostic.sourceResolution.resolutionSource.name
+                        )
+                    )
+                }
+                add(
+                    AutomatedDiagnosticEvidenceValue(
+                        "${spec.marker.probeKind.name} ${spec.marker.direction.name} observation created",
+                        (latestObservation != null).toString()
+                    )
+                )
+                latestObservation?.let { observation ->
+                    add(
+                        AutomatedDiagnosticEvidenceValue(
+                            "${spec.marker.probeKind.name} ${spec.marker.direction.name} message",
+                            observation.messageId
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    private fun finalValidationBlocker(
+        snapshot: AutomatedDiagnosticsRuntimeSnapshot,
+        selectedPeerId: String,
+        expectedLocalPhaseThreeMessageCount: Int
+    ): String? {
+        return when {
+            snapshot.bleAdvertiseStatus != BleAdvertiseStatus.ADVERTISING ->
+                "BLE advertiser is no longer active."
+            snapshot.bleScanStatus != BleScanStatus.SCANNING ->
+                "BLE scanner is no longer active."
+            snapshot.bleConnectionStatus != BleConnectionStatus.CONNECTED ->
+                "BLE transport connection is no longer connected."
+            secureSessionBlocker(snapshot, selectedPeerId) != null ->
+                secureSessionBlocker(snapshot, selectedPeerId)
+            capturedPhaseThreeMessageIds.size < expectedLocalPhaseThreeMessageCount ->
+                "Expected at least $expectedLocalPhaseThreeMessageCount local Phase 3 message ids but captured ${capturedPhaseThreeMessageIds.size}."
+            phaseThreeDuplicateObservationFingerprints(snapshot).isNotEmpty() ->
+                "Duplicate logical Phase 3 application probe observations were recorded."
+            else -> null
+        }
+    }
+
+    private fun finalValidationEvidence(
+        snapshot: AutomatedDiagnosticsRuntimeSnapshot,
+        selectedPeerId: String,
+        cleanedMessageCount: Int?,
+        phaseThreeCapturedIdCount: Int = capturedPhaseThreeMessageIds.size,
+        cleanupAttemptedCount: Int? = null,
+        cleanupRemainingCount: Int? = null,
+        phaseThreeObservationCount: Int =
+            snapshot.recentAutomatedDiagnosticsApplicationProbeObservations
+                .count { it.stepId in automatedDiagnosticsApplicationProbeStepIds }
+    ): List<AutomatedDiagnosticEvidenceValue> {
+        return buildList {
+            add(AutomatedDiagnosticEvidenceValue("Advertiser", snapshot.bleAdvertiseStatus.name))
+            add(AutomatedDiagnosticEvidenceValue("Scanner", snapshot.bleScanStatus.name))
+            add(AutomatedDiagnosticEvidenceValue("BLE connection", snapshot.bleConnectionStatus.name))
+            add(
+                AutomatedDiagnosticEvidenceValue(
+                    "Secure session ready",
+                    (secureSessionBlocker(snapshot, selectedPeerId) == null).toString()
+                )
+            )
+            add(
+                AutomatedDiagnosticEvidenceValue(
+                    "Phase 3 captured ids",
+                    phaseThreeCapturedIdCount.toString()
+                )
+            )
+            add(
+                AutomatedDiagnosticEvidenceValue(
+                    "Phase 3 observations",
+                    phaseThreeObservationCount.toString()
+                )
+            )
+            add(
+                AutomatedDiagnosticEvidenceValue(
+                    "Wi-Fi Direct role",
+                    snapshot.wifiDirectRuntimeStatus.connectionStatus.role.name
+                )
+            )
+            add(
+                AutomatedDiagnosticEvidenceValue(
+                    "Wi-Fi Direct socket",
+                    snapshot.wifiDirectSocketDiagnostics.state.name
+                )
+            )
+            cleanedMessageCount?.let { removed ->
+                add(AutomatedDiagnosticEvidenceValue("Cleaned message ids", removed.toString()))
+            }
+            cleanupAttemptedCount?.let { attempted ->
+                add(AutomatedDiagnosticEvidenceValue("Cleanup attempted ids", attempted.toString()))
+            }
+            cleanupRemainingCount?.let { remaining ->
+                add(AutomatedDiagnosticEvidenceValue("Cleanup remaining ids", remaining.toString()))
+            }
+        }
+    }
+
+    private fun capturePhaseThreeMessageId(
+        messageId: String?
+    ) {
+        val sanitizedMessageId = messageId?.trim()?.takeIf { it.isNotEmpty() } ?: return
+        capturedPhaseThreeMessageIds += sanitizedMessageId
+    }
+
+    private fun removeCapturedPhaseThreeMessages(): PhaseThreeCleanupResult {
+        if (capturedPhaseThreeMessageIds.isEmpty()) {
+            return PhaseThreeCleanupResult(
+                attemptedIds = emptySet(),
+                removedIds = emptySet()
+            )
+        }
+        val capturedIds = capturedPhaseThreeMessageIds.toSet()
+        val removedIds = bindings.commands.removeMessagesByIds(capturedIds)
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .toSet()
+            .intersect(capturedIds)
+        capturedPhaseThreeMessageIds.removeAll(removedIds)
+        return PhaseThreeCleanupResult(
+            attemptedIds = capturedIds,
+            removedIds = removedIds
+        )
+    }
+
+    private fun phaseThreeDuplicateObservationFingerprints(
+        snapshot: AutomatedDiagnosticsRuntimeSnapshot
+    ): Set<String> {
+        return snapshot.recentAutomatedDiagnosticsApplicationProbeObservations
+            .filter { it.stepId in automatedDiagnosticsApplicationProbeStepIds }
+            .groupBy { automatedDiagnosticsApplicationProbeFingerprint(it.marker) }
+            .filterValues { observations -> observations.size > 1 }
+            .keys
     }
 
     private suspend fun awaitStableSnapshotStep(
@@ -2794,6 +5540,7 @@ internal class AutomatedDiagnosticsRunner(
         val connectionStatus = snapshot.wifiDirectRuntimeStatus.connectionStatus
         return connectionStatus.state == WifiDirectConnectionState.CONNECTED ||
             connectionStatus.state == WifiDirectConnectionState.CONNECTING ||
+            connectionStatus.state == WifiDirectConnectionState.FAILED ||
             connectionStatus.state == WifiDirectConnectionState.DISCONNECTING ||
             connectionStatus.groupFormed == WifiDirectGroupFormedState.YES
     }
@@ -2880,6 +5627,67 @@ internal class AutomatedDiagnosticsRunner(
                 } else {
                     AutomatedDiagnosticsWifiDirectGroupProvenance.NONE
                 }
+        }
+    }
+
+    private fun resetWifiDirectDiscoveryAttemptState(
+        context: AutomatedDiagnosticsStepContext
+    ) {
+        clearStaleWifiDirectStepState(context)
+        context.wifiDirectCorrelationToken = null
+        context.wifiDirectDnsSdRegisteredCorrelationToken = null
+        context.wifiDirectCurrentRunTokenProofReady = false
+        context.wifiDirectCurrentRunDnsSdRegistrationObserved = false
+        context.wifiDirectCurrentRunDnsSdProofReady = false
+        context.wifiDirectPeerReadySendAttempts = 0
+        context.wifiDirectPeerReadySuccessfulSends = 0
+        context.wifiDirectPeerReadyReceivedCount = 0
+        context.wifiDirectPeerReadyAcceptedCount = 0
+        context.wifiDirectPeerReadyValidationCounters = AutomatedDiagnosticsCoordinationCounters()
+        context.wifiDirectPeerReadyLastRejectedReason = null
+        context.wifiDirectPeerReadyLastRejectedField = null
+        context.wifiDirectPeerReadyLastRejectedExpectedValue = null
+        context.wifiDirectPeerReadyLastRejectedObservedValue = null
+        context.lastWifiDirectDnsSdServiceRegistrationAtMillis = null
+        context.lastWifiDirectDnsSdDiscoveryStartAtMillis = null
+    }
+
+    private fun updateWifiDirectCurrentRunProofs(
+        localRole: AutomatedDiagnosticsPeerRole,
+        snapshot: AutomatedDiagnosticsRuntimeSnapshot,
+        acceptedRemoteSignal: AutomatedDiagnosticsWifiDirectPeerReadySignal?,
+        matchingDnsSdResponses: List<WifiDirectDnsSdServiceResponse>,
+        context: AutomatedDiagnosticsStepContext
+    ) {
+        val currentCorrelationToken = context.wifiDirectCorrelationToken
+        if (
+            localRole == AutomatedDiagnosticsPeerRole.PARTICIPANT &&
+            currentCorrelationToken != null &&
+            context.wifiDirectPeerReadySuccessfulSends > 0
+        ) {
+            context.wifiDirectCurrentRunTokenProofReady = true
+        }
+        if (
+            localRole == AutomatedDiagnosticsPeerRole.COORDINATOR &&
+            acceptedRemoteSignal != null
+        ) {
+            context.wifiDirectCurrentRunTokenProofReady = true
+        }
+        if (
+            localRole == AutomatedDiagnosticsPeerRole.PARTICIPANT &&
+            currentCorrelationToken != null &&
+            snapshot.wifiDirectRuntimeStatus.dnsSdDiagnostics.localServiceRegistered &&
+            context.wifiDirectDnsSdRegisteredCorrelationToken == currentCorrelationToken
+        ) {
+            context.wifiDirectCurrentRunDnsSdRegistrationObserved = true
+            context.wifiDirectCurrentRunDnsSdProofReady = true
+        }
+        if (
+            localRole == AutomatedDiagnosticsPeerRole.COORDINATOR &&
+            acceptedRemoteSignal != null &&
+            matchingDnsSdResponses.size == 1
+        ) {
+            context.wifiDirectCurrentRunDnsSdProofReady = true
         }
     }
 
@@ -3274,27 +6082,353 @@ internal class AutomatedDiagnosticsRunner(
 
     private fun hybridBootstrapAcceptBlocker(
         snapshot: AutomatedDiagnosticsRuntimeSnapshot,
-        runStartedAtMillis: Long
+        context: AutomatedDiagnosticsStepContext,
+        expectedPeerId: String,
+        expectedSessionId: String
     ): String {
-        return if (hasRecentHybridAccept(snapshot, runStartedAtMillis)) {
-            "Recent hybrid bootstrap accept already recorded."
-        } else {
-            "Waiting for the participant to send a recent hybrid bootstrap accept."
+        val acceptedObservation = context.hybridAcceptAcceptedObservation
+        if (acceptedObservation != null) {
+            return "Hybrid bootstrap accept already recorded for the current Step 15 attempt."
+        }
+        val observation = snapshot.latestAutomatedDiagnosticsHybridAcceptObservation
+        val failure = observation?.let {
+            hybridBootstrapAcceptObservationValidationFailureOrNull(
+                observation = it,
+                expectedPeerId = expectedPeerId,
+                expectedSessionId = expectedSessionId,
+                minimumObservedAtMonotonicMillis =
+                    context.hybridAcceptAttemptStartedAtMonotonicMillis ?: 0L
+            )
+        }
+        return when {
+            failure != null ->
+                hybridBootstrapAcceptRejectionBlocker(expectedPeerId, failure)
+            context.hybridAcceptLastRejectedReason != null ->
+                hybridBootstrapAcceptRejectionBlocker(
+                    expectedPeerId = expectedPeerId,
+                    failure = HybridAcceptObservationValidationFailure(
+                        reason = requireNotNull(context.hybridAcceptLastRejectedReason),
+                        fieldName =
+                            context.hybridAcceptLastRejectedField
+                                ?: "latestAutomatedDiagnosticsHybridAcceptObservation",
+                        expectedValue =
+                            context.hybridAcceptLastRejectedExpectedValue ?: expectedSessionId,
+                        observedValue =
+                            context.hybridAcceptLastRejectedObservedValue
+                                ?: "none"
+                    )
+                )
+            else ->
+                "Waiting for participant $expectedPeerId to send and record the current hybrid bootstrap accept."
+        }
+    }
+
+    private fun participantHybridBootstrapAcceptBlocker(
+        snapshot: AutomatedDiagnosticsRuntimeSnapshot,
+        context: AutomatedDiagnosticsStepContext
+    ): String {
+        val remotePhaseState = context.currentPhaseObservedRemoteSignal?.phaseState
+        return when {
+            remotePhaseState == AutomatedDiagnosticsPhaseState.PASS ->
+                "Coordinator Step 15 PASS observed."
+            remotePhaseState == AutomatedDiagnosticsPhaseState.READY ->
+                "Hybrid bootstrap accept sent, waiting for the coordinator to publish Step 15 PASS."
+            remotePhaseState == AutomatedDiagnosticsPhaseState.RUNNING ->
+                "Coordinator is processing the current hybrid bootstrap accept."
+            context.currentPhaseLastRejectedReason != null ->
+                "Waiting for a fresh coordinator Step 15 PASS signal (last rejection: ${context.currentPhaseLastRejectedReason?.statusText})."
+            context.hybridAcceptSuccessfulSendCount > 0 ->
+                "Hybrid bootstrap accept sent, waiting for the coordinator to receive and confirm it."
+            snapshot.hybridBootstrapManualAcceptBlockedReason != null ->
+                snapshot.hybridBootstrapManualAcceptBlockedReason
+                    ?: "Hybrid bootstrap accept is blocked."
+            context.hybridAcceptLastSendResult != null ->
+                "Waiting for coordinator confirmation after accept result ${context.hybridAcceptLastSendResult}."
+            else ->
+                "Waiting to send and confirm the current hybrid bootstrap accept."
+        }
+    }
+
+    private fun hybridBootstrapAcceptObservationValidationFailureOrNull(
+        observation: AutomatedDiagnosticsHybridAcceptObservation,
+        expectedPeerId: String,
+        expectedSessionId: String,
+        minimumObservedAtMonotonicMillis: Long
+    ): HybridAcceptObservationValidationFailure? {
+        if (!observation.recorded) {
+            val reason = when (observation.storeResult) {
+                HybridTransportControlStore.RecordResult.IgnoredOlderMessage ->
+                    AutomatedDiagnosticsCoordinationRejectionReason.STALE
+                HybridTransportControlStore.RecordResult.IgnoredInvalidPeerId,
+                HybridTransportControlStore.RecordResult.IgnoredNonBootstrapMessageType ->
+                    AutomatedDiagnosticsCoordinationRejectionReason.INVALID_PAYLOAD
+                HybridTransportControlStore.RecordResult.Stored ->
+                    AutomatedDiagnosticsCoordinationRejectionReason.INVALID_PAYLOAD
+            }
+            return HybridAcceptObservationValidationFailure(
+                reason = reason,
+                fieldName = "observation.storeResult",
+                expectedValue = hybridBootstrapAcceptStoreResultStatusText(
+                    HybridTransportControlStore.RecordResult.Stored
+                ),
+                observedValue = hybridBootstrapAcceptStoreResultStatusText(observation.storeResult)
+            )
+        }
+        if (observation.peerId != expectedPeerId) {
+            return HybridAcceptObservationValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.WRONG_PEER,
+                fieldName = "observation.peerId",
+                expectedValue = expectedPeerId,
+                observedValue = observation.peerId
+            )
+        }
+        val publicPeerIdHint = observation.publicPeerIdHint?.trim()?.takeIf { it.isNotEmpty() }
+        if (publicPeerIdHint != null && publicPeerIdHint != expectedPeerId) {
+            return HybridAcceptObservationValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.WRONG_PEER,
+                fieldName = "observation.publicPeerIdHint",
+                expectedValue = expectedPeerId,
+                observedValue = publicPeerIdHint
+            )
+        }
+        if (observation.sessionId != expectedSessionId) {
+            return HybridAcceptObservationValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.WRONG_SESSION,
+                fieldName = "observation.sessionId",
+                expectedValue = expectedSessionId,
+                observedValue = observation.sessionId
+            )
+        }
+        if (observation.observedAtMonotonicMillis < minimumObservedAtMonotonicMillis) {
+            return HybridAcceptObservationValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.STALE,
+                fieldName = "observation.observedAtMonotonicMillis",
+                expectedValue = ">=$minimumObservedAtMonotonicMillis",
+                observedValue = observation.observedAtMonotonicMillis.toString()
+            )
+        }
+        return null
+    }
+
+    private fun hybridBootstrapAcceptRejectionBlocker(
+        expectedPeerId: String,
+        failure: HybridAcceptObservationValidationFailure
+    ): String {
+        return buildString {
+            append("Waiting for a valid hybrid bootstrap accept from ")
+            append(expectedPeerId)
+            append(" (last rejection: ")
+            append(failure.reason.statusText)
+            append(", field=")
+            append(failure.fieldName)
+            append(", expected=")
+            append(failure.expectedValue)
+            append(", observed=")
+            append(failure.observedValue)
+            append(").")
+        }
+    }
+
+    private fun hybridBootstrapSocketHintObservationValidationFailureOrNull(
+        observation: AutomatedDiagnosticsHybridSocketHintObservation,
+        expectedPeerId: String,
+        expectedSessionId: String,
+        expectedGroupOwnerAddress: String,
+        expectedSocketPort: Int,
+        minimumObservedAtMonotonicMillis: Long
+    ): HybridSocketHintObservationValidationFailure? {
+        if (!observation.recorded) {
+            val reason = when (observation.storeResult) {
+                HybridTransportControlStore.RecordResult.IgnoredOlderMessage ->
+                    AutomatedDiagnosticsCoordinationRejectionReason.STALE
+                HybridTransportControlStore.RecordResult.IgnoredInvalidPeerId,
+                HybridTransportControlStore.RecordResult.IgnoredNonBootstrapMessageType ->
+                    AutomatedDiagnosticsCoordinationRejectionReason.INVALID_PAYLOAD
+                HybridTransportControlStore.RecordResult.Stored ->
+                    AutomatedDiagnosticsCoordinationRejectionReason.INVALID_PAYLOAD
+            }
+            return HybridSocketHintObservationValidationFailure(
+                reason = reason,
+                fieldName = "observation.storeResult",
+                expectedValue = hybridBootstrapAcceptStoreResultStatusText(
+                    HybridTransportControlStore.RecordResult.Stored
+                ),
+                observedValue = hybridBootstrapAcceptStoreResultStatusText(observation.storeResult)
+            )
+        }
+        if (observation.peerId != expectedPeerId) {
+            return HybridSocketHintObservationValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.WRONG_PEER,
+                fieldName = "observation.peerId",
+                expectedValue = expectedPeerId,
+                observedValue = observation.peerId
+            )
+        }
+        val publicPeerIdHint = observation.publicPeerIdHint?.trim()?.takeIf { it.isNotEmpty() }
+        if (publicPeerIdHint != null && publicPeerIdHint != expectedPeerId) {
+            return HybridSocketHintObservationValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.WRONG_PEER,
+                fieldName = "observation.publicPeerIdHint",
+                expectedValue = expectedPeerId,
+                observedValue = publicPeerIdHint
+            )
+        }
+        if (observation.sessionId != expectedSessionId) {
+            return HybridSocketHintObservationValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.WRONG_SESSION,
+                fieldName = "observation.sessionId",
+                expectedValue = expectedSessionId,
+                observedValue = observation.sessionId
+            )
+        }
+        if (observation.groupOwnerAddress != expectedGroupOwnerAddress) {
+            return HybridSocketHintObservationValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.INVALID_PAYLOAD,
+                fieldName = "observation.groupOwnerAddress",
+                expectedValue = expectedGroupOwnerAddress,
+                observedValue = observation.groupOwnerAddress
+            )
+        }
+        if (observation.socketPort != expectedSocketPort) {
+            return HybridSocketHintObservationValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.INVALID_PAYLOAD,
+                fieldName = "observation.socketPort",
+                expectedValue = expectedSocketPort.toString(),
+                observedValue = observation.socketPort.toString()
+            )
+        }
+        if (observation.observedAtMonotonicMillis < minimumObservedAtMonotonicMillis) {
+            return HybridSocketHintObservationValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.STALE,
+                fieldName = "observation.observedAtMonotonicMillis",
+                expectedValue = ">=$minimumObservedAtMonotonicMillis",
+                observedValue = observation.observedAtMonotonicMillis.toString()
+            )
+        }
+        return null
+    }
+
+    private fun hybridBootstrapSocketHintRejectionBlocker(
+        expectedPeerId: String,
+        failure: HybridSocketHintObservationValidationFailure
+    ): String {
+        return buildString {
+            append("Waiting for a valid hybrid bootstrap socket hint from ")
+            append(expectedPeerId)
+            append(" (last rejection: ")
+            append(failure.reason.statusText)
+            append(", field=")
+            append(failure.fieldName)
+            append(", expected=")
+            append(failure.expectedValue)
+            append(", observed=")
+            append(failure.observedValue)
+            append(").")
         }
     }
 
     private fun hybridBootstrapSocketHintBlocker(
         snapshot: AutomatedDiagnosticsRuntimeSnapshot,
-        runStartedAtMillis: Long
+        context: AutomatedDiagnosticsStepContext,
+        expectedPeerId: String,
+        expectedSessionId: String,
+        expectedGroupOwnerAddress: String,
+        expectedSocketPort: Int
     ): String {
+        val acceptedObservation = recentAcceptedHybridBootstrapSocketHintObservationOrNull(
+            snapshot = snapshot,
+            context = context,
+            expectedPeerId = expectedPeerId,
+            expectedSessionId = expectedSessionId,
+            expectedGroupOwnerAddress = expectedGroupOwnerAddress,
+            expectedSocketPort = expectedSocketPort
+        )
         return when {
-            hasRecentSocketReadyHybridCandidate(snapshot, runStartedAtMillis) ->
-                "Recent hybrid bootstrap socket hint already recorded."
-            snapshot.hybridBootstrapDiagnostics.socketReadyCandidateCount > 0 ->
-                "Recent hybrid bootstrap socket hint recorded, waiting for socket-ready stabilization."
+            acceptedObservation != null &&
+                matchingAcceptedSocketReadyHybridCandidateOrNull(
+                    snapshot = snapshot,
+                    expectedPeerId = expectedPeerId,
+                    expectedSessionId = expectedSessionId,
+                    expectedGroupOwnerAddress = expectedGroupOwnerAddress,
+                    expectedSocketPort = expectedSocketPort
+                ) != null ->
+                "Hybrid bootstrap socket hint already recorded for the current Step 16 attempt."
+            acceptedObservation != null ->
+                "Hybrid bootstrap socket hint recorded, waiting for matching socket-ready stabilization."
+            context.hybridSocketHintLastRejectedReason != null ->
+                hybridBootstrapSocketHintRejectionBlocker(
+                    expectedPeerId = expectedPeerId,
+                    failure = HybridSocketHintObservationValidationFailure(
+                        reason = requireNotNull(context.hybridSocketHintLastRejectedReason),
+                        fieldName = context.hybridSocketHintLastRejectedField
+                            ?: "observation",
+                        expectedValue =
+                            context.hybridSocketHintLastRejectedExpectedValue
+                                ?: expectedSessionId,
+                        observedValue =
+                            context.hybridSocketHintLastRejectedObservedValue ?: "none"
+                    )
+                )
             else ->
-                "Waiting for a recent hybrid bootstrap socket hint from the Wi-Fi Direct group owner."
+                "Waiting for a valid hybrid bootstrap socket hint from the Wi-Fi Direct group owner."
         }
+    }
+
+    private fun hybridBootstrapTriggerBlocker(
+        snapshot: AutomatedDiagnosticsRuntimeSnapshot,
+        context: AutomatedDiagnosticsStepContext,
+        expectedPeerId: String,
+        expectedSessionId: String,
+        expectedGroupOwnerAddress: String,
+        expectedSocketPort: Int
+    ): String {
+        if (
+            recentAcceptedHybridBootstrapSocketHintObservationOrNull(
+                snapshot = snapshot,
+                context = context,
+                expectedPeerId = expectedPeerId,
+                expectedSessionId = expectedSessionId,
+                expectedGroupOwnerAddress = expectedGroupOwnerAddress,
+                expectedSocketPort = expectedSocketPort
+            ) == null ||
+            matchingAcceptedSocketReadyHybridCandidateOrNull(
+                snapshot = snapshot,
+                expectedPeerId = expectedPeerId,
+                expectedSessionId = expectedSessionId,
+                expectedGroupOwnerAddress = expectedGroupOwnerAddress,
+                expectedSocketPort = expectedSocketPort
+            ) == null
+        ) {
+            return hybridBootstrapSocketHintBlocker(
+                snapshot = snapshot,
+                context = context,
+                expectedPeerId = expectedPeerId,
+                expectedSessionId = expectedSessionId,
+                expectedGroupOwnerAddress = expectedGroupOwnerAddress,
+                expectedSocketPort = expectedSocketPort
+            )
+        }
+        return snapshot.hybridBootstrapManualTriggerSnapshot.triggerStatusText
+            ?: snapshot.hybridBootstrapManualTriggerSnapshot.commandStatusText
+            ?: "Hybrid bootstrap command is not ready."
+    }
+
+    private fun groupOwnerHybridBootstrapSocketHintBlocker(
+        snapshot: AutomatedDiagnosticsRuntimeSnapshot,
+        context: AutomatedDiagnosticsStepContext
+    ): String {
+        return wifiDirectSocketBlocker(snapshot)
+            ?: when {
+                context.currentPhaseObservedRemoteSignal?.phaseState ==
+                    AutomatedDiagnosticsPhaseState.PASS ->
+                    "Client confirmed the hybrid bootstrap socket hint."
+                context.hybridSocketHintSuccessfulSendCount > 0 ->
+                    "Waiting for client confirmation after socket hint result ${context.hybridSocketHintLastSendResult ?: "sent"}."
+                context.hybridSocketHintLastSendResult != null ->
+                    "Waiting for client confirmation after socket hint result ${context.hybridSocketHintLastSendResult}."
+                else ->
+                    "Preparing to send the hybrid bootstrap socket hint to the Wi-Fi Direct client."
+            }
     }
 
     private fun hasRecentHybridOffer(
@@ -3306,25 +6440,29 @@ internal class AutomatedDiagnosticsRunner(
         } != null
     }
 
-    private fun hasRecentHybridAccept(
+    private fun matchingAcceptedSocketReadyHybridCandidateOrNull(
         snapshot: AutomatedDiagnosticsRuntimeSnapshot,
-        runStartedAtMillis: Long
-    ): Boolean {
-        return recentHybridCandidateOrNull(snapshot, runStartedAtMillis) { candidate ->
-            candidate.hasOffer && candidate.hasAccept
-        } != null
-    }
-
-    private fun hasRecentSocketReadyHybridCandidate(
-        snapshot: AutomatedDiagnosticsRuntimeSnapshot,
-        runStartedAtMillis: Long
-    ): Boolean {
-        return recentHybridCandidateOrNull(snapshot, runStartedAtMillis) { candidate ->
+        expectedPeerId: String,
+        expectedSessionId: String,
+        expectedGroupOwnerAddress: String,
+        expectedSocketPort: Int
+    ): HybridBootstrapCandidate? {
+        val expectedCanonicalPeerId =
+            snapshot.peerSessionDiagnostics.canonicalPeerIdFor(expectedPeerId)
+                ?: expectedPeerId
+        return snapshot.hybridBootstrapDecision.candidates.firstOrNull { candidate ->
             candidate.hasOffer &&
                 candidate.hasAccept &&
                 candidate.hasSocketHint &&
-                candidate.socketReady
-        } != null
+                candidate.socketReady &&
+                candidate.sessionId == expectedSessionId &&
+                candidate.groupOwnerAddress == expectedGroupOwnerAddress &&
+                candidate.socketPort == expectedSocketPort &&
+                (
+                    snapshot.peerSessionDiagnostics.canonicalPeerIdFor(candidate.peerId)
+                        ?: candidate.peerId.trim().takeIf { it.isNotEmpty() }
+                ) == expectedCanonicalPeerId
+        }
     }
 
     private fun recentHybridCandidateOrNull(
@@ -3383,39 +6521,216 @@ internal class AutomatedDiagnosticsRunner(
                 ?: now
         val leaseDurationMillis =
             (signal.expiresAtMillis - signal.createdAtMillis).coerceAtLeast(0L)
-        val rejectionReason = when {
-            now - observedAtMonotonicMillis > leaseDurationMillis ->
-                AutomatedDiagnosticsCoordinationRejectionReason.STALE
-            signal.sharedRun.runId != expectedRun.runId ->
-                AutomatedDiagnosticsCoordinationRejectionReason.WRONG_RUN
-            signal.sharedRun.coordinatorPeerId != expectedRun.coordinatorPeerId ||
-                signal.sharedRun.participantPeerId != expectedRun.participantPeerId ->
-                AutomatedDiagnosticsCoordinationRejectionReason.WRONG_PEER
-            signal.sharedRun.sessionAssociationId != expectedRun.sessionAssociationId ->
-                AutomatedDiagnosticsCoordinationRejectionReason.WRONG_SESSION
-            signal.peerId != expectedOwnerPeerId ||
-                signal.expectedClientPeerId != expectedClientPeerId ->
-                AutomatedDiagnosticsCoordinationRejectionReason.WRONG_PEER
-            signal.groupOwnerAddress.isBlank() || signal.socketPort !in 1..65535 ->
-                AutomatedDiagnosticsCoordinationRejectionReason.INVALID_PAYLOAD
-            requireGroupReady && !wifiDirectGroupReady(snapshot) ->
-                AutomatedDiagnosticsCoordinationRejectionReason.BEFORE_GROUP_READY
-            else -> null
-        }
-        if (rejectionReason != null) {
+        val rejection = validateAutomatedDiagnosticsServerReadySignalForSocketStep(
+            signal = signal,
+            expectedRun = expectedRun,
+            expectedOwnerPeerId = expectedOwnerPeerId,
+            expectedClientPeerId = expectedClientPeerId,
+            activeTransportPeerId =
+                snapshot.activeTransportPeerId?.trim()?.takeIf { it.isNotEmpty() },
+            localPeerId = snapshot.localPeerId?.trim()?.takeIf { it.isNotEmpty() },
+            localWifiDirectRole = snapshot.wifiDirectRuntimeStatus.connectionStatus.role,
+            observedAgeMillis = now - observedAtMonotonicMillis,
+            effectiveLeaseDurationMillis = leaseDurationMillis,
+            minimumCreatedAtMillis = minimumCreatedAtMillis,
+            groupReady = !requireGroupReady || wifiDirectGroupReady(snapshot)
+        )
+        if (rejection != null) {
             if (isNewObservation) {
                 context.coordinationCounters =
-                    context.coordinationCounters.recordRejected(rejectionReason)
-                context.serverReadyLastRejectedReason = rejectionReason
+                    context.coordinationCounters.recordRejected(rejection.reason)
             }
+            context.serverReadyLastRejectedReason = rejection.reason
+            context.serverReadyLastRejectedField = rejection.fieldName
+            context.serverReadyLastRejectedExpectedValue = rejection.expectedValue
+            context.serverReadyLastRejectedObservedValue = rejection.observedValue
             return null
         }
         if (isNewObservation) {
             context.coordinationCounters = context.coordinationCounters.recordAccepted()
             context.serverReadyAcceptedCount += 1
             context.serverReadyLastRejectedReason = null
+            context.serverReadyLastRejectedField = null
+            context.serverReadyLastRejectedExpectedValue = null
+            context.serverReadyLastRejectedObservedValue = null
         }
         return signal
+    }
+
+    private fun recentAcceptedAutomatedDiagnosticsPhaseSignalOrNull(
+        snapshot: AutomatedDiagnosticsRuntimeSnapshot,
+        expectedRun: AutomatedDiagnosticsSharedRun,
+        expectedSenderPeerId: String,
+        expectedRecipientPeerId: String,
+        expectedStepId: AutomatedDiagnosticStepId,
+        expectedAttemptNumber: Int,
+        context: AutomatedDiagnosticsStepContext,
+        allowLatestFallback: Boolean = true
+    ): AutomatedDiagnosticsPhaseSignal? {
+        val signal =
+            snapshot.latestAutomatedDiagnosticsPhaseSignalsByStep[expectedStepId]
+                ?: if (allowLatestFallback) {
+                    snapshot.latestAutomatedDiagnosticsPhaseSignal
+                } else {
+                    null
+                }
+                ?: return null
+        val signature = phaseSignalSignature(signal)
+        val now = clock.nowMillis()
+        val isNewObservation = context.markPhaseSignalObserved(signature, now)
+        if (isNewObservation) {
+            context.currentPhaseReceiveCount += 1
+        }
+        val activeTransportPeerId = snapshot.activeTransportPeerId?.trim()?.takeIf { it.isNotEmpty() }
+        val localPeerId = snapshot.localPeerId?.trim()?.takeIf { it.isNotEmpty() }
+        val observedAtMonotonicMillis =
+            context.lastObservedPhaseSignalObservedAtMonotonicMillis
+                ?: now
+        val embeddedLeaseDurationMillis =
+            (signal.expiresAtMillis - signal.createdAtMillis).coerceAtLeast(0L)
+        val effectiveLeaseDurationMillis = minOf(
+            embeddedLeaseDurationMillis.takeIf { it > 0L }
+                ?: timingPolicy.automatedDiagnosticsPhaseStateLeaseMillis,
+            timingPolicy.automatedDiagnosticsPhaseStateLeaseMillis
+        )
+        val rejection = validateAutomatedDiagnosticsPhaseSignalForBarrier(
+            signal = signal,
+            expectedRun = expectedRun,
+            expectedSenderPeerId = expectedSenderPeerId,
+            expectedRecipientPeerId = expectedRecipientPeerId,
+            expectedStepId = expectedStepId,
+            expectedAttemptNumber = expectedAttemptNumber,
+            activeTransportPeerId = activeTransportPeerId,
+            localPeerId = localPeerId,
+            observedAgeMillis = (now - observedAtMonotonicMillis).coerceAtLeast(0L),
+            effectiveLeaseDurationMillis = effectiveLeaseDurationMillis
+        )?.let { failure ->
+            coordinationValidationFailure(
+                reason = failure.reason,
+                functionName = "recentAcceptedAutomatedDiagnosticsPhaseSignalOrNull",
+                fieldName = failure.fieldName,
+                expectedValue = failure.expectedValue,
+                observedValue = failure.observedValue
+            )
+        }
+        if (rejection != null) {
+            context.currentPhaseLastRejectedReason = rejection.reason
+            if (
+                rejection.reason == AutomatedDiagnosticsCoordinationRejectionReason.STALE &&
+                context.currentPhaseObservedRemoteSignal?.let(::phaseSignalSignature) == signature
+            ) {
+                context.currentPhaseObservedRemoteSignal = null
+            }
+            return null
+        }
+        if (isNewObservation) {
+            context.currentPhaseAcceptedCount += 1
+        }
+        context.currentPhaseLastRejectedReason = null
+        context.currentPhaseObservedRemoteSignal = signal
+        bindings.commands
+            .recordAcceptedAutomatedDiagnosticsPhaseSignalSourceAssociation(signal)
+        return context.currentPhaseObservedRemoteSignal ?: signal
+    }
+
+    private fun recentAcceptedHybridBootstrapAcceptObservationOrNull(
+        snapshot: AutomatedDiagnosticsRuntimeSnapshot,
+        context: AutomatedDiagnosticsStepContext,
+        expectedPeerId: String,
+        expectedSessionId: String
+    ): AutomatedDiagnosticsHybridAcceptObservation? {
+        val observation = snapshot.latestAutomatedDiagnosticsHybridAcceptObservation
+            ?: return context.hybridAcceptAcceptedObservation
+        val signature = hybridAcceptObservationSignature(observation)
+        val isNewObservation = context.markHybridAcceptObserved(
+            signature = signature,
+            observedAtMonotonicMillis = observation.observedAtMonotonicMillis
+        )
+        if (isNewObservation) {
+            context.hybridAcceptObservedCount += 1
+        }
+        context.hybridAcceptLastObservedPeerId = observation.peerId
+        context.hybridAcceptLastObservedSessionId = observation.sessionId
+        context.hybridAcceptLastObservedStoreResult =
+            hybridBootstrapAcceptStoreResultStatusText(observation.storeResult)
+        val failure = hybridBootstrapAcceptObservationValidationFailureOrNull(
+            observation = observation,
+            expectedPeerId = expectedPeerId,
+            expectedSessionId = expectedSessionId,
+            minimumObservedAtMonotonicMillis =
+                context.hybridAcceptAttemptStartedAtMonotonicMillis ?: 0L
+        )
+        if (failure != null) {
+            if (isNewObservation) {
+                context.hybridAcceptLastRejectedReason = failure.reason
+                context.hybridAcceptLastRejectedField = failure.fieldName
+                context.hybridAcceptLastRejectedExpectedValue = failure.expectedValue
+                context.hybridAcceptLastRejectedObservedValue = failure.observedValue
+            }
+            return context.hybridAcceptAcceptedObservation
+        }
+        if (isNewObservation) {
+            context.hybridAcceptAcceptedCount += 1
+        }
+        context.hybridAcceptLastRejectedReason = null
+        context.hybridAcceptLastRejectedField = null
+        context.hybridAcceptLastRejectedExpectedValue = null
+        context.hybridAcceptLastRejectedObservedValue = null
+        context.hybridAcceptAcceptedObservation = observation
+        return context.hybridAcceptAcceptedObservation ?: observation
+    }
+
+    private fun recentAcceptedHybridBootstrapSocketHintObservationOrNull(
+        snapshot: AutomatedDiagnosticsRuntimeSnapshot,
+        context: AutomatedDiagnosticsStepContext,
+        expectedPeerId: String,
+        expectedSessionId: String,
+        expectedGroupOwnerAddress: String,
+        expectedSocketPort: Int
+    ): AutomatedDiagnosticsHybridSocketHintObservation? {
+        val observation = snapshot.latestAutomatedDiagnosticsHybridSocketHintObservation
+            ?: return context.hybridSocketHintAcceptedObservation
+        val signature = hybridSocketHintObservationSignature(observation)
+        val isNewObservation = context.markHybridSocketHintObserved(
+            signature = signature,
+            observedAtMonotonicMillis = observation.observedAtMonotonicMillis
+        )
+        if (isNewObservation) {
+            context.hybridSocketHintObservedCount += 1
+        }
+        context.hybridSocketHintLastObservedPeerId = observation.peerId
+        context.hybridSocketHintLastObservedSessionId = observation.sessionId
+        context.hybridSocketHintLastObservedGroupOwnerAddress = observation.groupOwnerAddress
+        context.hybridSocketHintLastObservedSocketPort = observation.socketPort
+        context.hybridSocketHintLastObservedStoreResult =
+            hybridBootstrapAcceptStoreResultStatusText(observation.storeResult)
+        val failure = hybridBootstrapSocketHintObservationValidationFailureOrNull(
+            observation = observation,
+            expectedPeerId = expectedPeerId,
+            expectedSessionId = expectedSessionId,
+            expectedGroupOwnerAddress = expectedGroupOwnerAddress,
+            expectedSocketPort = expectedSocketPort,
+            minimumObservedAtMonotonicMillis =
+                context.hybridSocketHintAttemptStartedAtMonotonicMillis ?: 0L
+        )
+        if (failure != null) {
+            if (isNewObservation) {
+                context.hybridSocketHintLastRejectedReason = failure.reason
+                context.hybridSocketHintLastRejectedField = failure.fieldName
+                context.hybridSocketHintLastRejectedExpectedValue = failure.expectedValue
+                context.hybridSocketHintLastRejectedObservedValue = failure.observedValue
+            }
+            return context.hybridSocketHintAcceptedObservation
+        }
+        if (isNewObservation) {
+            context.hybridSocketHintAcceptedCount += 1
+        }
+        context.hybridSocketHintLastRejectedReason = null
+        context.hybridSocketHintLastRejectedField = null
+        context.hybridSocketHintLastRejectedExpectedValue = null
+        context.hybridSocketHintLastRejectedObservedValue = null
+        context.hybridSocketHintAcceptedObservation = observation
+        return context.hybridSocketHintAcceptedObservation ?: observation
     }
 
     private fun recentAcceptedAutomatedDiagnosticsWifiDirectPeerReadySignalOrNull(
@@ -3543,7 +6858,10 @@ internal class AutomatedDiagnosticsRunner(
             }
             if (rejection.reason == AutomatedDiagnosticsCoordinationRejectionReason.STALE) {
                 context.acceptedWifiDirectPeerReadySignal = null
-                if (context.selectedWifiDirectPeerSource == validatedDnsSdTokenPeerSource) {
+                if (
+                    !context.wifiDirectCurrentRunValidatedPeerProofReady &&
+                    context.selectedWifiDirectPeerSource == validatedDnsSdTokenPeerSource
+                ) {
                     context.selectedWifiDirectPeer = null
                     context.selectedWifiDirectPeerSource = null
                     context.wifiDirectConnectTarget = null
@@ -3961,6 +7279,12 @@ internal class AutomatedDiagnosticsRunner(
             )
             add(
                 AutomatedDiagnosticEvidenceValue(
+                    "Current-run DNS-SD registration observed",
+                    (context?.wifiDirectCurrentRunDnsSdRegistrationObserved ?: false).toString()
+                )
+            )
+            add(
+                AutomatedDiagnosticEvidenceValue(
                     "DNS-SD registered token",
                     context?.wifiDirectDnsSdRegisteredCorrelationToken?.let(
                         ::automatedDiagnosticsCorrelationTokenFingerprint
@@ -4162,6 +7486,12 @@ internal class AutomatedDiagnosticsRunner(
             WifiDirectConnectionRole.UNKNOWN -> localPeerId
         }
         val rawServerReadySignal = snapshot.latestAutomatedDiagnosticsServerReadySignal
+        val latestServerReadyObservationSource = when {
+            rawServerReadySignal == null -> "none"
+            localPeerId != null && rawServerReadySignal.peerId == localPeerId -> "locally-emitted"
+            remotePeerId != null && rawServerReadySignal.peerId == remotePeerId -> "remotely-received"
+            else -> "other-peer"
+        }
         val acceptedServerReadySignal = if (
             sharedRun != null &&
             localPeerId != null &&
@@ -4455,7 +7785,25 @@ internal class AutomatedDiagnosticsRunner(
             )
             add(
                 AutomatedDiagnosticEvidenceValue(
-                    "Latest received SERVER_READY owner peer id",
+                    "Latest SERVER_READY observation source",
+                    latestServerReadyObservationSource
+                )
+            )
+            add(
+                AutomatedDiagnosticEvidenceValue(
+                    "Latest received SERVER_READY coordinator peer id",
+                    rawServerReadySignal?.sharedRun?.coordinatorPeerId ?: "none"
+                )
+            )
+            add(
+                AutomatedDiagnosticEvidenceValue(
+                    "Latest received SERVER_READY participant peer id",
+                    rawServerReadySignal?.sharedRun?.participantPeerId ?: "none"
+                )
+            )
+            add(
+                AutomatedDiagnosticEvidenceValue(
+                    "Latest received SERVER_READY transport sender peer id",
                     rawServerReadySignal?.peerId ?: "none"
                 )
             )
@@ -4469,6 +7817,24 @@ internal class AutomatedDiagnosticsRunner(
                 AutomatedDiagnosticEvidenceValue(
                     "SERVER_READY rejection reason",
                     context?.serverReadyLastRejectedReason?.statusText ?: "none"
+                )
+            )
+            add(
+                AutomatedDiagnosticEvidenceValue(
+                    "Last SERVER_READY rejection field",
+                    context?.serverReadyLastRejectedField ?: "none"
+                )
+            )
+            add(
+                AutomatedDiagnosticEvidenceValue(
+                    "Last SERVER_READY rejection expected",
+                    context?.serverReadyLastRejectedExpectedValue ?: "none"
+                )
+            )
+            add(
+                AutomatedDiagnosticEvidenceValue(
+                    "Last SERVER_READY rejection observed",
+                    context?.serverReadyLastRejectedObservedValue ?: "none"
                 )
             )
             add(
@@ -4682,6 +8048,237 @@ internal class AutomatedDiagnosticsRunner(
         }
     }
 
+    private fun hybridBootstrapAcceptEvidence(
+        snapshot: AutomatedDiagnosticsRuntimeSnapshot,
+        context: AutomatedDiagnosticsStepContext
+    ): List<AutomatedDiagnosticEvidenceValue> {
+        return buildList {
+            addAll(hybridBootstrapEvidence(snapshot))
+            add(
+                AutomatedDiagnosticEvidenceValue(
+                    "Accept send attempts",
+                    context.hybridAcceptSendAttemptCount.toString()
+                )
+            )
+            add(
+                AutomatedDiagnosticEvidenceValue(
+                    "Accept sends ok",
+                    context.hybridAcceptSuccessfulSendCount.toString()
+                )
+            )
+            add(
+                AutomatedDiagnosticEvidenceValue(
+                    "Accept observed",
+                    context.hybridAcceptObservedCount.toString()
+                )
+            )
+            add(
+                AutomatedDiagnosticEvidenceValue(
+                    "Accept recorded",
+                    context.hybridAcceptAcceptedCount.toString()
+                )
+            )
+            context.hybridAcceptLastSendResult?.let { result ->
+                add(AutomatedDiagnosticEvidenceValue("Accept last send", result))
+            }
+            context.hybridAcceptLastSentPeerId?.let { peerId ->
+                add(AutomatedDiagnosticEvidenceValue("Accept peer", peerId))
+            }
+            context.hybridAcceptLastSentSessionId?.let { sessionId ->
+                add(AutomatedDiagnosticEvidenceValue("Accept session", sessionId))
+            }
+            context.hybridAcceptLastSentAtMonotonicMillis?.let { observedAt ->
+                add(
+                    AutomatedDiagnosticEvidenceValue(
+                        "Accept send age",
+                        formatAutomatedDiagnosticsDuration(
+                            (clock.nowMillis() - observedAt).coerceAtLeast(0L)
+                        )
+                    )
+                )
+            }
+            context.hybridAcceptLastObservedPeerId?.let { peerId ->
+                add(AutomatedDiagnosticEvidenceValue("Accept observed peer", peerId))
+            }
+            context.hybridAcceptLastObservedSessionId?.let { sessionId ->
+                add(AutomatedDiagnosticEvidenceValue("Accept observed session", sessionId))
+            }
+            context.hybridAcceptLastObservedStoreResult?.let { result ->
+                add(AutomatedDiagnosticEvidenceValue("Accept store result", result))
+            }
+            context.lastObservedHybridAcceptObservedAtMonotonicMillis?.let { observedAt ->
+                add(
+                    AutomatedDiagnosticEvidenceValue(
+                        "Accept observed age",
+                        formatAutomatedDiagnosticsDuration(
+                            (clock.nowMillis() - observedAt).coerceAtLeast(0L)
+                        )
+                    )
+                )
+            }
+            add(
+                AutomatedDiagnosticEvidenceValue(
+                    "Accept current-attempt match",
+                    (context.hybridAcceptAcceptedObservation != null).toString()
+                )
+            )
+            context.currentPhaseObservedRemoteSignal?.let { signal ->
+                add(
+                    AutomatedDiagnosticEvidenceValue(
+                        "Coordinator Step15 state",
+                        signal.phaseState.name
+                    )
+                )
+            }
+            context.hybridAcceptLastRejectedReason?.let { reason ->
+                add(
+                    AutomatedDiagnosticEvidenceValue(
+                        "Accept last rejection",
+                        buildString {
+                            append(reason.statusText)
+                            context.hybridAcceptLastRejectedField?.let { field ->
+                                append(" @ ")
+                                append(field)
+                            }
+                            context.hybridAcceptLastRejectedExpectedValue?.let { expected ->
+                                append(" expected=")
+                                append(expected)
+                            }
+                            context.hybridAcceptLastRejectedObservedValue?.let { observed ->
+                                append(" observed=")
+                                append(observed)
+                            }
+                        }
+                    )
+                )
+            }
+        }
+    }
+
+    private fun hybridBootstrapSocketHintEvidence(
+        snapshot: AutomatedDiagnosticsRuntimeSnapshot,
+        context: AutomatedDiagnosticsStepContext
+    ): List<AutomatedDiagnosticEvidenceValue> {
+        return buildList {
+            addAll(hybridBootstrapEvidence(snapshot))
+            add(
+                AutomatedDiagnosticEvidenceValue(
+                    "Socket hint send attempts",
+                    context.hybridSocketHintSendAttemptCount.toString()
+                )
+            )
+            add(
+                AutomatedDiagnosticEvidenceValue(
+                    "Socket hint sends ok",
+                    context.hybridSocketHintSuccessfulSendCount.toString()
+                )
+            )
+            add(
+                AutomatedDiagnosticEvidenceValue(
+                    "Socket hint observed",
+                    context.hybridSocketHintObservedCount.toString()
+                )
+            )
+            add(
+                AutomatedDiagnosticEvidenceValue(
+                    "Socket hint recorded",
+                    context.hybridSocketHintAcceptedCount.toString()
+                )
+            )
+            context.hybridSocketHintLastSendResult?.let { result ->
+                add(AutomatedDiagnosticEvidenceValue("Socket hint last send", result))
+            }
+            context.hybridSocketHintLastSentPeerId?.let { peerId ->
+                add(AutomatedDiagnosticEvidenceValue("Hint peer", peerId))
+            }
+            context.hybridSocketHintLastSentSessionId?.let { sessionId ->
+                add(AutomatedDiagnosticEvidenceValue("Hint session", sessionId))
+            }
+            context.hybridSocketHintLastSentGroupOwnerAddress?.let { address ->
+                add(AutomatedDiagnosticEvidenceValue("Hint address", address))
+            }
+            context.hybridSocketHintLastSentSocketPort?.let { socketPort ->
+                add(AutomatedDiagnosticEvidenceValue("Hint port", socketPort.toString()))
+            }
+            context.hybridSocketHintLastSentAtMonotonicMillis?.let { observedAt ->
+                add(
+                    AutomatedDiagnosticEvidenceValue(
+                        "Hint send age",
+                        formatAutomatedDiagnosticsDuration(
+                            (clock.nowMillis() - observedAt).coerceAtLeast(0L)
+                        )
+                    )
+                )
+            }
+            context.hybridSocketHintLastObservedPeerId?.let { peerId ->
+                add(AutomatedDiagnosticEvidenceValue("Hint observed peer", peerId))
+            }
+            context.hybridSocketHintLastObservedSessionId?.let { sessionId ->
+                add(AutomatedDiagnosticEvidenceValue("Hint observed session", sessionId))
+            }
+            context.hybridSocketHintLastObservedGroupOwnerAddress?.let { address ->
+                add(AutomatedDiagnosticEvidenceValue("Hint observed address", address))
+            }
+            context.hybridSocketHintLastObservedSocketPort?.let { socketPort ->
+                add(
+                    AutomatedDiagnosticEvidenceValue(
+                        "Hint observed port",
+                        socketPort.toString()
+                    )
+                )
+            }
+            context.hybridSocketHintLastObservedStoreResult?.let { result ->
+                add(AutomatedDiagnosticEvidenceValue("Hint store result", result))
+            }
+            context.lastObservedHybridSocketHintObservedAtMonotonicMillis?.let { observedAt ->
+                add(
+                    AutomatedDiagnosticEvidenceValue(
+                        "Hint observed age",
+                        formatAutomatedDiagnosticsDuration(
+                            (clock.nowMillis() - observedAt).coerceAtLeast(0L)
+                        )
+                    )
+                )
+            }
+            add(
+                AutomatedDiagnosticEvidenceValue(
+                    "Hint current-attempt match",
+                    (context.hybridSocketHintAcceptedObservation != null).toString()
+                )
+            )
+            context.currentPhaseObservedRemoteSignal?.let { signal ->
+                add(
+                    AutomatedDiagnosticEvidenceValue(
+                        "Remote Step16 state",
+                        signal.phaseState.name
+                    )
+                )
+            }
+            context.hybridSocketHintLastRejectedReason?.let { reason ->
+                add(
+                    AutomatedDiagnosticEvidenceValue(
+                        "Hint last rejection",
+                        buildString {
+                            append(reason.statusText)
+                            context.hybridSocketHintLastRejectedField?.let { field ->
+                                append(" @ ")
+                                append(field)
+                            }
+                            context.hybridSocketHintLastRejectedExpectedValue?.let { expected ->
+                                append(" expected=")
+                                append(expected)
+                            }
+                            context.hybridSocketHintLastRejectedObservedValue?.let { observed ->
+                                append(" observed=")
+                                append(observed)
+                            }
+                        }
+                    )
+                )
+            }
+        }
+    }
+
     private fun selectDeterministicPeer(
         devices: List<BleDiscoveredDevice>
     ): SelectedAutomatedDiagnosticsPeer? {
@@ -4766,6 +8363,28 @@ internal class AutomatedDiagnosticsRunner(
             bindings.commands.selectSecurePeer(pendingAnnouncement.selectedPeer.identityKey)
         }
         val refreshedSnapshot = bindings.snapshot()
+        val preparationState = automatedDiagnosticsPreparationState(refreshedSnapshot)
+        if (!preparationState.isReady) {
+            lastAutoJoinBlocker = buildString {
+                append("preparation")
+                preparationState.requiredAction?.kind?.name?.let { kind ->
+                    append(":")
+                    append(kind)
+                }
+                append(" [")
+                append(preparationState.summary)
+                append("]")
+            }
+            if (
+                clock.nowMillis() - pendingAnnouncement.observedMonotonicMillis >
+                timingPolicy.sharedRunCoordination.timeoutMillis
+            ) {
+                clearPendingParticipantAnnouncement(
+                    "participantAnnouncementSeedOrNull: preparation-timeout"
+                )
+            }
+            return null
+        }
         val propagationState = selectedPeerPropagationState(refreshedSnapshot)
         val blocker = secureSessionBlocker(
             refreshedSnapshot,
@@ -4897,7 +8516,7 @@ internal class AutomatedDiagnosticsRunner(
                     sharedRunCanonicalPeerPair = canonicalPeerPairText(sharedRun.canonicalPeerPair()),
                     elapsedMillis = 0L,
                     steps = seededSteps,
-                    phaseTwoSummary = automatedDiagnosticsPhaseTwoSummary
+                    phaseTwoSummary = ""
                 )
             ),
             context = pendingAnnouncement.context,
@@ -4955,7 +8574,68 @@ internal class AutomatedDiagnosticsRunner(
             )
         )
         pendingParticipantAnnouncement = pending
+        syncPendingParticipantAnnouncementState()
         return pending
+    }
+
+    private fun syncPendingParticipantAnnouncementState() {
+        val pendingAnnouncement = pendingParticipantAnnouncement
+        updateRunState { current ->
+            if (current.overallStatus != AutomatedDiagnosticsOverallStatus.IDLE) {
+                return@updateRunState current
+            }
+            val updated = if (pendingAnnouncement == null) {
+                if (
+                    current.localPeerRole != AutomatedDiagnosticsPeerRole.PARTICIPANT &&
+                    current.sharedRunId == null
+                ) {
+                    return@updateRunState current
+                }
+                current.copy(
+                    selectedPeerId = null,
+                    localPeerRole = null,
+                    sharedRunId = null,
+                    sharedRunCoordinatorPeerId = null,
+                    sharedRunParticipantPeerId = null,
+                    sharedRunSessionAssociationId = null,
+                    sharedRunCreatedAtMillis = null,
+                    sharedRunExpiresAtMillis = null,
+                    sharedRunCanonicalPeerPair = null
+                )
+            } else {
+                val sharedRun = pendingAnnouncement.announcement.sharedRun
+                current.copy(
+                    selectedPeerId = pendingAnnouncement.selectedPeer.identityKey,
+                    localPeerRole = AutomatedDiagnosticsPeerRole.PARTICIPANT,
+                    sharedRunId = sharedRun.runId,
+                    sharedRunCoordinatorPeerId = sharedRun.coordinatorPeerId,
+                    sharedRunParticipantPeerId = sharedRun.participantPeerId,
+                    sharedRunSessionAssociationId = sharedRun.sessionAssociationId,
+                    sharedRunCreatedAtMillis = sharedRun.createdAtMillis,
+                    sharedRunExpiresAtMillis = sharedRun.expiresAtMillis,
+                    sharedRunCanonicalPeerPair =
+                        canonicalPeerPairText(sharedRun.canonicalPeerPair())
+                )
+            }
+            updated.copy(
+                reportText = automatedDiagnosticsPlainTextReport(
+                    overallStatus = updated.overallStatus,
+                    selectedPeerId = updated.selectedPeerId,
+                    localPeerRole = updated.localPeerRole,
+                    localRunnerExecutionId = updated.localRunnerExecutionId,
+                    sharedRunId = updated.sharedRunId,
+                    sharedRunCoordinatorPeerId = updated.sharedRunCoordinatorPeerId,
+                    sharedRunParticipantPeerId = updated.sharedRunParticipantPeerId,
+                    sharedRunSessionAssociationId = updated.sharedRunSessionAssociationId,
+                    sharedRunCreatedAtMillis = updated.sharedRunCreatedAtMillis,
+                    sharedRunExpiresAtMillis = updated.sharedRunExpiresAtMillis,
+                    sharedRunCanonicalPeerPair = updated.sharedRunCanonicalPeerPair,
+                    elapsedMillis = updated.elapsedMillis,
+                    steps = updated.steps,
+                    phaseTwoSummary = updated.phaseTwoSummary
+                )
+            )
+        }
     }
 
     private fun currentSharedRunSessionAssociationId(
@@ -5808,6 +9488,24 @@ internal class AutomatedDiagnosticsRunner(
         ).joinToString(separator = "|")
     }
 
+    private fun phaseSignalSignature(
+        signal: AutomatedDiagnosticsPhaseSignal
+    ): String {
+        return listOf(
+            signal.sharedRun.runId,
+            signal.sharedRun.coordinatorPeerId,
+            signal.sharedRun.participantPeerId,
+            signal.sharedRun.sessionAssociationId,
+            signal.peerId,
+            signal.expectedRemotePeerId,
+            signal.stepId.name,
+            signal.phaseState.name,
+            signal.attemptNumber.toString(),
+            signal.createdAtMillis.toString(),
+            signal.expiresAtMillis.toString()
+        ).joinToString(separator = "|")
+    }
+
     private fun wifiDirectPeerReadySignalSignature(
         signal: AutomatedDiagnosticsWifiDirectPeerReadySignal
     ): String {
@@ -5823,6 +9521,46 @@ internal class AutomatedDiagnosticsRunner(
             signal.createdAtMillis.toString(),
             signal.expiresAtMillis.toString()
         ).joinToString(separator = "|")
+    }
+
+    private fun hybridAcceptObservationSignature(
+        observation: AutomatedDiagnosticsHybridAcceptObservation
+    ): String {
+        return listOf(
+            observation.peerId,
+            observation.sessionId,
+            observation.publicPeerIdHint ?: "none",
+            observation.createdAtMillis.toString(),
+            hybridBootstrapAcceptStoreResultStatusText(observation.storeResult)
+        ).joinToString(separator = "|")
+    }
+
+    private fun hybridSocketHintObservationSignature(
+        observation: AutomatedDiagnosticsHybridSocketHintObservation
+    ): String {
+        return listOf(
+            observation.peerId,
+            observation.sessionId,
+            observation.publicPeerIdHint ?: "none",
+            observation.groupOwnerAddress,
+            observation.socketPort.toString(),
+            observation.createdAtMillis.toString(),
+            hybridBootstrapAcceptStoreResultStatusText(observation.storeResult)
+        ).joinToString(separator = "|")
+    }
+
+    private fun hybridBootstrapAcceptStoreResultStatusText(
+        result: HybridTransportControlStore.RecordResult
+    ): String {
+        return when (result) {
+            HybridTransportControlStore.RecordResult.Stored -> "stored"
+            HybridTransportControlStore.RecordResult.IgnoredOlderMessage ->
+                "ignored-older-message"
+            HybridTransportControlStore.RecordResult.IgnoredNonBootstrapMessageType ->
+                "ignored-non-bootstrap-message-type"
+            HybridTransportControlStore.RecordResult.IgnoredInvalidPeerId ->
+                "ignored-invalid-peer-id"
+        }
     }
 
     private fun currentRunStartedAtMillis(): Long {
@@ -5880,19 +9618,27 @@ internal class AutomatedDiagnosticsRunner(
         refreshAggregateState()
     }
 
+    private fun phaseAttemptNumberFromEvidence(
+        stepId: AutomatedDiagnosticStepId
+    ): Int {
+        return stepEvidenceValue(stepId, "Phase attempt number")?.toIntOrNull()?.coerceAtLeast(0) ?: 0
+    }
+
     private fun restoreStepContextForStartIndex(
         startIndex: Int
     ): AutomatedDiagnosticsStepContext {
         if (startIndex <= AutomatedDiagnosticStepId.AURORA_PEER_DISCOVERY.ordinal) {
             return AutomatedDiagnosticsStepContext()
         }
+        val stepElevenOrdinal = AutomatedDiagnosticStepId.WIFI_DIRECT_DISCOVERY_AND_GROUP.ordinal
+        val shouldRestoreStepElevenAttemptState = startIndex > stepElevenOrdinal
         val snapshot = bindings.snapshot()
         val selectedPeerId = mutableState.value.selectedPeerId
         val selectedPeer = selectedPeerId?.let { peerId ->
             selectedPeerForIdentityKey(snapshot.discoveredAuroraPeers, peerId)
         }
         val selectedWifiDirectPeer = if (
-            startIndex >= AutomatedDiagnosticStepId.WIFI_DIRECT_DISCOVERY_AND_GROUP.ordinal
+            shouldRestoreStepElevenAttemptState
         ) {
             snapshot.wifiDirectRuntimeStatus.connectionStatus.targetPeer
         } else {
@@ -5923,15 +9669,41 @@ internal class AutomatedDiagnosticsRunner(
                 "Group provenance"
             )
         )
+        val restoredPhaseAttemptNumbers = if (startIndex > stepElevenOrdinal) {
+            AutomatedDiagnosticStepId.entries
+                .filter { it.ordinal >= stepElevenOrdinal }
+                .associateWith(::phaseAttemptNumberFromEvidence)
+                .filterValues { it > 0 }
+                .toMutableMap()
+        } else {
+            linkedMapOf()
+        }
+        val restoredDnsSdRegistrationObserved =
+            shouldRestoreStepElevenAttemptState && (
+                stepEvidenceValue(
+                    AutomatedDiagnosticStepId.WIFI_DIRECT_DISCOVERY_AND_GROUP,
+                    "Current-run DNS-SD registration observed"
+                ) == "true" ||
+                    stepEvidenceValue(
+                        AutomatedDiagnosticStepId.WIFI_DIRECT_DISCOVERY_AND_GROUP,
+                        "Current-run DNS-SD proof ready"
+                    ) == "true" ||
+                    stepElevenProvenance ==
+                    AutomatedDiagnosticsWifiDirectGroupProvenance.CURRENT_RUN_VALIDATED
+                )
         return AutomatedDiagnosticsStepContext(
             selectedPeer = selectedPeer,
             localRole = mutableState.value.localPeerRole,
             localRoleAfterConflict = mutableState.value.localPeerRole,
             selectedWifiDirectPeer = selectedWifiDirectPeer,
-            selectedWifiDirectPeerSource = stepEvidenceValue(
-                AutomatedDiagnosticStepId.WIFI_DIRECT_DISCOVERY_AND_GROUP,
-                "Selected peer source"
-            )?.takeUnless { it == "none" },
+            selectedWifiDirectPeerSource = if (shouldRestoreStepElevenAttemptState) {
+                stepEvidenceValue(
+                    AutomatedDiagnosticStepId.WIFI_DIRECT_DISCOVERY_AND_GROUP,
+                    "Selected peer source"
+                )?.takeUnless { it == "none" }
+            } else {
+                null
+            },
             sharedRun = sharedRun,
             sharedCanonicalPeerPair = sharedRun?.let { canonicalPeerPairText(it.canonicalPeerPair()) },
             conflictAuthorityPeerId = if (
@@ -5947,53 +9719,106 @@ internal class AutomatedDiagnosticsRunner(
                 mutableState.value.localPeerRole == AutomatedDiagnosticsPeerRole.PARTICIPANT &&
                 startIndex >= AutomatedDiagnosticStepId.WIFI_DIRECT_DISCOVERY_AND_GROUP.ordinal,
             wifiDirectBaselineEstablished =
+                shouldRestoreStepElevenAttemptState &&
                 stepEvidenceValue(
                     AutomatedDiagnosticStepId.WIFI_DIRECT_DISCOVERY_AND_GROUP,
                     "Fresh baseline established"
                 ) == "true" ||
+                    shouldRestoreStepElevenAttemptState &&
                     stepElevenProvenance ==
                     AutomatedDiagnosticsWifiDirectGroupProvenance.CURRENT_RUN_VALIDATED,
+            preExistingWifiDirectGroupDetected =
+                shouldRestoreStepElevenAttemptState &&
+                    stepEvidenceValue(
+                        AutomatedDiagnosticStepId.WIFI_DIRECT_DISCOVERY_AND_GROUP,
+                        "Pre-existing group detected"
+                    ) == "true",
+            preExistingWifiDirectSocketDetected =
+                shouldRestoreStepElevenAttemptState &&
+                    stepEvidenceValue(
+                        AutomatedDiagnosticStepId.WIFI_DIRECT_DISCOVERY_AND_GROUP,
+                        "Pre-existing socket detected"
+                    ) == "true",
+            wifiDirectBaselineDisconnectRequested =
+                shouldRestoreStepElevenAttemptState &&
+                    stepEvidenceValue(
+                        AutomatedDiagnosticStepId.WIFI_DIRECT_DISCOVERY_AND_GROUP,
+                        "Fresh baseline disconnect requested"
+                    ) == "true",
+            wifiDirectBaselineDisconnectRequestCount = if (shouldRestoreStepElevenAttemptState) {
+                stepEvidenceValue(
+                    AutomatedDiagnosticStepId.WIFI_DIRECT_DISCOVERY_AND_GROUP,
+                    "Fresh baseline disconnect request count"
+                )?.toIntOrNull() ?: 0
+            } else {
+                0
+            },
+            wifiDirectBaselineSocketCleanupRequested =
+                shouldRestoreStepElevenAttemptState &&
+                    stepEvidenceValue(
+                        AutomatedDiagnosticStepId.WIFI_DIRECT_DISCOVERY_AND_GROUP,
+                        "Fresh baseline socket close/reset requested"
+                    ) == "true",
             wifiDirectCurrentRunTokenProofReady =
-                stepEvidenceValue(
-                    AutomatedDiagnosticStepId.WIFI_DIRECT_DISCOVERY_AND_GROUP,
-                    "Current-run token proof ready"
-                ) == "true" ||
+                shouldRestoreStepElevenAttemptState && (
+                    stepEvidenceValue(
+                        AutomatedDiagnosticStepId.WIFI_DIRECT_DISCOVERY_AND_GROUP,
+                        "Current-run token proof ready"
+                    ) == "true" ||
                     stepElevenProvenance ==
-                    AutomatedDiagnosticsWifiDirectGroupProvenance.CURRENT_RUN_VALIDATED,
+                        AutomatedDiagnosticsWifiDirectGroupProvenance.CURRENT_RUN_VALIDATED
+                    ),
+            wifiDirectCurrentRunDnsSdRegistrationObserved = restoredDnsSdRegistrationObserved,
             wifiDirectCurrentRunDnsSdProofReady =
-                stepEvidenceValue(
-                    AutomatedDiagnosticStepId.WIFI_DIRECT_DISCOVERY_AND_GROUP,
-                    "Current-run DNS-SD proof ready"
-                ) == "true" ||
+                shouldRestoreStepElevenAttemptState && (
+                    stepEvidenceValue(
+                        AutomatedDiagnosticStepId.WIFI_DIRECT_DISCOVERY_AND_GROUP,
+                        "Current-run DNS-SD proof ready"
+                    ) == "true" ||
                     stepElevenProvenance ==
-                    AutomatedDiagnosticsWifiDirectGroupProvenance.CURRENT_RUN_VALIDATED,
+                        AutomatedDiagnosticsWifiDirectGroupProvenance.CURRENT_RUN_VALIDATED
+                    ),
             wifiDirectCurrentRunValidatedPeerProofReady =
-                stepEvidenceValue(
-                    AutomatedDiagnosticStepId.WIFI_DIRECT_DISCOVERY_AND_GROUP,
-                    "Current-run validated-peer proof ready"
-                ) == "true" ||
+                shouldRestoreStepElevenAttemptState && (
+                    stepEvidenceValue(
+                        AutomatedDiagnosticStepId.WIFI_DIRECT_DISCOVERY_AND_GROUP,
+                        "Current-run validated-peer proof ready"
+                    ) == "true" ||
                     stepElevenProvenance ==
-                    AutomatedDiagnosticsWifiDirectGroupProvenance.CURRENT_RUN_VALIDATED,
+                        AutomatedDiagnosticsWifiDirectGroupProvenance.CURRENT_RUN_VALIDATED
+                    ),
             wifiDirectCurrentRunConnectProofReady =
-                stepEvidenceValue(
-                    AutomatedDiagnosticStepId.WIFI_DIRECT_DISCOVERY_AND_GROUP,
-                    "Current-run connect proof ready"
-                ) == "true" ||
+                shouldRestoreStepElevenAttemptState && (
+                    stepEvidenceValue(
+                        AutomatedDiagnosticStepId.WIFI_DIRECT_DISCOVERY_AND_GROUP,
+                        "Current-run connect proof ready"
+                    ) == "true" ||
                     stepElevenProvenance ==
-                    AutomatedDiagnosticsWifiDirectGroupProvenance.CURRENT_RUN_VALIDATED,
+                        AutomatedDiagnosticsWifiDirectGroupProvenance.CURRENT_RUN_VALIDATED
+                    ),
             wifiDirectGroupObservedAfterCurrentRunProof =
-                stepEvidenceValue(
-                    AutomatedDiagnosticStepId.WIFI_DIRECT_DISCOVERY_AND_GROUP,
-                    "Group observed after current-run proof"
-                ) == "true" ||
+                shouldRestoreStepElevenAttemptState && (
+                    stepEvidenceValue(
+                        AutomatedDiagnosticStepId.WIFI_DIRECT_DISCOVERY_AND_GROUP,
+                        "Group observed after current-run proof"
+                    ) == "true" ||
                     stepElevenProvenance ==
-                    AutomatedDiagnosticsWifiDirectGroupProvenance.CURRENT_RUN_VALIDATED,
-            wifiDirectGroupProvenance = stepElevenProvenance,
-            wifiDirectConnectInvocationCount =
+                        AutomatedDiagnosticsWifiDirectGroupProvenance.CURRENT_RUN_VALIDATED
+                    ),
+            wifiDirectGroupProvenance = if (shouldRestoreStepElevenAttemptState) {
+                stepElevenProvenance
+            } else {
+                AutomatedDiagnosticsWifiDirectGroupProvenance.NONE
+            },
+            wifiDirectConnectInvocationCount = if (shouldRestoreStepElevenAttemptState) {
                 stepEvidenceValue(
                     AutomatedDiagnosticStepId.WIFI_DIRECT_DISCOVERY_AND_GROUP,
                     "Wi-Fi Direct connect invocation count"
                 )?.toIntOrNull() ?: 0
+            } else {
+                0
+            },
+            phaseAttemptNumbersByStep = restoredPhaseAttemptNumbers
         )
     }
 
@@ -6221,6 +10046,7 @@ internal class AutomatedDiagnosticsRunner(
         var wifiDirectBaselineEstablishedAtMillis: Long? = null,
         var wifiDirectDnsSdRegisteredCorrelationToken: String? = null,
         var wifiDirectCurrentRunTokenProofReady: Boolean = false,
+        var wifiDirectCurrentRunDnsSdRegistrationObserved: Boolean = false,
         var wifiDirectCurrentRunDnsSdProofReady: Boolean = false,
         var wifiDirectCurrentRunValidatedPeerProofReady: Boolean = false,
         var wifiDirectCurrentRunConnectProofReady: Boolean = false,
@@ -6251,9 +10077,57 @@ internal class AutomatedDiagnosticsRunner(
         var serverReadyReceivedCount: Int = 0,
         var serverReadyAcceptedCount: Int = 0,
         var serverReadyLastRejectedReason: AutomatedDiagnosticsCoordinationRejectionReason? = null,
+        var serverReadyLastRejectedField: String? = null,
+        var serverReadyLastRejectedExpectedValue: String? = null,
+        var serverReadyLastRejectedObservedValue: String? = null,
         var clientConnectRequestCount: Int = 0,
         var clientConnectRequestAtMillis: Long? = null,
         var clientConnectRequestHost: String? = null,
+        var hybridAcceptAttemptStartedAtMonotonicMillis: Long? = null,
+        var hybridAcceptExpectedSessionId: String? = null,
+        var hybridAcceptSendAttemptCount: Int = 0,
+        var hybridAcceptSuccessfulSendCount: Int = 0,
+        var hybridAcceptObservedCount: Int = 0,
+        var hybridAcceptAcceptedCount: Int = 0,
+        var hybridAcceptLastSendResult: String? = null,
+        var hybridAcceptLastSentPeerId: String? = null,
+        var hybridAcceptLastSentSessionId: String? = null,
+        var hybridAcceptLastSentAtMonotonicMillis: Long? = null,
+        var hybridAcceptLastObservedPeerId: String? = null,
+        var hybridAcceptLastObservedSessionId: String? = null,
+        var hybridAcceptLastObservedStoreResult: String? = null,
+        var hybridAcceptLastRejectedReason: AutomatedDiagnosticsCoordinationRejectionReason? =
+            null,
+        var hybridAcceptLastRejectedField: String? = null,
+        var hybridAcceptLastRejectedExpectedValue: String? = null,
+        var hybridAcceptLastRejectedObservedValue: String? = null,
+        var hybridAcceptAcceptedObservation: AutomatedDiagnosticsHybridAcceptObservation? = null,
+        var hybridSocketHintAttemptStartedAtMonotonicMillis: Long? = null,
+        var hybridSocketHintExpectedSessionId: String? = null,
+        var hybridSocketHintExpectedGroupOwnerAddress: String? = null,
+        var hybridSocketHintExpectedSocketPort: Int? = null,
+        var hybridSocketHintSendAttemptCount: Int = 0,
+        var hybridSocketHintSuccessfulSendCount: Int = 0,
+        var hybridSocketHintObservedCount: Int = 0,
+        var hybridSocketHintAcceptedCount: Int = 0,
+        var hybridSocketHintLastSendResult: String? = null,
+        var hybridSocketHintLastSentPeerId: String? = null,
+        var hybridSocketHintLastSentSessionId: String? = null,
+        var hybridSocketHintLastSentGroupOwnerAddress: String? = null,
+        var hybridSocketHintLastSentSocketPort: Int? = null,
+        var hybridSocketHintLastSentAtMonotonicMillis: Long? = null,
+        var hybridSocketHintLastObservedPeerId: String? = null,
+        var hybridSocketHintLastObservedSessionId: String? = null,
+        var hybridSocketHintLastObservedGroupOwnerAddress: String? = null,
+        var hybridSocketHintLastObservedSocketPort: Int? = null,
+        var hybridSocketHintLastObservedStoreResult: String? = null,
+        var hybridSocketHintLastRejectedReason: AutomatedDiagnosticsCoordinationRejectionReason? =
+            null,
+        var hybridSocketHintLastRejectedField: String? = null,
+        var hybridSocketHintLastRejectedExpectedValue: String? = null,
+        var hybridSocketHintLastRejectedObservedValue: String? = null,
+        var hybridSocketHintAcceptedObservation: AutomatedDiagnosticsHybridSocketHintObservation? =
+            null,
         var coordinationCounters: AutomatedDiagnosticsCoordinationCounters =
             AutomatedDiagnosticsCoordinationCounters(),
         var lastRejectedFunction: String? = null,
@@ -6265,7 +10139,30 @@ internal class AutomatedDiagnosticsRunner(
         private var lastObservedWifiDirectPeerReadySignature: String? = null,
         internal var lastObservedWifiDirectPeerReadyObservedAtMonotonicMillis: Long? = null,
         private var lastObservedServerReadySignature: String? = null,
-        internal var lastObservedServerReadyObservedAtMonotonicMillis: Long? = null
+        internal var lastObservedServerReadyObservedAtMonotonicMillis: Long? = null,
+        private var lastObservedHybridAcceptSignature: String? = null,
+        internal var lastObservedHybridAcceptObservedAtMonotonicMillis: Long? = null,
+        private var lastObservedHybridSocketHintSignature: String? = null,
+        internal var lastObservedHybridSocketHintObservedAtMonotonicMillis: Long? = null,
+        private val phaseAttemptNumbersByStep:
+        MutableMap<AutomatedDiagnosticStepId, Int> = linkedMapOf(),
+        private var lastObservedPhaseSignalSignature: String? = null,
+        internal var lastObservedPhaseSignalObservedAtMonotonicMillis: Long? = null,
+        var currentPhaseStepId: AutomatedDiagnosticStepId? = null,
+        var currentPhaseAttemptNumber: Int = 0,
+        var currentPhaseLocalState: AutomatedDiagnosticsPhaseState? = null,
+        var currentPhaseObservedRemoteSignal: AutomatedDiagnosticsPhaseSignal? = null,
+        var currentPhaseBarrierEstablished: Boolean = false,
+        var currentPhaseBarrierEstablishedAtMillis: Long? = null,
+        var currentPhaseAttemptStartedAtMillis: Long? = null,
+        var currentPhaseOperationalStartedAtMillis: Long? = null,
+        var currentPhaseApplicationProbeDescriptors:
+        List<AutomatedDiagnosticsPhaseApplicationProbeDescriptor> = emptyList(),
+        var currentPhaseSendCount: Int = 0,
+        var currentPhaseReceiveCount: Int = 0,
+        var currentPhaseAcceptedCount: Int = 0,
+        var currentPhaseLastRejectedReason: AutomatedDiagnosticsCoordinationRejectionReason? = null,
+        var currentPhaseLastLocalSendStatus: String? = null
     ) {
         fun mergeFrom(
             override: AutomatedDiagnosticsStepContext?
@@ -6420,6 +10317,9 @@ internal class AutomatedDiagnosticsRunner(
             }
             wifiDirectCurrentRunTokenProofReady =
                 wifiDirectCurrentRunTokenProofReady || override.wifiDirectCurrentRunTokenProofReady
+            wifiDirectCurrentRunDnsSdRegistrationObserved =
+                wifiDirectCurrentRunDnsSdRegistrationObserved ||
+                    override.wifiDirectCurrentRunDnsSdRegistrationObserved
             wifiDirectCurrentRunDnsSdProofReady =
                 wifiDirectCurrentRunDnsSdProofReady || override.wifiDirectCurrentRunDnsSdProofReady
             wifiDirectCurrentRunValidatedPeerProofReady =
@@ -6514,6 +10414,17 @@ internal class AutomatedDiagnosticsRunner(
             if (override.serverReadyLastRejectedReason != null) {
                 serverReadyLastRejectedReason = override.serverReadyLastRejectedReason
             }
+            if (override.serverReadyLastRejectedField != null) {
+                serverReadyLastRejectedField = override.serverReadyLastRejectedField
+            }
+            if (override.serverReadyLastRejectedExpectedValue != null) {
+                serverReadyLastRejectedExpectedValue =
+                    override.serverReadyLastRejectedExpectedValue
+            }
+            if (override.serverReadyLastRejectedObservedValue != null) {
+                serverReadyLastRejectedObservedValue =
+                    override.serverReadyLastRejectedObservedValue
+            }
             clientConnectRequestCount = maxOf(
                 clientConnectRequestCount,
                 override.clientConnectRequestCount
@@ -6523,6 +10434,157 @@ internal class AutomatedDiagnosticsRunner(
             }
             if (override.clientConnectRequestHost != null) {
                 clientConnectRequestHost = override.clientConnectRequestHost
+            }
+            if (override.hybridAcceptAttemptStartedAtMonotonicMillis != null) {
+                hybridAcceptAttemptStartedAtMonotonicMillis =
+                    override.hybridAcceptAttemptStartedAtMonotonicMillis
+            }
+            if (override.hybridAcceptExpectedSessionId != null) {
+                hybridAcceptExpectedSessionId = override.hybridAcceptExpectedSessionId
+            }
+            hybridAcceptSendAttemptCount = maxOf(
+                hybridAcceptSendAttemptCount,
+                override.hybridAcceptSendAttemptCount
+            )
+            hybridAcceptSuccessfulSendCount = maxOf(
+                hybridAcceptSuccessfulSendCount,
+                override.hybridAcceptSuccessfulSendCount
+            )
+            hybridAcceptObservedCount = maxOf(
+                hybridAcceptObservedCount,
+                override.hybridAcceptObservedCount
+            )
+            hybridAcceptAcceptedCount = maxOf(
+                hybridAcceptAcceptedCount,
+                override.hybridAcceptAcceptedCount
+            )
+            if (override.hybridAcceptLastSendResult != null) {
+                hybridAcceptLastSendResult = override.hybridAcceptLastSendResult
+            }
+            if (override.hybridAcceptLastSentPeerId != null) {
+                hybridAcceptLastSentPeerId = override.hybridAcceptLastSentPeerId
+            }
+            if (override.hybridAcceptLastSentSessionId != null) {
+                hybridAcceptLastSentSessionId = override.hybridAcceptLastSentSessionId
+            }
+            if (override.hybridAcceptLastSentAtMonotonicMillis != null) {
+                hybridAcceptLastSentAtMonotonicMillis =
+                    override.hybridAcceptLastSentAtMonotonicMillis
+            }
+            if (override.hybridAcceptLastObservedPeerId != null) {
+                hybridAcceptLastObservedPeerId = override.hybridAcceptLastObservedPeerId
+            }
+            if (override.hybridAcceptLastObservedSessionId != null) {
+                hybridAcceptLastObservedSessionId = override.hybridAcceptLastObservedSessionId
+            }
+            if (override.hybridAcceptLastObservedStoreResult != null) {
+                hybridAcceptLastObservedStoreResult =
+                    override.hybridAcceptLastObservedStoreResult
+            }
+            if (override.hybridAcceptLastRejectedReason != null) {
+                hybridAcceptLastRejectedReason = override.hybridAcceptLastRejectedReason
+            }
+            if (override.hybridAcceptLastRejectedField != null) {
+                hybridAcceptLastRejectedField = override.hybridAcceptLastRejectedField
+            }
+            if (override.hybridAcceptLastRejectedExpectedValue != null) {
+                hybridAcceptLastRejectedExpectedValue =
+                    override.hybridAcceptLastRejectedExpectedValue
+            }
+            if (override.hybridAcceptLastRejectedObservedValue != null) {
+                hybridAcceptLastRejectedObservedValue =
+                    override.hybridAcceptLastRejectedObservedValue
+            }
+            if (override.hybridAcceptAcceptedObservation != null) {
+                hybridAcceptAcceptedObservation = override.hybridAcceptAcceptedObservation
+            }
+            if (override.hybridSocketHintAttemptStartedAtMonotonicMillis != null) {
+                hybridSocketHintAttemptStartedAtMonotonicMillis =
+                    override.hybridSocketHintAttemptStartedAtMonotonicMillis
+            }
+            if (override.hybridSocketHintExpectedSessionId != null) {
+                hybridSocketHintExpectedSessionId = override.hybridSocketHintExpectedSessionId
+            }
+            if (override.hybridSocketHintExpectedGroupOwnerAddress != null) {
+                hybridSocketHintExpectedGroupOwnerAddress =
+                    override.hybridSocketHintExpectedGroupOwnerAddress
+            }
+            if (override.hybridSocketHintExpectedSocketPort != null) {
+                hybridSocketHintExpectedSocketPort = override.hybridSocketHintExpectedSocketPort
+            }
+            hybridSocketHintSendAttemptCount = maxOf(
+                hybridSocketHintSendAttemptCount,
+                override.hybridSocketHintSendAttemptCount
+            )
+            hybridSocketHintSuccessfulSendCount = maxOf(
+                hybridSocketHintSuccessfulSendCount,
+                override.hybridSocketHintSuccessfulSendCount
+            )
+            hybridSocketHintObservedCount = maxOf(
+                hybridSocketHintObservedCount,
+                override.hybridSocketHintObservedCount
+            )
+            hybridSocketHintAcceptedCount = maxOf(
+                hybridSocketHintAcceptedCount,
+                override.hybridSocketHintAcceptedCount
+            )
+            if (override.hybridSocketHintLastSendResult != null) {
+                hybridSocketHintLastSendResult = override.hybridSocketHintLastSendResult
+            }
+            if (override.hybridSocketHintLastSentPeerId != null) {
+                hybridSocketHintLastSentPeerId = override.hybridSocketHintLastSentPeerId
+            }
+            if (override.hybridSocketHintLastSentSessionId != null) {
+                hybridSocketHintLastSentSessionId = override.hybridSocketHintLastSentSessionId
+            }
+            if (override.hybridSocketHintLastSentGroupOwnerAddress != null) {
+                hybridSocketHintLastSentGroupOwnerAddress =
+                    override.hybridSocketHintLastSentGroupOwnerAddress
+            }
+            if (override.hybridSocketHintLastSentSocketPort != null) {
+                hybridSocketHintLastSentSocketPort = override.hybridSocketHintLastSentSocketPort
+            }
+            if (override.hybridSocketHintLastSentAtMonotonicMillis != null) {
+                hybridSocketHintLastSentAtMonotonicMillis =
+                    override.hybridSocketHintLastSentAtMonotonicMillis
+            }
+            if (override.hybridSocketHintLastObservedPeerId != null) {
+                hybridSocketHintLastObservedPeerId = override.hybridSocketHintLastObservedPeerId
+            }
+            if (override.hybridSocketHintLastObservedSessionId != null) {
+                hybridSocketHintLastObservedSessionId =
+                    override.hybridSocketHintLastObservedSessionId
+            }
+            if (override.hybridSocketHintLastObservedGroupOwnerAddress != null) {
+                hybridSocketHintLastObservedGroupOwnerAddress =
+                    override.hybridSocketHintLastObservedGroupOwnerAddress
+            }
+            if (override.hybridSocketHintLastObservedSocketPort != null) {
+                hybridSocketHintLastObservedSocketPort =
+                    override.hybridSocketHintLastObservedSocketPort
+            }
+            if (override.hybridSocketHintLastObservedStoreResult != null) {
+                hybridSocketHintLastObservedStoreResult =
+                    override.hybridSocketHintLastObservedStoreResult
+            }
+            if (override.hybridSocketHintLastRejectedReason != null) {
+                hybridSocketHintLastRejectedReason =
+                    override.hybridSocketHintLastRejectedReason
+            }
+            if (override.hybridSocketHintLastRejectedField != null) {
+                hybridSocketHintLastRejectedField = override.hybridSocketHintLastRejectedField
+            }
+            if (override.hybridSocketHintLastRejectedExpectedValue != null) {
+                hybridSocketHintLastRejectedExpectedValue =
+                    override.hybridSocketHintLastRejectedExpectedValue
+            }
+            if (override.hybridSocketHintLastRejectedObservedValue != null) {
+                hybridSocketHintLastRejectedObservedValue =
+                    override.hybridSocketHintLastRejectedObservedValue
+            }
+            if (override.hybridSocketHintAcceptedObservation != null) {
+                hybridSocketHintAcceptedObservation =
+                    override.hybridSocketHintAcceptedObservation
             }
             coordinationCounters = override.coordinationCounters.takeIf {
                 it != AutomatedDiagnosticsCoordinationCounters()
@@ -6539,7 +10601,95 @@ internal class AutomatedDiagnosticsRunner(
             if (override.lastRejectedObservedValue != null) {
                 lastRejectedObservedValue = override.lastRejectedObservedValue
             }
+            override.phaseAttemptNumbersByStep.forEach { (stepId, attemptNumber) ->
+                phaseAttemptNumbersByStep[stepId] =
+                    maxOf(phaseAttemptNumbersByStep[stepId] ?: 0, attemptNumber)
+            }
             return this
+        }
+
+        fun beginPhaseAttempt(
+            stepId: AutomatedDiagnosticStepId,
+            startedAtMonotonicMillis: Long
+        ): Int {
+            currentPhaseStepId = stepId
+            currentPhaseAttemptNumber = (phaseAttemptNumbersByStep[stepId] ?: 0) + 1
+            phaseAttemptNumbersByStep[stepId] = currentPhaseAttemptNumber
+            currentPhaseLocalState = null
+            currentPhaseObservedRemoteSignal = null
+            currentPhaseBarrierEstablished = false
+            currentPhaseBarrierEstablishedAtMillis = null
+            currentPhaseAttemptStartedAtMillis = startedAtMonotonicMillis
+            currentPhaseOperationalStartedAtMillis = null
+            currentPhaseApplicationProbeDescriptors = emptyList()
+            currentPhaseSendCount = 0
+            currentPhaseReceiveCount = 0
+            currentPhaseAcceptedCount = 0
+            currentPhaseLastRejectedReason = null
+            currentPhaseLastLocalSendStatus = null
+            lastObservedPhaseSignalSignature = null
+            lastObservedPhaseSignalObservedAtMonotonicMillis = null
+            return currentPhaseAttemptNumber
+        }
+
+        fun beginHybridAcceptAttempt(
+            expectedSessionId: String,
+            startedAtMonotonicMillis: Long
+        ) {
+            hybridAcceptAttemptStartedAtMonotonicMillis = startedAtMonotonicMillis
+            hybridAcceptExpectedSessionId = expectedSessionId
+            hybridAcceptSendAttemptCount = 0
+            hybridAcceptSuccessfulSendCount = 0
+            hybridAcceptObservedCount = 0
+            hybridAcceptAcceptedCount = 0
+            hybridAcceptLastSendResult = null
+            hybridAcceptLastSentPeerId = null
+            hybridAcceptLastSentSessionId = null
+            hybridAcceptLastSentAtMonotonicMillis = null
+            hybridAcceptLastObservedPeerId = null
+            hybridAcceptLastObservedSessionId = null
+            hybridAcceptLastObservedStoreResult = null
+            hybridAcceptLastRejectedReason = null
+            hybridAcceptLastRejectedField = null
+            hybridAcceptLastRejectedExpectedValue = null
+            hybridAcceptLastRejectedObservedValue = null
+            hybridAcceptAcceptedObservation = null
+            lastObservedHybridAcceptSignature = null
+            lastObservedHybridAcceptObservedAtMonotonicMillis = null
+        }
+
+        fun beginHybridSocketHintAttempt(
+            expectedSessionId: String,
+            expectedGroupOwnerAddress: String,
+            expectedSocketPort: Int,
+            startedAtMonotonicMillis: Long
+        ) {
+            hybridSocketHintAttemptStartedAtMonotonicMillis = startedAtMonotonicMillis
+            hybridSocketHintExpectedSessionId = expectedSessionId
+            hybridSocketHintExpectedGroupOwnerAddress = expectedGroupOwnerAddress
+            hybridSocketHintExpectedSocketPort = expectedSocketPort
+            hybridSocketHintSendAttemptCount = 0
+            hybridSocketHintSuccessfulSendCount = 0
+            hybridSocketHintObservedCount = 0
+            hybridSocketHintAcceptedCount = 0
+            hybridSocketHintLastSendResult = null
+            hybridSocketHintLastSentPeerId = null
+            hybridSocketHintLastSentSessionId = null
+            hybridSocketHintLastSentGroupOwnerAddress = null
+            hybridSocketHintLastSentSocketPort = null
+            hybridSocketHintLastSentAtMonotonicMillis = null
+            hybridSocketHintLastObservedPeerId = null
+            hybridSocketHintLastObservedSessionId = null
+            hybridSocketHintLastObservedGroupOwnerAddress = null
+            hybridSocketHintLastObservedSocketPort = null
+            hybridSocketHintLastObservedStoreResult = null
+            hybridSocketHintLastRejectedReason = null
+            hybridSocketHintLastRejectedField = null
+            hybridSocketHintLastRejectedExpectedValue = null
+            hybridSocketHintLastRejectedObservedValue = null
+            hybridSocketHintAcceptedObservation = null
+            lastObservedHybridSocketHintSignature = null
+            lastObservedHybridSocketHintObservedAtMonotonicMillis = null
         }
 
         fun markAnnouncementObserved(
@@ -6584,6 +10734,45 @@ internal class AutomatedDiagnosticsRunner(
             }
             lastObservedServerReadySignature = signature
             lastObservedServerReadyObservedAtMonotonicMillis =
+                observedAtMonotonicMillis
+            return true
+        }
+
+        fun markHybridAcceptObserved(
+            signature: String,
+            observedAtMonotonicMillis: Long
+        ): Boolean {
+            if (lastObservedHybridAcceptSignature == signature) {
+                return false
+            }
+            lastObservedHybridAcceptSignature = signature
+            lastObservedHybridAcceptObservedAtMonotonicMillis =
+                observedAtMonotonicMillis
+            return true
+        }
+
+        fun markHybridSocketHintObserved(
+            signature: String,
+            observedAtMonotonicMillis: Long
+        ): Boolean {
+            if (lastObservedHybridSocketHintSignature == signature) {
+                return false
+            }
+            lastObservedHybridSocketHintSignature = signature
+            lastObservedHybridSocketHintObservedAtMonotonicMillis =
+                observedAtMonotonicMillis
+            return true
+        }
+
+        fun markPhaseSignalObserved(
+            signature: String,
+            observedAtMonotonicMillis: Long
+        ): Boolean {
+            if (lastObservedPhaseSignalSignature == signature) {
+                return false
+            }
+            lastObservedPhaseSignalSignature = signature
+            lastObservedPhaseSignalObservedAtMonotonicMillis =
                 observedAtMonotonicMillis
             return true
         }
@@ -6642,6 +10831,20 @@ internal class AutomatedDiagnosticsRunner(
         val observedValue: String
     )
 
+    private data class HybridAcceptObservationValidationFailure(
+        val reason: AutomatedDiagnosticsCoordinationRejectionReason,
+        val fieldName: String,
+        val expectedValue: String,
+        val observedValue: String
+    )
+
+    private data class HybridSocketHintObservationValidationFailure(
+        val reason: AutomatedDiagnosticsCoordinationRejectionReason,
+        val fieldName: String,
+        val expectedValue: String,
+        val observedValue: String
+    )
+
     private data class AutomatedDiagnosticsBlocker(
         val message: String,
         val requiredAction: AutomatedDiagnosticsRequiredAction? = null
@@ -6658,4 +10861,428 @@ internal class AutomatedDiagnosticsRunner(
         val identityKey: String,
         val displayName: String
     )
+}
+
+internal fun automatedDiagnosticsApplicationProbeMinimumObservedAtMillis(
+    currentPhaseAttemptStartedAtMillis: Long?,
+    currentPhaseBarrierEstablishedAtMillis: Long?,
+    fallbackStartedAtMillis: Long
+): Long {
+    return currentPhaseAttemptStartedAtMillis
+        ?: currentPhaseBarrierEstablishedAtMillis
+        ?: fallbackStartedAtMillis
+}
+
+internal fun automatedDiagnosticsApplicationProbeMatchesExpected(
+    observation: AutomatedDiagnosticsApplicationProbeObservation,
+    expectedMarker: AutomatedDiagnosticsApplicationProbeMarker,
+    expectedSenderPeerId: String,
+    expectedReceiverPeerId: String,
+    expectedThreadId: String,
+    expectedPrivateChatId: String?,
+    expectedMessageId: String? = null,
+    expectedTransportGroupId: Int? = null,
+    minimumObservedAtMillis: Long
+): Boolean {
+    return observation.marker == expectedMarker &&
+        observation.senderPeerId == expectedSenderPeerId &&
+        observation.receiverPeerId == expectedReceiverPeerId &&
+        observation.threadId == expectedThreadId &&
+        (expectedMessageId == null || observation.messageId == expectedMessageId) &&
+        (expectedTransportGroupId == null || observation.transportGroupId == expectedTransportGroupId) &&
+        observation.observedAtMonotonicMillis >= minimumObservedAtMillis &&
+        observation.privateChatId == expectedPrivateChatId
+}
+
+internal fun automatedDiagnosticsApplicationProbeReceiveDiagnosticMatchesExpected(
+    diagnostic: AutomatedDiagnosticsApplicationProbeReceiveDiagnostic,
+    expectedMarker: AutomatedDiagnosticsApplicationProbeMarker,
+    expectedReceiverPeerId: String,
+    expectedThreadId: String,
+    expectedPrivateChatId: String?,
+    expectedMessageId: String? = null,
+    expectedTransportGroupId: Int? = null,
+    minimumObservedAtMillis: Long
+): Boolean {
+    return diagnostic.marker == expectedMarker &&
+        diagnostic.receiverPeerId == expectedReceiverPeerId &&
+        diagnostic.threadId == expectedThreadId &&
+        (expectedMessageId == null || diagnostic.messageId == expectedMessageId) &&
+        (expectedTransportGroupId == null || diagnostic.transportGroupId == expectedTransportGroupId) &&
+        diagnostic.observedAtMonotonicMillis >= minimumObservedAtMillis &&
+        diagnostic.privateChatId == expectedPrivateChatId
+}
+
+internal fun automatedDiagnosticsIsLocalProbeSender(
+    localPeerId: String?,
+    expectedSenderPeerId: String
+): Boolean {
+    return localPeerId?.trim()?.takeIf { it.isNotEmpty() } == expectedSenderPeerId
+}
+
+internal fun automatedDiagnosticsAcceptedRemotePhaseSignalForProbeOrNull(
+    snapshot: AutomatedDiagnosticsRuntimeSnapshot,
+    expectedMarker: AutomatedDiagnosticsApplicationProbeMarker,
+    expectedSenderPeerId: String,
+    expectedReceiverPeerId: String
+): AutomatedDiagnosticsPhaseSignal? {
+    val signal = snapshot.latestAutomatedDiagnosticsPhaseSignalsByStep[expectedMarker.stepId]
+        ?: return null
+    return signal.takeIf { acceptedSignal ->
+        acceptedSignal.sharedRun.runId == expectedMarker.sharedRunId &&
+            acceptedSignal.stepId == expectedMarker.stepId &&
+            acceptedSignal.attemptNumber == expectedMarker.attemptNumber &&
+            acceptedSignal.peerId == expectedSenderPeerId &&
+            acceptedSignal.expectedRemotePeerId == expectedReceiverPeerId
+    }
+}
+
+internal fun automatedDiagnosticsRemotePhaseApplicationProbeDescriptorOrNull(
+    snapshot: AutomatedDiagnosticsRuntimeSnapshot,
+    expectedMarker: AutomatedDiagnosticsApplicationProbeMarker,
+    expectedSenderPeerId: String,
+    expectedReceiverPeerId: String,
+    expectedMessageId: String? = null
+): AutomatedDiagnosticsPhaseApplicationProbeDescriptor? {
+    val signal = automatedDiagnosticsAcceptedRemotePhaseSignalForProbeOrNull(
+        snapshot = snapshot,
+        expectedMarker = expectedMarker,
+        expectedSenderPeerId = expectedSenderPeerId,
+        expectedReceiverPeerId = expectedReceiverPeerId
+    ) ?: return null
+    val matchingDescriptors = signal.applicationProbeDescriptors.filter { descriptor ->
+        descriptor.probeKind == expectedMarker.probeKind &&
+            (expectedMessageId == null || descriptor.messageId == expectedMessageId)
+    }
+    return when {
+        matchingDescriptors.isEmpty() -> null
+        expectedMessageId != null -> matchingDescriptors.firstOrNull()
+        matchingDescriptors.size == 1 -> matchingDescriptors.single()
+        else -> null
+    }
+}
+
+internal fun automatedDiagnosticsLocalPhaseApplicationProbeDescriptor(
+    snapshot: AutomatedDiagnosticsRuntimeSnapshot,
+    probeKind: AutomatedDiagnosticsApplicationProbeKind,
+    messageId: String,
+    expectedReceiverPeerId: String,
+    transportStatus: String?,
+    localBleTransportResult: String?,
+    expectedReceiverTransportGroupId: Int?
+): AutomatedDiagnosticsPhaseApplicationProbeDescriptor {
+    val latestLocalSendTrace = snapshot.recentBleTransportLocalSendTraces.lastOrNull { trace ->
+        trace.messageId == messageId &&
+            trace.targetPeerId == expectedReceiverPeerId
+    }
+    return AutomatedDiagnosticsPhaseApplicationProbeDescriptor(
+        probeKind = probeKind,
+        messageId = messageId,
+        transportStatus = transportStatus,
+        localBleTransportResult = localBleTransportResult,
+        expectedTransportGroupId =
+            latestLocalSendTrace?.groupId ?: expectedReceiverTransportGroupId,
+        expectedChunkCount = latestLocalSendTrace?.chunkCount,
+        frameByteCount = latestLocalSendTrace?.encodedPayloadByteCount,
+        senderChunksQueued = latestLocalSendTrace?.chunksQueued,
+        senderChunksWriteAttempted = latestLocalSendTrace?.chunksWriteAttempted,
+        senderLastLocalWriteResult = latestLocalSendTrace?.lastLocalWriteResult
+    )
+}
+
+internal fun automatedDiagnosticsAuthoritativePhaseApplicationProbeDescriptorOrNull(
+    snapshot: AutomatedDiagnosticsRuntimeSnapshot,
+    expectedMarker: AutomatedDiagnosticsApplicationProbeMarker,
+    expectedSenderPeerId: String,
+    expectedReceiverPeerId: String,
+    localPeerId: String?,
+    localSubmissionMessageId: String? = null,
+    localTransportStatus: String? = null,
+    localBleTransportResult: String? = null,
+    localExpectedReceiverTransportGroupId: Int? = null
+): AutomatedDiagnosticsPhaseApplicationProbeDescriptor? {
+    val remoteDescriptor = automatedDiagnosticsRemotePhaseApplicationProbeDescriptorOrNull(
+        snapshot = snapshot,
+        expectedMarker = expectedMarker,
+        expectedSenderPeerId = expectedSenderPeerId,
+        expectedReceiverPeerId = expectedReceiverPeerId,
+        expectedMessageId = localSubmissionMessageId
+    )
+    if (!automatedDiagnosticsIsLocalProbeSender(localPeerId, expectedSenderPeerId)) {
+        return remoteDescriptor
+    }
+    val localMessageId = localSubmissionMessageId ?: remoteDescriptor?.messageId ?: return null
+    val localDescriptor = automatedDiagnosticsLocalPhaseApplicationProbeDescriptor(
+        snapshot = snapshot,
+        probeKind = expectedMarker.probeKind,
+        messageId = localMessageId,
+        expectedReceiverPeerId = expectedReceiverPeerId,
+        transportStatus = localTransportStatus ?: remoteDescriptor?.transportStatus,
+        localBleTransportResult =
+            localBleTransportResult ?: remoteDescriptor?.localBleTransportResult,
+        expectedReceiverTransportGroupId =
+            localExpectedReceiverTransportGroupId ?: remoteDescriptor?.expectedTransportGroupId
+    )
+    return if (
+        localDescriptor.expectedChunkCount != null ||
+            localDescriptor.frameByteCount != null ||
+            localDescriptor.senderChunksQueued != null ||
+            localDescriptor.senderChunksWriteAttempted != null ||
+            localDescriptor.senderLastLocalWriteResult != null ||
+            localDescriptor.expectedTransportGroupId != null
+    ) {
+        localDescriptor
+    } else {
+        remoteDescriptor ?: localDescriptor
+    }
+}
+
+internal data class AutomatedDiagnosticsPhaseSignalBarrierValidationFailure(
+    val reason: AutomatedDiagnosticsCoordinationRejectionReason,
+    val fieldName: String,
+    val expectedValue: String,
+    val observedValue: String
+)
+
+internal data class AutomatedDiagnosticsServerReadyValidationFailure(
+    val reason: AutomatedDiagnosticsCoordinationRejectionReason,
+    val fieldName: String,
+    val expectedValue: String,
+    val observedValue: String
+)
+
+internal fun validateAutomatedDiagnosticsServerReadySignalForSocketStep(
+    signal: AutomatedDiagnosticsServerReadySignal,
+    expectedRun: AutomatedDiagnosticsSharedRun,
+    expectedOwnerPeerId: String,
+    expectedClientPeerId: String,
+    activeTransportPeerId: String?,
+    localPeerId: String?,
+    localWifiDirectRole: WifiDirectConnectionRole,
+    observedAgeMillis: Long,
+    effectiveLeaseDurationMillis: Long,
+    minimumCreatedAtMillis: Long,
+    groupReady: Boolean
+): AutomatedDiagnosticsServerReadyValidationFailure? {
+    return when {
+        observedAgeMillis > effectiveLeaseDurationMillis ->
+            AutomatedDiagnosticsServerReadyValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.STALE,
+                fieldName = "signal.localMonotonicLeaseMillis",
+                expectedValue = "<=$effectiveLeaseDurationMillis",
+                observedValue = observedAgeMillis.toString()
+            )
+        signal.createdAtMillis < minimumCreatedAtMillis ->
+            AutomatedDiagnosticsServerReadyValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.STALE,
+                fieldName = "signal.createdAtMillis",
+                expectedValue = ">=$minimumCreatedAtMillis",
+                observedValue = signal.createdAtMillis.toString()
+            )
+        signal.sharedRun.runId != expectedRun.runId ->
+            AutomatedDiagnosticsServerReadyValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.WRONG_RUN,
+                fieldName = "signal.sharedRun.runId",
+                expectedValue = expectedRun.runId,
+                observedValue = signal.sharedRun.runId
+            )
+        signal.sharedRun.coordinatorPeerId != expectedRun.coordinatorPeerId ->
+            AutomatedDiagnosticsServerReadyValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.WRONG_PEER,
+                fieldName = "signal.sharedRun.coordinatorPeerId",
+                expectedValue = expectedRun.coordinatorPeerId,
+                observedValue = signal.sharedRun.coordinatorPeerId
+            )
+        signal.sharedRun.participantPeerId != expectedRun.participantPeerId ->
+            AutomatedDiagnosticsServerReadyValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.WRONG_PEER,
+                fieldName = "signal.sharedRun.participantPeerId",
+                expectedValue = expectedRun.participantPeerId,
+                observedValue = signal.sharedRun.participantPeerId
+            )
+        signal.sharedRun.sessionAssociationId != expectedRun.sessionAssociationId ->
+            AutomatedDiagnosticsServerReadyValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.WRONG_SESSION,
+                fieldName = "signal.sharedRun.sessionAssociationId",
+                expectedValue = expectedRun.sessionAssociationId,
+                observedValue = signal.sharedRun.sessionAssociationId
+            )
+        signal.peerId != expectedOwnerPeerId ->
+            AutomatedDiagnosticsServerReadyValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.WRONG_PEER,
+                fieldName = "signal.peerId",
+                expectedValue = expectedOwnerPeerId,
+                observedValue = signal.peerId
+            )
+        localWifiDirectRole == WifiDirectConnectionRole.CLIENT &&
+            activeTransportPeerId != null &&
+            activeTransportPeerId != expectedOwnerPeerId ->
+            AutomatedDiagnosticsServerReadyValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.WRONG_PEER,
+                fieldName = "snapshot.activeTransportPeerId",
+                expectedValue = expectedOwnerPeerId,
+                observedValue = activeTransportPeerId
+            )
+        signal.expectedClientPeerId != expectedClientPeerId ->
+            AutomatedDiagnosticsServerReadyValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.WRONG_PEER,
+                fieldName = "signal.expectedClientPeerId",
+                expectedValue = expectedClientPeerId,
+                observedValue = signal.expectedClientPeerId
+            )
+        localWifiDirectRole == WifiDirectConnectionRole.CLIENT &&
+            localPeerId != null &&
+            localPeerId != expectedClientPeerId ->
+            AutomatedDiagnosticsServerReadyValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.WRONG_PEER,
+                fieldName = "snapshot.localPeerId",
+                expectedValue = expectedClientPeerId,
+                observedValue = localPeerId
+            )
+        signal.groupOwnerAddress.isBlank() ->
+            AutomatedDiagnosticsServerReadyValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.INVALID_PAYLOAD,
+                fieldName = "signal.groupOwnerAddress",
+                expectedValue = "non-blank-host",
+                observedValue = signal.groupOwnerAddress
+            )
+        signal.socketPort !in 1..65535 ->
+            AutomatedDiagnosticsServerReadyValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.INVALID_PAYLOAD,
+                fieldName = "signal.socketPort",
+                expectedValue = "1..65535",
+                observedValue = signal.socketPort.toString()
+            )
+        !groupReady ->
+            AutomatedDiagnosticsServerReadyValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.BEFORE_GROUP_READY,
+                fieldName = "wifiDirectGroupReady(snapshot)",
+                expectedValue = "true",
+                observedValue = "false"
+            )
+        else -> null
+    }
+}
+
+internal fun validateAutomatedDiagnosticsPhaseSignalForBarrier(
+    signal: AutomatedDiagnosticsPhaseSignal,
+    expectedRun: AutomatedDiagnosticsSharedRun,
+    expectedSenderPeerId: String,
+    expectedRecipientPeerId: String,
+    expectedStepId: AutomatedDiagnosticStepId,
+    expectedAttemptNumber: Int,
+    activeTransportPeerId: String?,
+    localPeerId: String?,
+    observedAgeMillis: Long,
+    effectiveLeaseDurationMillis: Long
+): AutomatedDiagnosticsPhaseSignalBarrierValidationFailure? {
+    val expectedCanonicalPeerPair = expectedRun.canonicalPeerPair()
+    val actualCanonicalPeerPair = signal.sharedRun.canonicalPeerPair()
+    return when {
+        signal.sharedRun.runId != expectedRun.runId ->
+            AutomatedDiagnosticsPhaseSignalBarrierValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.WRONG_RUN,
+                fieldName = "signal.sharedRun.runId",
+                expectedValue = expectedRun.runId,
+                observedValue = signal.sharedRun.runId
+            )
+        signal.sharedRun.coordinatorPeerId != expectedRun.coordinatorPeerId ->
+            AutomatedDiagnosticsPhaseSignalBarrierValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.WRONG_PEER,
+                fieldName = "signal.sharedRun.coordinatorPeerId",
+                expectedValue = expectedRun.coordinatorPeerId,
+                observedValue = signal.sharedRun.coordinatorPeerId
+            )
+        signal.sharedRun.participantPeerId != expectedRun.participantPeerId ->
+            AutomatedDiagnosticsPhaseSignalBarrierValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.WRONG_PEER,
+                fieldName = "signal.sharedRun.participantPeerId",
+                expectedValue = expectedRun.participantPeerId,
+                observedValue = signal.sharedRun.participantPeerId
+            )
+        actualCanonicalPeerPair != expectedCanonicalPeerPair ->
+            AutomatedDiagnosticsPhaseSignalBarrierValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.WRONG_PEER,
+                fieldName = "signal.sharedRun.canonicalPeerPair()",
+                expectedValue = automatedDiagnosticsCanonicalPeerPairText(expectedCanonicalPeerPair),
+                observedValue = automatedDiagnosticsCanonicalPeerPairText(actualCanonicalPeerPair)
+            )
+        signal.sharedRun.sessionAssociationId != expectedRun.sessionAssociationId ->
+            AutomatedDiagnosticsPhaseSignalBarrierValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.WRONG_SESSION,
+                fieldName = "signal.sharedRun.sessionAssociationId",
+                expectedValue = expectedRun.sessionAssociationId,
+                observedValue = signal.sharedRun.sessionAssociationId
+            )
+        signal.peerId != expectedSenderPeerId ->
+            AutomatedDiagnosticsPhaseSignalBarrierValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.WRONG_PEER,
+                fieldName = "signal.peerId",
+                expectedValue = expectedSenderPeerId,
+                observedValue = signal.peerId
+            )
+        signal.expectedRemotePeerId != expectedRecipientPeerId ->
+            AutomatedDiagnosticsPhaseSignalBarrierValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.WRONG_PEER,
+                fieldName = "signal.expectedRemotePeerId",
+                expectedValue = expectedRecipientPeerId,
+                observedValue = signal.expectedRemotePeerId
+            )
+        signal.stepId.ordinal < expectedStepId.ordinal ->
+            AutomatedDiagnosticsPhaseSignalBarrierValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.STALE,
+                fieldName = "signal.stepId",
+                expectedValue = expectedStepId.name,
+                observedValue = signal.stepId.name
+            )
+        signal.stepId != expectedStepId ->
+            AutomatedDiagnosticsPhaseSignalBarrierValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.UNEXPECTED_PHASE,
+                fieldName = "signal.stepId",
+                expectedValue = expectedStepId.name,
+                observedValue = signal.stepId.name
+            )
+        signal.attemptNumber < expectedAttemptNumber ->
+            AutomatedDiagnosticsPhaseSignalBarrierValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.STALE,
+                fieldName = "signal.attemptNumber",
+                expectedValue = expectedAttemptNumber.toString(),
+                observedValue = signal.attemptNumber.toString()
+            )
+        signal.attemptNumber > expectedAttemptNumber ->
+            AutomatedDiagnosticsPhaseSignalBarrierValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.UNEXPECTED_PHASE,
+                fieldName = "signal.attemptNumber",
+                expectedValue = expectedAttemptNumber.toString(),
+                observedValue = signal.attemptNumber.toString()
+            )
+        activeTransportPeerId != expectedSenderPeerId ->
+            AutomatedDiagnosticsPhaseSignalBarrierValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.WRONG_PEER,
+                fieldName = "snapshot.activeTransportPeerId",
+                expectedValue = expectedSenderPeerId,
+                observedValue = activeTransportPeerId ?: "none"
+            )
+        localPeerId != null && localPeerId != expectedRecipientPeerId ->
+            AutomatedDiagnosticsPhaseSignalBarrierValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.WRONG_PEER,
+                fieldName = "snapshot.localPeerId",
+                expectedValue = expectedRecipientPeerId,
+                observedValue = localPeerId
+            )
+        observedAgeMillis > effectiveLeaseDurationMillis ->
+            AutomatedDiagnosticsPhaseSignalBarrierValidationFailure(
+                reason = AutomatedDiagnosticsCoordinationRejectionReason.STALE,
+                fieldName = "signal.localMonotonicLeaseMillis",
+                expectedValue = "<=$effectiveLeaseDurationMillis",
+                observedValue = observedAgeMillis.toString()
+            )
+        else -> null
+    }
+}
+
+private fun automatedDiagnosticsCanonicalPeerPairText(
+    canonicalPeerPair: AutomatedDiagnosticsCanonicalPeerPair
+): String {
+    return "${canonicalPeerPair.lowerPeerId} | ${canonicalPeerPair.higherPeerId}"
 }

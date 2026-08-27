@@ -96,6 +96,35 @@ class HybridTransportControlCodecTest {
     }
 
     @Test
+    fun encodingAndDecodingPhaseReadyPreservesDiagnosticsApplicationProbePayload() {
+        val message = HybridTransportControlMessage(
+            messageType = HybridTransportControlMessage.MessageType.AUTOMATED_DIAGNOSTICS_PHASE_READY,
+            sessionId = "diag-run-012",
+            publicPeerIdHint = "coordinator-peer-012",
+            relatedPeerIdHint = "participant-peer-012",
+            senderPeerIdHint = "coordinator-peer-012",
+            expectedPeerIdHint = "participant-peer-012",
+            diagnosticsStepNumber = 18,
+            diagnosticsPhaseState = "RUNNING",
+            diagnosticsAttemptNumber = 2,
+            diagnosticsApplicationProbePayload =
+                "GLOBAL\u001Fglobal-123\u001EPRIVATE\u001Fprivate-456",
+            createdAtMillis = 1_720_000_412L,
+            associatedSessionId = "secure-session-012",
+            expiresAtMillis = 1_720_008_412L,
+            capabilityFlags = setOf(
+                HybridTransportControlMessage.CapabilityFlag.BLE_FALLBACK
+            )
+        )
+
+        val encoded = HybridTransportControlCodec.encode(message)
+        val decoded = HybridTransportControlCodec.decode(encoded)
+
+        assertEquals(22, encoded.split("|").size)
+        assertEquals(message, decoded)
+    }
+
+    @Test
     fun legacyPhaseReadyAddressPayloadStillDecodesWithoutToken() {
         val legacyMessage = HybridTransportControlMessage(
             messageType = HybridTransportControlMessage.MessageType.AUTOMATED_DIAGNOSTICS_PHASE_READY,

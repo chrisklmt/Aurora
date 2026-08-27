@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
@@ -27,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -42,11 +42,18 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import gr.hua.aurora.ble.permissions.BluetoothPermissionStatusReader
 import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsRequiredAction
 import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsRequiredActionKind
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsPreparationCommand
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsPreparationItemStatus
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsPreparationState
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsPhaseSection
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsOverallStatus
 import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsRunner
 import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticEvidenceValue
 import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticStepResult
 import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticStepStatus
 import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsRunState
+import gr.hua.aurora.diagnostics.automated.automatedDiagnosticsPhaseSections
+import gr.hua.aurora.diagnostics.automated.automatedDiagnosticsPreparationCommand
 import gr.hua.aurora.diagnostics.automated.automatedDiagnosticsCompactSummaryText
 import gr.hua.aurora.diagnostics.automated.automatedDiagnosticsCurrentRequiredActionStepOrNull
 import gr.hua.aurora.diagnostics.automated.automatedDiagnosticsShouldAutoExpand
@@ -64,6 +71,9 @@ internal fun AutomatedDiagnosticsScreen(
     onBack: () -> Unit
 ) {
     val runState by runner.state.collectAsStateWithLifecycle()
+    var preparationRefreshNonce by remember {
+        mutableStateOf(0)
+    }
     DisposableEffect(runner) {
         runner.setAutomaticParticipationEnabled(true)
         onDispose {
@@ -72,6 +82,12 @@ internal fun AutomatedDiagnosticsScreen(
     }
     AutomatedDiagnosticsScreen(
         state = runState,
+        preparationState = remember(runState, preparationRefreshNonce) {
+            runner.currentPreparationState()
+        },
+        automaticPreparationPending = remember(runState, preparationRefreshNonce) {
+            runner.automaticPreparationPending()
+        },
         currentUsername = currentUsername,
         onStart = runner::start,
         onStop = runner::stop,
@@ -79,6 +95,9 @@ internal fun AutomatedDiagnosticsScreen(
         onResetReport = runner::resetReport,
         onRefreshWifiDirectStatus = onRefreshWifiDirectStatus,
         onRefreshBluetoothStatus = onRefreshBluetoothStatus,
+        onPreparationStateChanged = {
+            preparationRefreshNonce += 1
+        },
         onBack = onBack
     )
 }
@@ -86,6 +105,8 @@ internal fun AutomatedDiagnosticsScreen(
 @Composable
 internal fun AutomatedDiagnosticsScreen(
     state: AutomatedDiagnosticsRunState,
+    preparationState: AutomatedDiagnosticsPreparationState,
+    automaticPreparationPending: Boolean,
     currentUsername: String,
     onStart: () -> Unit,
     onStop: () -> Unit,
@@ -93,12 +114,19 @@ internal fun AutomatedDiagnosticsScreen(
     onResetReport: () -> Unit,
     onRefreshWifiDirectStatus: () -> Unit,
     onRefreshBluetoothStatus: () -> Unit,
+    onPreparationStateChanged: () -> Unit,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
-    val manualExpansion = remember {
+    val manualStepExpansion = remember {
         mutableStateMapOf<String, Boolean>()
+    }
+    val manualPhaseExpansion = remember {
+        mutableStateMapOf<String, Boolean>()
+    }
+    var pendingPreparationStart by remember {
+        mutableStateOf(false)
     }
     var bluetoothPermissionRequestAttempted by remember {
         mutableStateOf(false)
@@ -113,39 +141,113 @@ internal fun AutomatedDiagnosticsScreen(
     ) {
         bluetoothPermissionRequestAttempted = true
         onRefreshBluetoothStatus()
-        onRetryFailedStep()
+        onPreparationStateChanged()
+        if (!pendingPreparationStart && state.overallStatus != AutomatedDiagnosticsOverallStatus.IDLE) {
+            onRetryFailedStep()
+        }
     }
     val wifiDirectPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
         wifiDirectPermissionRequestAttempted = true
         onRefreshWifiDirectStatus()
-        onRetryFailedStep()
+        onPreparationStateChanged()
+        if (!pendingPreparationStart && state.overallStatus != AutomatedDiagnosticsOverallStatus.IDLE) {
+            onRetryFailedStep()
+        }
     }
     val settingsLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
         onRefreshBluetoothStatus()
         onRefreshWifiDirectStatus()
-        onRetryFailedStep()
+        onPreparationStateChanged()
+        if (!pendingPreparationStart && state.overallStatus != AutomatedDiagnosticsOverallStatus.IDLE) {
+            onRetryFailedStep()
+        }
+    }
+    val preparationCommand = remember(
+        pendingPreparationStart,
+        automaticPreparationPending,
+        state.overallStatus,
+        preparationState,
+        bluetoothPermissionRequestAttempted,
+        wifiDirectPermissionRequestAttempted
+    ) {
+        val manualCommand = automatedDiagnosticsPreparationCommand(
+            isPreparationPending = pendingPreparationStart,
+            currentOverallStatus = state.overallStatus,
+            preparationState = preparationState,
+            bluetoothPermissionRequestAttempted = bluetoothPermissionRequestAttempted,
+            wifiDirectPermissionRequestAttempted = wifiDirectPermissionRequestAttempted
+        )
+        if (manualCommand != AutomatedDiagnosticsPreparationCommand.NONE) {
+            manualCommand
+        } else {
+            automatedDiagnosticsPreparationCommand(
+                isPreparationPending = automaticPreparationPending,
+                currentOverallStatus = state.overallStatus,
+                preparationState = preparationState,
+                bluetoothPermissionRequestAttempted = bluetoothPermissionRequestAttempted,
+                wifiDirectPermissionRequestAttempted = wifiDirectPermissionRequestAttempted,
+                startWhenReady = false
+            )
+        }
+    }
+    val visiblePreparationState =
+        pendingPreparationStart ||
+            automaticPreparationPending ||
+            state.overallStatus == AutomatedDiagnosticsOverallStatus.IDLE
+    val activeAction = requiredActionStep?.requiredAction
+        ?: if (visiblePreparationState) preparationState.requiredAction else null
+    LaunchedEffect(
+        preparationCommand,
+        pendingPreparationStart,
+        automaticPreparationPending,
+        visiblePreparationState
+    ) {
+        when (preparationCommand) {
+            AutomatedDiagnosticsPreparationCommand.START_RUN -> {
+                pendingPreparationStart = false
+                onStart()
+            }
+            AutomatedDiagnosticsPreparationCommand.REQUEST_BLUETOOTH_PERMISSIONS -> {
+                val permissionStatus = BluetoothPermissionStatusReader.read(context)
+                if (permissionStatus.missingPermissions.isNotEmpty()) {
+                    bluetoothPermissionLauncher.launch(
+                        permissionStatus.missingPermissions.toTypedArray()
+                    )
+                }
+            }
+            AutomatedDiagnosticsPreparationCommand.REQUEST_WIFI_DIRECT_PERMISSIONS -> {
+                val permissionStatus = WifiDirectPermissionStatusReader.read(context)
+                if (permissionStatus.missingPermissions.isNotEmpty()) {
+                    wifiDirectPermissionLauncher.launch(
+                        permissionStatus.missingPermissions.toTypedArray()
+                    )
+                }
+            }
+            AutomatedDiagnosticsPreparationCommand.NONE -> Unit
+        }
     }
     val actionHandler = remember(
         context,
         activity,
-        requiredActionStep,
+        activeAction,
         bluetoothPermissionRequestAttempted,
         wifiDirectPermissionRequestAttempted,
         onRefreshBluetoothStatus,
         onRefreshWifiDirectStatus,
+        onPreparationStateChanged,
         onRetryFailedStep,
         bluetoothPermissionLauncher,
         wifiDirectPermissionLauncher,
         settingsLauncher
     ) {
         {
-            val step = requiredActionStep
-            if (step != null) {
-                when (step.requiredAction?.kind) {
+            val action = activeAction
+            if (action != null) {
+                when (action.kind) {
                     AutomatedDiagnosticsRequiredActionKind.REQUEST_BLUETOOTH_PERMISSIONS -> {
                         val permissionStatus = BluetoothPermissionStatusReader.read(context)
                         if (
@@ -162,7 +264,13 @@ internal fun AutomatedDiagnosticsScreen(
                             )
                         } else {
                             onRefreshBluetoothStatus()
-                            onRetryFailedStep()
+                            onPreparationStateChanged()
+                            if (
+                                !pendingPreparationStart &&
+                                state.overallStatus != AutomatedDiagnosticsOverallStatus.IDLE
+                            ) {
+                                onRetryFailedStep()
+                            }
                         }
                     }
                     AutomatedDiagnosticsRequiredActionKind.REQUEST_WIFI_DIRECT_PERMISSIONS -> {
@@ -181,7 +289,13 @@ internal fun AutomatedDiagnosticsScreen(
                             )
                         } else {
                             onRefreshWifiDirectStatus()
-                            onRetryFailedStep()
+                            onPreparationStateChanged()
+                            if (
+                                !pendingPreparationStart &&
+                                state.overallStatus != AutomatedDiagnosticsOverallStatus.IDLE
+                            ) {
+                                onRetryFailedStep()
+                            }
                         }
                     }
                     AutomatedDiagnosticsRequiredActionKind.OPEN_BLUETOOTH_SETTINGS -> {
@@ -201,17 +315,20 @@ internal fun AutomatedDiagnosticsScreen(
     val actionButtonLabel = remember(
         context,
         activity,
-        requiredActionStep,
+        activeAction,
         bluetoothPermissionRequestAttempted,
         wifiDirectPermissionRequestAttempted
     ) {
         requiredActionButtonLabel(
             context = context,
             activity = activity,
-            action = requiredActionStep?.requiredAction,
+            action = activeAction,
             bluetoothPermissionRequestAttempted = bluetoothPermissionRequestAttempted,
             wifiDirectPermissionRequestAttempted = wifiDirectPermissionRequestAttempted
         )
+    }
+    val phaseSections = remember(state) {
+        automatedDiagnosticsPhaseSections(state)
     }
 
     Scaffold(
@@ -238,11 +355,29 @@ internal fun AutomatedDiagnosticsScreen(
             }
             item {
                 AutomatedDiagnosticsControlsRow(
-                    onStart = onStart,
-                    onStop = onStop,
+                    onStart = {
+                        pendingPreparationStart = true
+                        onPreparationStateChanged()
+                    },
+                    onStop = {
+                        pendingPreparationStart = false
+                        onStop()
+                    },
                     onRetryFailedStep = onRetryFailedStep,
-                    onResetReport = onResetReport
+                    onResetReport = {
+                        pendingPreparationStart = false
+                        onResetReport()
+                    }
                 )
+            }
+            if (visiblePreparationState) {
+                item {
+                    AutomatedDiagnosticsPreparationCard(
+                        preparationState = preparationState,
+                        buttonLabel = actionButtonLabel,
+                        onAction = actionHandler
+                    )
+                }
             }
             requiredActionStep?.let { step ->
                 item {
@@ -253,71 +388,106 @@ internal fun AutomatedDiagnosticsScreen(
                     )
                 }
             }
+            item {
+                SectionHeader(title = "Steps")
+            }
             items(
-                items = state.steps,
-                key = { it.stepId.name }
-            ) { step ->
-                val expanded = manualExpansion[step.stepId.name]
-                    ?: automatedDiagnosticsShouldAutoExpand(step)
-                AutomatedDiagnosticsStepCard(
-                    step = step,
+                items = phaseSections,
+                key = { it.phase.name }
+            ) { phaseSection ->
+                val expanded = manualPhaseExpansion[phaseSection.phase.name]
+                    ?: automatedDiagnosticsShouldAutoExpand(phaseSection.aggregatedStatus)
+                AutomatedDiagnosticsPhaseCard(
+                    phaseSection = phaseSection,
                     expanded = expanded,
                     onToggleExpanded = {
-                        manualExpansion[step.stepId.name] = !expanded
+                        manualPhaseExpansion[phaseSection.phase.name] = !expanded
+                    },
+                    stepExpanded = { step ->
+                        manualStepExpansion[step.stepId.name]
+                            ?: automatedDiagnosticsShouldAutoExpand(step)
+                    },
+                    onStepToggleExpanded = { step, expandedStep ->
+                        manualStepExpansion[step.stepId.name] = !expandedStep
                     }
                 )
             }
             item {
-                Card(
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text(
-                            text = "Phase 2",
-                            style = MaterialTheme.typography.titleSmall
-                        )
-                        Text(
-                            text = state.phaseTwoSummary,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                SectionHeader(title = "Reports")
+            }
+            items(
+                items = phaseSections,
+                key = { "${it.phase.name}-report" }
+            ) { phaseSection ->
+                AutomatedDiagnosticsReportCard(
+                    title = phaseSection.phase.reportTitle,
+                    onCopyReport = {
+                        clipboardManager.setText(AnnotatedString(phaseSection.reportText))
                     }
-                }
+                )
             }
             item {
-                Card(
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = "Plain-text report",
-                                style = MaterialTheme.typography.titleSmall
-                            )
-                            TextButton(
-                                onClick = {
-                                    clipboardManager.setText(AnnotatedString(state.reportText))
-                                }
-                            ) {
-                                Text("Copy report")
-                            }
-                        }
-                        SelectionContainer {
-                            Text(
-                                text = state.reportText,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
+                TextButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = {
+                        clipboardManager.setText(AnnotatedString(state.reportText))
                     }
+                ) {
+                    Text("Copy full report")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionHeader(
+    title: String
+) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.titleSmall
+    )
+}
+
+@Composable
+private fun AutomatedDiagnosticsPreparationCard(
+    preparationState: AutomatedDiagnosticsPreparationState,
+    buttonLabel: String,
+    onAction: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "Preparing automated test",
+                style = MaterialTheme.typography.titleSmall
+            )
+            Text(
+                text = preparationState.summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            preparationState.items.forEach { item ->
+                val statusText = when (item.status) {
+                    AutomatedDiagnosticsPreparationItemStatus.READY -> "READY"
+                    AutomatedDiagnosticsPreparationItemStatus.WAITING -> "WAITING"
+                }
+                Text(
+                    text = "${item.label}: $statusText",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            preparationState.requiredAction?.let {
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onAction
+                ) {
+                    Text(buttonLabel)
                 }
             }
         }
@@ -358,6 +528,56 @@ private fun AutomatedDiagnosticsRequiredActionCard(
 }
 
 @Composable
+private fun AutomatedDiagnosticsPhaseCard(
+    phaseSection: AutomatedDiagnosticsPhaseSection,
+    expanded: Boolean,
+    onToggleExpanded: () -> Unit,
+    stepExpanded: (AutomatedDiagnosticStepResult) -> Boolean,
+    onStepToggleExpanded: (AutomatedDiagnosticStepResult, Boolean) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onToggleExpanded),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "${phaseSection.phase.title} (${phaseSection.steps.first().visibleStepNumber.toString().padStart(2, '0')}-${phaseSection.steps.last().visibleStepNumber.toString().padStart(2, '0')})",
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Text(
+                    text = phaseSection.aggregatedStatus.name,
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
+            if (expanded) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    phaseSection.steps.forEach { step ->
+                        val expandedStep = stepExpanded(step)
+                        AutomatedDiagnosticsStepCard(
+                            step = step,
+                            expanded = expandedStep,
+                            onToggleExpanded = {
+                                onStepToggleExpanded(step, expandedStep)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun AutomatedDiagnosticsSummaryCard(
     state: AutomatedDiagnosticsRunState
 ) {
@@ -392,6 +612,34 @@ private fun AutomatedDiagnosticsSummaryCard(
                 text = "Role: ${state.localPeerRole?.name ?: "unknown"}",
                 style = MaterialTheme.typography.bodySmall
             )
+        }
+    }
+}
+
+@Composable
+private fun AutomatedDiagnosticsReportCard(
+    title: String,
+    onCopyReport: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall
+                )
+                TextButton(onClick = onCopyReport) {
+                    Text("Copy report")
+                }
+            }
         }
     }
 }

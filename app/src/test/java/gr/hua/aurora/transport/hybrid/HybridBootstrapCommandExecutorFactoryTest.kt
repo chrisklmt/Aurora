@@ -199,6 +199,34 @@ class HybridBootstrapCommandExecutorFactoryTest {
     }
 
     @Test
+    fun socketPlanJavaNetUsesProvidedConnectorOverrideWhenPresent() {
+        val connector = FakeHybridBootstrapSocketConnector.connected(
+            connectedAtMillis = 1_744_000_010L
+        )
+        val executor = HybridBootstrapCommandExecutorFactory.create(
+            config = HybridBootstrapCommandExecutorConfig(
+                mode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_JAVANET
+            ),
+            socketConnectorOverride = connector
+        )
+
+        val result = executor.execute(command())
+
+        assertEquals(1, connector.connectedPlans.size)
+        assertEquals(
+            HybridBootstrapCommandExecutionResult.Accepted(
+                peerId = "peer-factory",
+                sessionId = "session-factory",
+                bootstrapIdentifier = "bootstrap-factory",
+                groupOwnerAddress = "192.168.49.181",
+                socketPort = 9181,
+                commandCreatedAtMillis = 1_734_000_002L
+            ),
+            result
+        )
+    }
+
+    @Test
     fun socketPlanDisabledUsesConnectorFactoryDisabledBehaviorIndirectly() {
         val source = sourceText(
             "app/src/main/java/gr/hua/aurora/transport/hybrid/HybridBootstrapCommandExecutorFactory.kt"

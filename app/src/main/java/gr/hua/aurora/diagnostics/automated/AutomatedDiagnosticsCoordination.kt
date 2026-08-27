@@ -1,9 +1,12 @@
 package gr.hua.aurora.diagnostics.automated
 
+import gr.hua.aurora.transport.hybrid.HybridTransportControlStore
 import java.security.MessageDigest
 
 private const val automatedDiagnosticsCorrelationTokenMinLength = 16
 private const val automatedDiagnosticsCorrelationTokenMaxLength = 128
+private const val automatedDiagnosticsPhaseProbeEntrySeparator = "\u001E"
+private const val automatedDiagnosticsPhaseProbeFieldSeparator = "\u001F"
 private val automatedDiagnosticsCorrelationTokenPattern =
     Regex("^[A-Za-z0-9_-]+$")
 
@@ -189,6 +192,384 @@ data class AutomatedDiagnosticsWifiDirectPeerReadySignal(
     }
 }
 
+enum class AutomatedDiagnosticsPhaseState(
+    val statusText: String
+) {
+    READY("READY"),
+    RUNNING("RUNNING"),
+    PASS("PASS"),
+    FAIL("FAIL"),
+    BLOCKED("BLOCKED"),
+    CANCELLED("CANCELLED")
+}
+
+data class AutomatedDiagnosticsPhaseSignal(
+    val sharedRun: AutomatedDiagnosticsSharedRun,
+    val peerId: String,
+    val expectedRemotePeerId: String,
+    val stepId: AutomatedDiagnosticStepId,
+    val phaseState: AutomatedDiagnosticsPhaseState,
+    val attemptNumber: Int,
+    val applicationProbeDescriptors: List<AutomatedDiagnosticsPhaseApplicationProbeDescriptor> =
+        emptyList(),
+    val createdAtMillis: Long,
+    val expiresAtMillis: Long,
+    val sourceDeviceAddress: String? = null
+) {
+    init {
+        require(peerId.isNotBlank()) {
+            "Automated diagnostics phase peerId must not be blank."
+        }
+        require(expectedRemotePeerId.isNotBlank()) {
+            "Automated diagnostics phase expectedRemotePeerId must not be blank."
+        }
+        require(attemptNumber > 0) {
+            "Automated diagnostics phase attemptNumber must be positive."
+        }
+        require(createdAtMillis >= 0L) {
+            "Automated diagnostics phase createdAtMillis must be non-negative."
+        }
+        require(expiresAtMillis >= createdAtMillis) {
+            "Automated diagnostics phase expiresAtMillis must be at least createdAtMillis."
+        }
+        require(sourceDeviceAddress?.isBlank() != true) {
+            "Automated diagnostics phase sourceDeviceAddress must not be blank when provided."
+        }
+    }
+}
+
+private data class AutomatedDiagnosticsPhaseApplicationProbeDescriptorKey(
+    val probeKind: AutomatedDiagnosticsApplicationProbeKind,
+    val messageId: String
+)
+
+fun mergeAutomatedDiagnosticsPhaseSignal(
+    current: AutomatedDiagnosticsPhaseSignal?,
+    incoming: AutomatedDiagnosticsPhaseSignal
+): AutomatedDiagnosticsPhaseSignal {
+    val existing = current ?: return incoming
+    if (!automatedDiagnosticsCanMergePhaseSignal(existing, incoming)) {
+        return automatedDiagnosticsPreferredPhaseSignal(existing, incoming)
+    }
+    val preferred = automatedDiagnosticsPreferredPhaseSignal(existing, incoming)
+    val fallback = if (preferred == existing) incoming else existing
+    return preferred.copy(
+        applicationProbeDescriptors = mergeAutomatedDiagnosticsPhaseApplicationProbeDescriptors(
+            preferred = preferred.applicationProbeDescriptors,
+            fallback = fallback.applicationProbeDescriptors
+        ),
+        expiresAtMillis = maxOf(existing.expiresAtMillis, incoming.expiresAtMillis),
+        sourceDeviceAddress = preferred.sourceDeviceAddress ?: fallback.sourceDeviceAddress
+    )
+}
+
+private fun automatedDiagnosticsCanMergePhaseSignal(
+    first: AutomatedDiagnosticsPhaseSignal,
+    second: AutomatedDiagnosticsPhaseSignal
+): Boolean {
+    return first.sharedRun == second.sharedRun &&
+        first.peerId == second.peerId &&
+        first.expectedRemotePeerId == second.expectedRemotePeerId &&
+        first.stepId == second.stepId &&
+        first.attemptNumber == second.attemptNumber
+}
+
+private fun automatedDiagnosticsPreferredPhaseSignal(
+    first: AutomatedDiagnosticsPhaseSignal,
+    second: AutomatedDiagnosticsPhaseSignal
+): AutomatedDiagnosticsPhaseSignal {
+    val comparison = compareValuesBy(
+        first,
+        second,
+        { automatedDiagnosticsPhaseStatePriority(it.phaseState) },
+        { it.createdAtMillis },
+        { automatedDiagnosticsPhaseApplicationProbeDescriptorRichness(it.applicationProbeDescriptors) }
+    )
+    return if (comparison >= 0) {
+        first
+    } else {
+        second
+    }
+}
+
+private fun automatedDiagnosticsPhaseStatePriority(
+    phaseState: AutomatedDiagnosticsPhaseState
+): Int {
+    return when (phaseState) {
+        AutomatedDiagnosticsPhaseState.READY -> 0
+        AutomatedDiagnosticsPhaseState.RUNNING -> 1
+        AutomatedDiagnosticsPhaseState.PASS,
+        AutomatedDiagnosticsPhaseState.FAIL,
+        AutomatedDiagnosticsPhaseState.BLOCKED,
+        AutomatedDiagnosticsPhaseState.CANCELLED -> 2
+    }
+}
+
+private fun automatedDiagnosticsPhaseApplicationProbeDescriptorRichness(
+    descriptors: List<AutomatedDiagnosticsPhaseApplicationProbeDescriptor>
+): Int {
+    return descriptors.sumOf(::automatedDiagnosticsPhaseApplicationProbeDescriptorRichness)
+}
+
+private fun automatedDiagnosticsPhaseApplicationProbeDescriptorRichness(
+    descriptor: AutomatedDiagnosticsPhaseApplicationProbeDescriptor
+): Int {
+    var richness = 1
+    if (descriptor.transportStatus != null) {
+        richness += 1
+    }
+    if (descriptor.localBleTransportResult != null) {
+        richness += 1
+    }
+    if (descriptor.expectedTransportGroupId != null) {
+        richness += 1
+    }
+    if (descriptor.expectedChunkCount != null) {
+        richness += 1
+    }
+    if (descriptor.frameByteCount != null) {
+        richness += 1
+    }
+    if (descriptor.senderChunksQueued != null) {
+        richness += 1
+    }
+    if (descriptor.senderChunksWriteAttempted != null) {
+        richness += 1
+    }
+    if (descriptor.senderLastLocalWriteResult != null) {
+        richness += 1
+    }
+    return richness
+}
+
+private fun mergeAutomatedDiagnosticsPhaseApplicationProbeDescriptors(
+    preferred: List<AutomatedDiagnosticsPhaseApplicationProbeDescriptor>,
+    fallback: List<AutomatedDiagnosticsPhaseApplicationProbeDescriptor>
+): List<AutomatedDiagnosticsPhaseApplicationProbeDescriptor> {
+    val mergedByKey =
+        linkedMapOf<
+            AutomatedDiagnosticsPhaseApplicationProbeDescriptorKey,
+            AutomatedDiagnosticsPhaseApplicationProbeDescriptor
+            >()
+    preferred.forEach { descriptor ->
+        mergedByKey[descriptor.phaseApplicationProbeDescriptorKey()] = descriptor
+    }
+    fallback.forEach { descriptor ->
+        val key = descriptor.phaseApplicationProbeDescriptorKey()
+        val existing = mergedByKey[key]
+        mergedByKey[key] = if (existing == null) {
+            descriptor
+        } else {
+            mergeAutomatedDiagnosticsPhaseApplicationProbeDescriptor(
+                preferred = existing,
+                fallback = descriptor
+            )
+        }
+    }
+    return mergedByKey.values.toList()
+}
+
+private fun mergeAutomatedDiagnosticsPhaseApplicationProbeDescriptor(
+    preferred: AutomatedDiagnosticsPhaseApplicationProbeDescriptor,
+    fallback: AutomatedDiagnosticsPhaseApplicationProbeDescriptor
+): AutomatedDiagnosticsPhaseApplicationProbeDescriptor {
+    return preferred.copy(
+        transportStatus = preferred.transportStatus ?: fallback.transportStatus,
+        localBleTransportResult =
+            preferred.localBleTransportResult ?: fallback.localBleTransportResult,
+        expectedTransportGroupId =
+            preferred.expectedTransportGroupId ?: fallback.expectedTransportGroupId,
+        expectedChunkCount = preferred.expectedChunkCount ?: fallback.expectedChunkCount,
+        frameByteCount = preferred.frameByteCount ?: fallback.frameByteCount,
+        senderChunksQueued = preferred.senderChunksQueued ?: fallback.senderChunksQueued,
+        senderChunksWriteAttempted =
+            preferred.senderChunksWriteAttempted ?: fallback.senderChunksWriteAttempted,
+        senderLastLocalWriteResult =
+            preferred.senderLastLocalWriteResult ?: fallback.senderLastLocalWriteResult
+    )
+}
+
+private fun AutomatedDiagnosticsPhaseApplicationProbeDescriptor.phaseApplicationProbeDescriptorKey():
+    AutomatedDiagnosticsPhaseApplicationProbeDescriptorKey {
+    return AutomatedDiagnosticsPhaseApplicationProbeDescriptorKey(
+        probeKind = probeKind,
+        messageId = messageId
+    )
+}
+
+fun automatedDiagnosticsPhaseApplicationProbePayloadOrNull(
+    descriptors: List<AutomatedDiagnosticsPhaseApplicationProbeDescriptor>
+): String? {
+    if (descriptors.isEmpty()) {
+        return null
+    }
+    return descriptors.joinToString(automatedDiagnosticsPhaseProbeEntrySeparator) { descriptor ->
+        buildList {
+            add(descriptor.probeKind.name)
+            add(descriptor.messageId)
+            if (
+                descriptor.transportStatus != null ||
+                    descriptor.localBleTransportResult != null ||
+                    descriptor.expectedTransportGroupId != null ||
+                    descriptor.expectedChunkCount != null ||
+                    descriptor.frameByteCount != null ||
+                    descriptor.senderChunksQueued != null ||
+                    descriptor.senderChunksWriteAttempted != null ||
+                    descriptor.senderLastLocalWriteResult != null
+            ) {
+                add(descriptor.transportStatus ?: "")
+                add(descriptor.localBleTransportResult ?: "")
+                add(descriptor.expectedTransportGroupId?.toString() ?: "")
+                add(descriptor.expectedChunkCount?.toString() ?: "")
+                add(descriptor.frameByteCount?.toString() ?: "")
+                add(descriptor.senderChunksQueued?.toString() ?: "")
+                add(descriptor.senderChunksWriteAttempted?.toString() ?: "")
+                add(descriptor.senderLastLocalWriteResult ?: "")
+            }
+        }.joinToString(automatedDiagnosticsPhaseProbeFieldSeparator)
+    }
+}
+
+fun automatedDiagnosticsPhaseApplicationProbeDescriptors(
+    payload: String?
+): List<AutomatedDiagnosticsPhaseApplicationProbeDescriptor> {
+    val sanitizedPayload = payload?.takeIf { it.isNotEmpty() } ?: return emptyList()
+    val descriptors = mutableListOf<AutomatedDiagnosticsPhaseApplicationProbeDescriptor>()
+    for (entry in sanitizedPayload.split(automatedDiagnosticsPhaseProbeEntrySeparator)) {
+        val parts = entry.split(
+            automatedDiagnosticsPhaseProbeFieldSeparator,
+            ignoreCase = false,
+            limit = 10
+        )
+        if (parts.size != 2 && parts.size != 4 && parts.size != 7 && parts.size != 10) {
+            return emptyList()
+        }
+        val probeKind = runCatching {
+            AutomatedDiagnosticsApplicationProbeKind.valueOf(parts[0])
+        }.getOrNull() ?: return emptyList()
+        val messageId = parts[1].trim().takeIf { it.isNotEmpty() } ?: return emptyList()
+        val transportStatus = parts.getOrNull(2)?.trim()?.takeIf { it.isNotEmpty() }
+        val localBleTransportResult = parts.getOrNull(3)?.trim()?.takeIf { it.isNotEmpty() }
+        val expectedTransportGroupIdToken = parts.getOrNull(4)?.trim()
+        val expectedTransportGroupId =
+            if (expectedTransportGroupIdToken.isNullOrEmpty()) {
+                null
+            } else {
+                expectedTransportGroupIdToken.toIntOrNull() ?: return emptyList()
+            }
+        val expectedChunkCountToken = parts.getOrNull(5)?.trim()
+        val expectedChunkCount =
+            if (expectedChunkCountToken.isNullOrEmpty()) {
+                null
+            } else {
+                expectedChunkCountToken.toIntOrNull() ?: return emptyList()
+            }
+        val frameByteCountToken = parts.getOrNull(6)?.trim()
+        val frameByteCount =
+            if (frameByteCountToken.isNullOrEmpty()) {
+                null
+            } else {
+                frameByteCountToken.toIntOrNull() ?: return emptyList()
+            }
+        val senderChunksQueuedToken = parts.getOrNull(7)?.trim()
+        val senderChunksQueued =
+            if (senderChunksQueuedToken.isNullOrEmpty()) {
+                null
+            } else {
+                senderChunksQueuedToken.toIntOrNull() ?: return emptyList()
+            }
+        val senderChunksWriteAttemptedToken = parts.getOrNull(8)?.trim()
+        val senderChunksWriteAttempted =
+            if (senderChunksWriteAttemptedToken.isNullOrEmpty()) {
+                null
+            } else {
+                senderChunksWriteAttemptedToken.toIntOrNull() ?: return emptyList()
+            }
+        val senderLastLocalWriteResult = parts.getOrNull(9)?.trim()?.takeIf { it.isNotEmpty() }
+        descriptors += AutomatedDiagnosticsPhaseApplicationProbeDescriptor(
+            probeKind = probeKind,
+            messageId = messageId,
+            transportStatus = transportStatus,
+            localBleTransportResult = localBleTransportResult,
+            expectedTransportGroupId = expectedTransportGroupId,
+            expectedChunkCount = expectedChunkCount,
+            frameByteCount = frameByteCount,
+            senderChunksQueued = senderChunksQueued,
+            senderChunksWriteAttempted = senderChunksWriteAttempted,
+            senderLastLocalWriteResult = senderLastLocalWriteResult
+        )
+    }
+    return descriptors
+}
+
+data class AutomatedDiagnosticsHybridAcceptObservation(
+    val peerId: String,
+    val sessionId: String,
+    val publicPeerIdHint: String?,
+    val createdAtMillis: Long,
+    val observedAtMonotonicMillis: Long,
+    val storeResult: HybridTransportControlStore.RecordResult
+) {
+    init {
+        require(peerId.isNotBlank()) {
+            "Automated diagnostics hybrid ACCEPT peerId must not be blank."
+        }
+        require(sessionId.isNotBlank()) {
+            "Automated diagnostics hybrid ACCEPT sessionId must not be blank."
+        }
+        require(publicPeerIdHint?.isBlank() != true) {
+            "Automated diagnostics hybrid ACCEPT publicPeerIdHint must not be blank when provided."
+        }
+        require(createdAtMillis >= 0L) {
+            "Automated diagnostics hybrid ACCEPT createdAtMillis must be non-negative."
+        }
+        require(observedAtMonotonicMillis >= 0L) {
+            "Automated diagnostics hybrid ACCEPT observedAtMonotonicMillis must be non-negative."
+        }
+    }
+
+    val recorded: Boolean
+        get() = storeResult == HybridTransportControlStore.RecordResult.Stored
+}
+
+data class AutomatedDiagnosticsHybridSocketHintObservation(
+    val peerId: String,
+    val sessionId: String,
+    val publicPeerIdHint: String?,
+    val groupOwnerAddress: String,
+    val socketPort: Int,
+    val createdAtMillis: Long,
+    val observedAtMonotonicMillis: Long,
+    val storeResult: HybridTransportControlStore.RecordResult
+) {
+    init {
+        require(peerId.isNotBlank()) {
+            "Automated diagnostics hybrid SOCKET_HINT peerId must not be blank."
+        }
+        require(sessionId.isNotBlank()) {
+            "Automated diagnostics hybrid SOCKET_HINT sessionId must not be blank."
+        }
+        require(publicPeerIdHint?.isBlank() != true) {
+            "Automated diagnostics hybrid SOCKET_HINT publicPeerIdHint must not be blank when provided."
+        }
+        require(groupOwnerAddress.isNotBlank()) {
+            "Automated diagnostics hybrid SOCKET_HINT groupOwnerAddress must not be blank."
+        }
+        require(socketPort in 1..65535) {
+            "Automated diagnostics hybrid SOCKET_HINT socketPort must be within 1..65535."
+        }
+        require(createdAtMillis >= 0L) {
+            "Automated diagnostics hybrid SOCKET_HINT createdAtMillis must be non-negative."
+        }
+        require(observedAtMonotonicMillis >= 0L) {
+            "Automated diagnostics hybrid SOCKET_HINT observedAtMonotonicMillis must be non-negative."
+        }
+    }
+
+    val recorded: Boolean
+        get() = storeResult == HybridTransportControlStore.RecordResult.Stored
+}
+
 enum class AutomatedDiagnosticsCoordinationRejectionReason(
     val statusText: String
 ) {
@@ -196,6 +577,7 @@ enum class AutomatedDiagnosticsCoordinationRejectionReason(
     WRONG_PEER("wrong-peer"),
     WRONG_SESSION("wrong-session"),
     STALE("stale"),
+    UNEXPECTED_PHASE("unexpected-phase"),
     INVALID_TOKEN("invalid-token"),
     INVALID_ADDRESS("invalid-address"),
     INVALID_PAYLOAD("invalid-payload"),
@@ -293,6 +675,7 @@ data class AutomatedDiagnosticsCoordinationCounters(
                 lastRejectedReason = reason
             )
 
+            AutomatedDiagnosticsCoordinationRejectionReason.UNEXPECTED_PHASE,
             AutomatedDiagnosticsCoordinationRejectionReason.INVALID_TOKEN,
             AutomatedDiagnosticsCoordinationRejectionReason.INVALID_ADDRESS,
             AutomatedDiagnosticsCoordinationRejectionReason.INVALID_PAYLOAD,
@@ -396,6 +779,36 @@ sealed interface AutomatedDiagnosticsServerReadySendResult {
     }
 }
 
+sealed interface AutomatedDiagnosticsPhaseStateSendResult {
+    data class Sent(
+        val signal: AutomatedDiagnosticsPhaseSignal
+    ) : AutomatedDiagnosticsPhaseStateSendResult
+
+    data object NoActivePeer : AutomatedDiagnosticsPhaseStateSendResult
+
+    data object WriterUnavailable : AutomatedDiagnosticsPhaseStateSendResult
+
+    data class InvalidSignal(
+        val reason: String
+    ) : AutomatedDiagnosticsPhaseStateSendResult {
+        init {
+            require(reason.isNotBlank()) {
+                "Automated diagnostics invalid phase-state reason must not be blank."
+            }
+        }
+    }
+
+    data class SendFailed(
+        val reason: String
+    ) : AutomatedDiagnosticsPhaseStateSendResult {
+        init {
+            require(reason.isNotBlank()) {
+                "Automated diagnostics phase-state send failure reason must not be blank."
+            }
+        }
+    }
+}
+
 sealed interface AutomatedDiagnosticsWifiDirectPeerReadySendResult {
     data class Sent(
         val signal: AutomatedDiagnosticsWifiDirectPeerReadySignal
@@ -457,6 +870,15 @@ fun automatedDiagnosticsWifiDirectPeerReadyStatusText(
         "Wi-Fi peer-ready: run=${it.sharedRun.runId} sender=${it.peerId} " +
             "remote=${it.expectedRemotePeerId} token=${it.wifiDirectCorrelationTokenFingerprint()} " +
             "name=${it.wifiDirectDeviceName ?: "none"}"
+    }
+}
+
+fun automatedDiagnosticsPhaseStateStatusText(
+    signal: AutomatedDiagnosticsPhaseSignal?
+): String? {
+    return signal?.let {
+        "Phase state: run=${it.sharedRun.runId} peer=${it.peerId} remote=${it.expectedRemotePeerId} " +
+            "step=${it.stepId.stepNumber} state=${it.phaseState.statusText} attempt=${it.attemptNumber}"
     }
 }
 
@@ -568,5 +990,26 @@ fun automatedDiagnosticsServerReadySendStatusText(
 
         is AutomatedDiagnosticsServerReadySendResult.SendFailed ->
             "Server-ready signal failed: ${result.reason}"
+    }
+}
+
+fun automatedDiagnosticsPhaseStateSendStatusText(
+    result: AutomatedDiagnosticsPhaseStateSendResult
+): String {
+    return when (result) {
+        is AutomatedDiagnosticsPhaseStateSendResult.Sent ->
+            "Phase state sent: ${automatedDiagnosticsPhaseStateStatusText(result.signal)}"
+
+        AutomatedDiagnosticsPhaseStateSendResult.NoActivePeer ->
+            "Phase state unavailable: no active BLE peer."
+
+        AutomatedDiagnosticsPhaseStateSendResult.WriterUnavailable ->
+            "Phase state unavailable: BLE writer unavailable."
+
+        is AutomatedDiagnosticsPhaseStateSendResult.InvalidSignal ->
+            "Phase state invalid: ${result.reason}"
+
+        is AutomatedDiagnosticsPhaseStateSendResult.SendFailed ->
+            "Phase state failed: ${result.reason}"
     }
 }

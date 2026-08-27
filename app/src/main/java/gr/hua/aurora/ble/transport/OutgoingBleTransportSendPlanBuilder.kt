@@ -29,7 +29,7 @@ object OutgoingBleTransportSendPlanBuilder {
         )
     }
 
-    private fun deriveGroupId(
+    internal fun deriveGroupId(
         messageId: String,
         targetPeerId: String?
     ): Int {

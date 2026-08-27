@@ -11,6 +11,7 @@ class HybridBootstrapAttemptPolicyTest {
         val result = HybridBootstrapAttemptPolicy.decide(
             resolution = HybridBootstrapSocketEndpointResolution.NoCandidates,
             requestedAtMillis = 1_727_000_001L,
+            currentMonotonicMillis = 1_001L,
             maxEndpointAgeMillis = 30_000L
         )
 
@@ -22,6 +23,7 @@ class HybridBootstrapAttemptPolicyTest {
         val result = HybridBootstrapAttemptPolicy.decide(
             resolution = HybridBootstrapSocketEndpointResolution.NoSocketReadyCandidate,
             requestedAtMillis = 1_727_000_002L,
+            currentMonotonicMillis = 1_002L,
             maxEndpointAgeMillis = 30_000L
         )
 
@@ -35,6 +37,7 @@ class HybridBootstrapAttemptPolicyTest {
                 "Selected hybrid bootstrap candidate socketPort is missing."
             ),
             requestedAtMillis = 1_727_000_003L,
+            currentMonotonicMillis = 1_003L,
             maxEndpointAgeMillis = 30_000L
         )
 
@@ -50,9 +53,11 @@ class HybridBootstrapAttemptPolicyTest {
     fun resolvedFreshEndpointReturnsAllowed() {
         val result = HybridBootstrapAttemptPolicy.decide(
             resolution = resolvedEndpoint(
-                latestCreatedAtMillis = 1_727_000_010L
+                latestCreatedAtMillis = 1_727_000_010L,
+                localSocketHintObservedAtMonotonicMillis = 1_990L
             ),
             requestedAtMillis = 1_727_000_020L,
+            currentMonotonicMillis = 2_000L,
             maxEndpointAgeMillis = 30_000L
         )
 
@@ -68,9 +73,11 @@ class HybridBootstrapAttemptPolicyTest {
                 bootstrapIdentifier = "bootstrap==Gamma/03",
                 groupOwnerAddress = "fe80::1234",
                 socketPort = 65535,
-                latestCreatedAtMillis = 1_727_000_030L
+                latestCreatedAtMillis = 1_727_000_030L,
+                localSocketHintObservedAtMonotonicMillis = 2_090L
             ),
             requestedAtMillis = 1_727_000_040L,
+            currentMonotonicMillis = 2_100L,
             maxEndpointAgeMillis = 30_000L
         )
 
@@ -94,9 +101,11 @@ class HybridBootstrapAttemptPolicyTest {
     fun endpointOlderThanMaxAgeReturnsEndpointTooOldWithExactAgeAndMax() {
         val result = HybridBootstrapAttemptPolicy.decide(
             resolution = resolvedEndpoint(
-                latestCreatedAtMillis = 1_727_000_050L
+                latestCreatedAtMillis = 1_727_000_050L,
+                localSocketHintObservedAtMonotonicMillis = 100L
             ),
             requestedAtMillis = 1_727_030_051L,
+            currentMonotonicMillis = 30_101L,
             maxEndpointAgeMillis = 30_000L
         )
 
@@ -110,30 +119,69 @@ class HybridBootstrapAttemptPolicyTest {
     }
 
     @Test
-    fun endpointTimestampInTheFutureReturnsInvalidEndpoint() {
+    fun missingLocalSocketHintObservationReturnsInvalidEndpoint() {
         val result = HybridBootstrapAttemptPolicy.decide(
             resolution = resolvedEndpoint(
-                latestCreatedAtMillis = 1_727_000_070L
+                latestCreatedAtMillis = 1_727_000_070L,
+                localSocketHintObservedAtMonotonicMillis = null
             ),
             requestedAtMillis = 1_727_000_069L,
+            currentMonotonicMillis = 2_200L,
             maxEndpointAgeMillis = 30_000L
         )
 
         assertEquals(
             HybridBootstrapAttemptDecision.InvalidEndpoint(
-                "Endpoint timestamp is in the future."
+                "Socket hint has not been observed locally."
             ),
             result
         )
     }
 
     @Test
+    fun socketHintObservationTimestampInTheFutureReturnsInvalidEndpoint() {
+        val result = HybridBootstrapAttemptPolicy.decide(
+            resolution = resolvedEndpoint(
+                latestCreatedAtMillis = 1_727_000_080L,
+                localSocketHintObservedAtMonotonicMillis = 2_301L
+            ),
+            requestedAtMillis = 1_727_000_081L,
+            currentMonotonicMillis = 2_300L,
+            maxEndpointAgeMillis = 30_000L
+        )
+
+        assertEquals(
+            HybridBootstrapAttemptDecision.InvalidEndpoint(
+                "Socket hint observation timestamp is in the future."
+            ),
+            result
+        )
+    }
+
+    @Test
+    fun remoteEndpointCreatedAtMayBeAheadOfLocalWallClockWhenLocalObservationMatches() {
+        val result = HybridBootstrapAttemptPolicy.decide(
+            resolution = resolvedEndpoint(
+                latestCreatedAtMillis = 1_727_120_000L,
+                localSocketHintObservedAtMonotonicMillis = 2_390L
+            ),
+            requestedAtMillis = 1_727_000_100L,
+            currentMonotonicMillis = 2_400L,
+            maxEndpointAgeMillis = 30_000L
+        )
+
+        assertTrue(result is HybridBootstrapAttemptDecision.Allowed)
+    }
+
+    @Test
     fun negativeRequestedAtMillisReturnsInvalidEndpoint() {
         val result = HybridBootstrapAttemptPolicy.decide(
             resolution = resolvedEndpoint(
-                latestCreatedAtMillis = 1_727_000_080L
+                latestCreatedAtMillis = 1_727_000_080L,
+                localSocketHintObservedAtMonotonicMillis = 2_490L
             ),
             requestedAtMillis = -1L,
+            currentMonotonicMillis = 2_500L,
             maxEndpointAgeMillis = 30_000L
         )
 
@@ -146,12 +194,34 @@ class HybridBootstrapAttemptPolicyTest {
     }
 
     @Test
+    fun negativeCurrentMonotonicMillisReturnsInvalidEndpoint() {
+        val result = HybridBootstrapAttemptPolicy.decide(
+            resolution = resolvedEndpoint(
+                latestCreatedAtMillis = 1_727_000_090L,
+                localSocketHintObservedAtMonotonicMillis = 2_590L
+            ),
+            requestedAtMillis = 1_727_000_100L,
+            currentMonotonicMillis = -1L,
+            maxEndpointAgeMillis = 30_000L
+        )
+
+        assertEquals(
+            HybridBootstrapAttemptDecision.InvalidEndpoint(
+                "Current monotonic millis must be non-negative."
+            ),
+            result
+        )
+    }
+
+    @Test
     fun negativeMaxEndpointAgeMillisReturnsInvalidEndpoint() {
         val result = HybridBootstrapAttemptPolicy.decide(
             resolution = resolvedEndpoint(
-                latestCreatedAtMillis = 1_727_000_090L
+                latestCreatedAtMillis = 1_727_000_090L,
+                localSocketHintObservedAtMonotonicMillis = 2_590L
             ),
             requestedAtMillis = 1_727_000_100L,
+            currentMonotonicMillis = 2_600L,
             maxEndpointAgeMillis = -1L
         )
 
@@ -227,18 +297,6 @@ class HybridBootstrapAttemptPolicyTest {
     }
 
     @Test
-    fun attemptRequestValidationRejectsRequestedAtMillisBeforeLatestCreatedAtMillis() {
-        assertValidationFailure(
-            "Hybrid bootstrap attempt request requestedAtMillis must be greater than or equal to latestCreatedAtMillis."
-        ) {
-            request(
-                latestCreatedAtMillis = 1_727_000_120L,
-                requestedAtMillis = 1_727_000_119L
-            )
-        }
-    }
-
-    @Test
     fun policyDoesNotMutateEndpointResolution() {
         val resolution = resolvedEndpoint(
             peerId = "peer-stable",
@@ -246,7 +304,8 @@ class HybridBootstrapAttemptPolicyTest {
             bootstrapIdentifier = "bootstrap-stable",
             groupOwnerAddress = "192.168.49.90",
             socketPort = 9090,
-            latestCreatedAtMillis = 1_727_000_130L
+            latestCreatedAtMillis = 1_727_000_130L,
+            localSocketHintObservedAtMonotonicMillis = 2_690L
         )
         val before = resolution.copy(
             endpoint = resolution.endpoint.copy()
@@ -255,6 +314,7 @@ class HybridBootstrapAttemptPolicyTest {
         val result = HybridBootstrapAttemptPolicy.decide(
             resolution = resolution,
             requestedAtMillis = 1_727_000_131L,
+            currentMonotonicMillis = 2_700L,
             maxEndpointAgeMillis = 30_000L
         )
 
@@ -266,9 +326,11 @@ class HybridBootstrapAttemptPolicyTest {
     fun policyIsPassiveAndDoesNotPerformTransportOrSocketActions() {
         val result = HybridBootstrapAttemptPolicy.decide(
             resolution = resolvedEndpoint(
-                latestCreatedAtMillis = 1_727_000_140L
+                latestCreatedAtMillis = 1_727_000_140L,
+                localSocketHintObservedAtMonotonicMillis = 2_790L
             ),
             requestedAtMillis = 1_727_000_141L,
+            currentMonotonicMillis = 2_800L,
             maxEndpointAgeMillis = 30_000L
         )
 
@@ -281,7 +343,8 @@ class HybridBootstrapAttemptPolicyTest {
         bootstrapIdentifier: String = sessionId,
         groupOwnerAddress: String = "192.168.49.1",
         socketPort: Int = 8988,
-        latestCreatedAtMillis: Long
+        latestCreatedAtMillis: Long,
+        localSocketHintObservedAtMonotonicMillis: Long? = 1_000L
     ): HybridBootstrapSocketEndpointResolution.Resolved {
         return HybridBootstrapSocketEndpointResolution.Resolved(
             HybridBootstrapSocketEndpoint(
@@ -290,7 +353,9 @@ class HybridBootstrapAttemptPolicyTest {
                 bootstrapIdentifier = bootstrapIdentifier,
                 groupOwnerAddress = groupOwnerAddress,
                 socketPort = socketPort,
-                latestCreatedAtMillis = latestCreatedAtMillis
+                latestCreatedAtMillis = latestCreatedAtMillis,
+                localSocketHintObservedAtMonotonicMillis =
+                    localSocketHintObservedAtMonotonicMillis
             )
         )
     }

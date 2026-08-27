@@ -1,8 +1,11 @@
 package gr.hua.aurora.transport.hybrid
 
 import java.io.IOException
+import java.net.ConnectException
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 
 internal const val hybridBootstrapSocketDialMaxConnectTimeoutMillis = 30_000L
 
@@ -65,13 +68,25 @@ class JavaNetHybridBootstrapSocketDialer(
                 port = port,
                 connectedAtMillis = nowMillis()
             )
+        } catch (_: SocketTimeoutException) {
+            HybridBootstrapSocketDialResult.Failed(
+                reason = "Hybrid bootstrap socket dial failed: SocketTimeoutException."
+            )
+        } catch (_: ConnectException) {
+            HybridBootstrapSocketDialResult.Failed(
+                reason = "Hybrid bootstrap socket dial failed: ConnectException."
+            )
+        } catch (_: UnknownHostException) {
+            HybridBootstrapSocketDialResult.Failed(
+                reason = "Hybrid bootstrap socket dial failed: UnknownHostException."
+            )
         } catch (_: SecurityException) {
             HybridBootstrapSocketDialResult.Failed(
-                reason = "Hybrid bootstrap socket dial failed: security error."
+                reason = "Hybrid bootstrap socket dial failed: SecurityException."
             )
         } catch (_: IOException) {
             HybridBootstrapSocketDialResult.Failed(
-                reason = "Hybrid bootstrap socket dial failed: I/O error."
+                reason = "Hybrid bootstrap socket dial failed: IOException."
             )
         }
     }

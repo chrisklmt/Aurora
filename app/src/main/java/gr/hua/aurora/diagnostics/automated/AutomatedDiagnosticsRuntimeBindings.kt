@@ -5,6 +5,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import gr.hua.aurora.ble.advertise.BleAdvertiseStatus
+import gr.hua.aurora.ble.transport.BleTransportLocalSendTrace
 import gr.hua.aurora.ble.connection.BleConnectionStatus
 import gr.hua.aurora.ble.discovery.BleDiscoveredDevice
 import gr.hua.aurora.ble.discovery.BleScanStatus
@@ -22,7 +23,11 @@ import gr.hua.aurora.protocol.PeerIdentityExchangeSendResult
 import gr.hua.aurora.protocol.PeerSessionRegistryDiagnostics
 import gr.hua.aurora.state.AuroraAvailabilityPreference
 import gr.hua.aurora.state.AuroraBleRuntimeState
+import gr.hua.aurora.state.GlobalQueuedChatSubmissionResult
+import gr.hua.aurora.state.PrivateQueuedChatSubmissionResult
 import gr.hua.aurora.state.AuroraStateHolder
+import gr.hua.aurora.state.sendGlobalChatMessageThroughProductionPath
+import gr.hua.aurora.state.sendPrivateChatMessageThroughProductionPath
 import gr.hua.aurora.wifidirect.debug.WifiDirectGlobalDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.debug.WifiDirectPrivateDebugSendDiagnostics
 import gr.hua.aurora.wifidirect.debug.WifiDirectReceiveBridgeDiagnostics
@@ -105,9 +110,24 @@ internal data class AutomatedDiagnosticsRuntimeSnapshot(
     val latestAutomatedDiagnosticsParticipantJoin: AutomatedDiagnosticsParticipantJoin? = null,
     val latestAutomatedDiagnosticsWifiDirectPeerReadySignal:
     AutomatedDiagnosticsWifiDirectPeerReadySignal? = null,
+    val latestAutomatedDiagnosticsPhaseSignal: AutomatedDiagnosticsPhaseSignal? = null,
+    val latestAutomatedDiagnosticsPhaseSignalsByStep:
+    Map<AutomatedDiagnosticStepId, AutomatedDiagnosticsPhaseSignal> = emptyMap(),
     val latestAutomatedDiagnosticsServerReadySignal: AutomatedDiagnosticsServerReadySignal? = null,
+    val latestAutomatedDiagnosticsHybridAcceptObservation:
+    AutomatedDiagnosticsHybridAcceptObservation? = null,
+    val latestAutomatedDiagnosticsHybridSocketHintObservation:
+    AutomatedDiagnosticsHybridSocketHintObservation? = null,
+    val recentBleTransportLocalSendTraces: List<BleTransportLocalSendTrace> = emptyList(),
+    val recentAutomatedDiagnosticsApplicationProbeObservations:
+    List<AutomatedDiagnosticsApplicationProbeObservation> = emptyList(),
+    val recentAutomatedDiagnosticsApplicationProbeTransportReceiveEvents:
+    List<AutomatedDiagnosticsApplicationProbeTransportReceiveEvent> = emptyList(),
+    val recentAutomatedDiagnosticsApplicationProbeReceiveDiagnostics:
+    List<AutomatedDiagnosticsApplicationProbeReceiveDiagnostic> = emptyList(),
     val lastAutomatedDiagnosticsCoordinationStatus: String? = null,
     val lastAutomatedDiagnosticsWifiDirectPeerReadyStatus: String? = null,
+    val lastAutomatedDiagnosticsPhaseStatus: String? = null,
     val lastAutomatedDiagnosticsServerReadyStatus: String? = null,
     val hybridBootstrapManualTriggerSnapshot: HybridBootstrapManualTriggerSnapshot,
     val hybridBootstrapManualAcceptAvailable: Boolean,
@@ -160,13 +180,30 @@ internal data class AutomatedDiagnosticsRunnerCommands(
         String?
     ) -> AutomatedDiagnosticsWifiDirectPeerReadySendResult =
         { _, _, _, _ -> AutomatedDiagnosticsWifiDirectPeerReadySendResult.NoActivePeer },
+    val requestAutomatedDiagnosticsPhaseState:
+    suspend (
+        AutomatedDiagnosticsSharedRun,
+        String,
+        AutomatedDiagnosticStepId,
+        AutomatedDiagnosticsPhaseState,
+        Int,
+        List<AutomatedDiagnosticsPhaseApplicationProbeDescriptor>
+    ) -> AutomatedDiagnosticsPhaseStateSendResult =
+        { _, _, _, _, _, _ -> AutomatedDiagnosticsPhaseStateSendResult.NoActivePeer },
+    val recordAcceptedAutomatedDiagnosticsPhaseSignalSourceAssociation:
+    (AutomatedDiagnosticsPhaseSignal) -> Unit = {},
     val requestAutomatedDiagnosticsServerReadySignal:
     suspend (AutomatedDiagnosticsSharedRun, String, String, Int, Long) -> AutomatedDiagnosticsServerReadySendResult =
         { _, _, _, _, _ -> AutomatedDiagnosticsServerReadySendResult.NoActivePeer },
-    val requestHybridBootstrapManualTrigger: () -> HybridBootstrapCommandTriggerResult,
+    val requestHybridBootstrapManualTrigger: suspend () -> HybridBootstrapCommandTriggerResult,
     val requestHybridBootstrapManualOffer: suspend () -> HybridBootstrapManualOfferSendResult,
     val requestHybridBootstrapManualAccept: suspend () -> HybridBootstrapManualAcceptSendResult,
-    val requestHybridBootstrapManualSocketHint: suspend () -> HybridBootstrapManualSocketHintSendResult
+    val requestHybridBootstrapManualSocketHint: suspend () -> HybridBootstrapManualSocketHintSendResult,
+    val sendGlobalChatMessage: suspend (String) -> GlobalQueuedChatSubmissionResult? =
+        { null },
+    val sendPrivateChatMessage: suspend (String, String) -> PrivateQueuedChatSubmissionResult? =
+        { _, _ -> null },
+    val removeMessagesByIds: (Set<String>) -> Set<String> = { emptySet() }
 )
 
 internal class AutomatedDiagnosticsRunnerBindings(
@@ -220,12 +257,30 @@ internal fun createAutomatedDiagnosticsRunnerBindings(
                 runtimeState.latestAutomatedDiagnosticsParticipantJoin,
                 latestAutomatedDiagnosticsWifiDirectPeerReadySignal =
                 runtimeState.latestAutomatedDiagnosticsWifiDirectPeerReadySignal,
+                latestAutomatedDiagnosticsPhaseSignal =
+                runtimeState.latestAutomatedDiagnosticsPhaseSignal,
+                latestAutomatedDiagnosticsPhaseSignalsByStep =
+                runtimeState.latestAutomatedDiagnosticsPhaseSignalsByStep,
                 latestAutomatedDiagnosticsServerReadySignal =
                 runtimeState.latestAutomatedDiagnosticsServerReadySignal,
+                latestAutomatedDiagnosticsHybridAcceptObservation =
+                runtimeState.latestAutomatedDiagnosticsHybridAcceptObservation,
+                latestAutomatedDiagnosticsHybridSocketHintObservation =
+                runtimeState.latestAutomatedDiagnosticsHybridSocketHintObservation,
+                recentBleTransportLocalSendTraces =
+                runtimeState.recentBleTransportLocalSendTraces,
+                recentAutomatedDiagnosticsApplicationProbeObservations =
+                runtimeState.recentAutomatedDiagnosticsApplicationProbeObservations,
+                recentAutomatedDiagnosticsApplicationProbeTransportReceiveEvents =
+                runtimeState.recentAutomatedDiagnosticsApplicationProbeTransportReceiveEvents,
+                recentAutomatedDiagnosticsApplicationProbeReceiveDiagnostics =
+                runtimeState.recentAutomatedDiagnosticsApplicationProbeReceiveDiagnostics,
                 lastAutomatedDiagnosticsCoordinationStatus =
                 runtimeState.lastAutomatedDiagnosticsCoordinationStatus,
                 lastAutomatedDiagnosticsWifiDirectPeerReadyStatus =
                 runtimeState.lastAutomatedDiagnosticsWifiDirectPeerReadyStatus,
+                lastAutomatedDiagnosticsPhaseStatus =
+                runtimeState.lastAutomatedDiagnosticsPhaseStatus,
                 lastAutomatedDiagnosticsServerReadyStatus =
                 runtimeState.lastAutomatedDiagnosticsServerReadyStatus,
                 hybridBootstrapManualTriggerSnapshot =
@@ -348,6 +403,26 @@ internal fun createAutomatedDiagnosticsRunnerBindings(
                     wifiDirectDeviceName
                 )
             },
+                    requestAutomatedDiagnosticsPhaseState = {
+                            sharedRun,
+                            expectedRemotePeerId,
+                            stepId,
+                            phaseState,
+                            attemptNumber,
+                            applicationProbeDescriptors ->
+                        bleRuntimeStateProvider().onAutomatedDiagnosticsPhaseStateRequested(
+                            sharedRun,
+                            expectedRemotePeerId,
+                            stepId,
+                            phaseState,
+                            attemptNumber,
+                            applicationProbeDescriptors
+                        )
+                    },
+            recordAcceptedAutomatedDiagnosticsPhaseSignalSourceAssociation = { signal ->
+                bleRuntimeStateProvider()
+                    .recordAcceptedAutomatedDiagnosticsPhaseSignalSourceAssociation(signal)
+            },
             requestAutomatedDiagnosticsServerReadySignal = {
                     sharedRun,
                     peerId,
@@ -373,6 +448,51 @@ internal fun createAutomatedDiagnosticsRunnerBindings(
             },
             requestHybridBootstrapManualSocketHint = {
                 bleRuntimeStateProvider().onHybridBootstrapManualSocketHintRequested()
+            },
+            sendGlobalChatMessage = { text ->
+                sendGlobalChatMessageThroughProductionPath(
+                    text = text,
+                    stateHolder = stateHolderProvider(),
+                    currentUsername = { stateHolderProvider().uiState.globalChatUsername },
+                    submitTransport = { message, senderId ->
+                        bleRuntimeStateProvider().submitGlobalMeshMessageWithOptionalWifiDirect(
+                            message,
+                            senderId,
+                            if (wifiDirectSocketStateProvider().globalDebugSendDiagnostics.enabled) {
+                                null
+                            } else {
+                                wifiDirectSocketStateProvider().transportSender
+                            }
+                        )
+                    },
+                    submitWifiDirectDebugTransport =
+                    if (wifiDirectSocketStateProvider().globalDebugSendDiagnostics.enabled) {
+                        wifiDirectSocketStateProvider().sendGlobalDebugMessage
+                    } else {
+                        null
+                    }
+                )
+            },
+            sendPrivateChatMessage = { peerId, text ->
+                sendPrivateChatMessageThroughProductionPath(
+                    peerId = peerId,
+                    text = text,
+                    stateHolder = stateHolderProvider(),
+                    currentUsername = { stateHolderProvider().uiState.privateProfileUsername },
+                    resolvePrivateChatId = { targetPeerId ->
+                        stateHolderProvider().privateChatIdentityForPeerId(targetPeerId)?.privateChatId
+                    },
+                    submitTransport = bleRuntimeStateProvider().submitPrivateChatMessage,
+                    submitWifiDirectDebugTransport =
+                    if (wifiDirectSocketStateProvider().privateDebugSendDiagnostics.enabled) {
+                        wifiDirectSocketStateProvider().sendPrivateDebugMessage
+                    } else {
+                        null
+                    }
+                )
+            },
+            removeMessagesByIds = { messageIds ->
+                stateHolderProvider().removeMessagesByIds(messageIds)
             }
         ),
         scope = scope

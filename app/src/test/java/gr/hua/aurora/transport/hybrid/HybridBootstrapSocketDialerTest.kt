@@ -1,7 +1,11 @@
 package gr.hua.aurora.transport.hybrid
 
 import gr.hua.aurora.state.currentHybridBootstrapCommandExecutorConfig
+import gr.hua.aurora.wifidirect.socket.AndroidWifiDirectSocketController
+import gr.hua.aurora.wifidirect.socket.WifiDirectSocketState
+import java.net.ConnectException
 import java.io.IOException
+import java.net.SocketTimeoutException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.charset.StandardCharsets.UTF_8
@@ -357,7 +361,90 @@ class HybridBootstrapSocketDialerTest {
 
         assertEquals(
             HybridBootstrapSocketDialResult.Failed(
-                reason = "Hybrid bootstrap socket dial failed: I/O error."
+                reason = "Hybrid bootstrap socket dial failed: IOException."
+            ),
+            result
+        )
+    }
+
+    @Test
+    fun javaNetDialerReturnsSafeFailureForConnectException() {
+        val dialer = JavaNetHybridBootstrapSocketDialer(
+            socketFactory = {
+                throw ConnectException("connection refused")
+            }
+        )
+
+        val result = dialer.dial(
+            address = "192.168.49.25",
+            port = 9_025,
+            connectTimeoutMillis = 5_000L
+        )
+
+        assertEquals(
+            HybridBootstrapSocketDialResult.Failed(
+                reason = "Hybrid bootstrap socket dial failed: ConnectException."
+            ),
+            result
+        )
+    }
+
+    @Test
+    fun javaNetDialerReturnsControlledConnectExceptionWhenStepTwelveSocketAlreadyConsumedSingleAccept() {
+        val server = AndroidWifiDirectSocketController(requestedPort = 0)
+
+        try {
+            server.startServer(hostHint = "127.0.0.1")
+            awaitSocketCondition {
+                server.currentDiagnostics().state == WifiDirectSocketState.SERVER_LISTENING
+            }
+            val listeningPort = requireNotNull(server.currentDiagnostics().endpoint?.port)
+            val client = AndroidWifiDirectSocketController(requestedPort = listeningPort)
+
+            try {
+                client.connectClient("127.0.0.1")
+                awaitSocketCondition {
+                    client.currentDiagnostics().state == WifiDirectSocketState.CONNECTED &&
+                        server.currentDiagnostics().state == WifiDirectSocketState.CONNECTED
+                }
+
+                val result = JavaNetHybridBootstrapSocketDialer().dial(
+                    address = "127.0.0.1",
+                    port = listeningPort,
+                    connectTimeoutMillis = 250L
+                )
+
+                assertEquals(
+                    HybridBootstrapSocketDialResult.Failed(
+                        reason = "Hybrid bootstrap socket dial failed: ConnectException."
+                    ),
+                    result
+                )
+            } finally {
+                client.dispose()
+            }
+        } finally {
+            server.dispose()
+        }
+    }
+
+    @Test
+    fun javaNetDialerReturnsSafeFailureForSocketTimeoutException() {
+        val dialer = JavaNetHybridBootstrapSocketDialer(
+            socketFactory = {
+                throw SocketTimeoutException("timed out")
+            }
+        )
+
+        val result = dialer.dial(
+            address = "192.168.49.26",
+            port = 9_026,
+            connectTimeoutMillis = 5_000L
+        )
+
+        assertEquals(
+            HybridBootstrapSocketDialResult.Failed(
+                reason = "Hybrid bootstrap socket dial failed: SocketTimeoutException."
             ),
             result
         )
@@ -379,7 +466,7 @@ class HybridBootstrapSocketDialerTest {
 
         assertEquals(
             HybridBootstrapSocketDialResult.Failed(
-                reason = "Hybrid bootstrap socket dial failed: security error."
+                reason = "Hybrid bootstrap socket dial failed: SecurityException."
             ),
             result
         )
@@ -465,6 +552,19 @@ class HybridBootstrapSocketDialerTest {
             requestedAtMillis = 1_740_000_101L,
             commandCreatedAtMillis = 1_740_000_102L
         )
+    }
+
+    private fun awaitSocketCondition(
+        timeoutMillis: Long = 5_000L,
+        condition: () -> Boolean
+    ) {
+        val startMillis = System.currentTimeMillis()
+        while (!condition()) {
+            if (System.currentTimeMillis() - startMillis > timeoutMillis) {
+                throw AssertionError("Timed out waiting for socket condition.")
+            }
+            Thread.sleep(25L)
+        }
     }
 
     private fun newMainSourcePaths(): List<String> {

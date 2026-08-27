@@ -4,8 +4,10 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.DisposableEffect
 import androidx.activity.viewModels
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.navigation.compose.rememberNavController
 import gr.hua.aurora.data.LocalProfileStore
 import gr.hua.aurora.data.persistence.FileAuroraPersistenceStore
@@ -14,6 +16,7 @@ import gr.hua.aurora.diagnostics.automated.rememberAutomatedDiagnosticsRunnerBin
 import gr.hua.aurora.navigation.NavGraph
 import gr.hua.aurora.state.AuroraStateViewModel
 import gr.hua.aurora.state.rememberAuroraBleRuntimeState
+import gr.hua.aurora.transport.hybrid.ConnectedWifiDirectTransportHybridBootstrapSocketConnector
 import gr.hua.aurora.ui.theme.AuroraTheme
 import gr.hua.aurora.wifidirect.socket.rememberWifiDirectSocketState
 
@@ -48,6 +51,25 @@ class MainActivity : ComponentActivity() {
                     runtimeStatus = bleRuntimeState.wifiDirectRuntimeStatus,
                     processReceiveBridgeFrame = bleRuntimeState.receiveWifiDirectDebugTransportFrame
                 )
+                val latestWifiDirectSocketState = rememberUpdatedState(wifiDirectSocketState)
+                val hybridBootstrapSocketConnector = remember {
+                    ConnectedWifiDirectTransportHybridBootstrapSocketConnector(
+                        currentSocketDiagnostics = {
+                            latestWifiDirectSocketState.value.diagnostics
+                        },
+                        currentAdapterDiagnostics = {
+                            latestWifiDirectSocketState.value.adapterDiagnostics
+                        }
+                    )
+                }
+                DisposableEffect(bleRuntimeState, hybridBootstrapSocketConnector) {
+                    bleRuntimeState.setHybridBootstrapSocketConnectorOverride(
+                        hybridBootstrapSocketConnector
+                    )
+                    onDispose {
+                        bleRuntimeState.setHybridBootstrapSocketConnectorOverride(null)
+                    }
+                }
                 val automatedDiagnosticsBindings = rememberAutomatedDiagnosticsRunnerBindings(
                     stateHolder = stateHolder,
                     bleRuntimeState = bleRuntimeState,

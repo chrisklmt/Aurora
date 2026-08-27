@@ -204,18 +204,6 @@ class HybridBootstrapAttemptCommandBuilderTest {
     }
 
     @Test
-    fun commandValidationRejectsRequestedAtMillisBeforeLatestCreatedAtMillis() {
-        assertValidationFailure(
-            "Hybrid bootstrap attempt command requestedAtMillis must be greater than or equal to latestCreatedAtMillis."
-        ) {
-            command(
-                latestCreatedAtMillis = 1_728_000_040L,
-                requestedAtMillis = 1_728_000_039L
-            )
-        }
-    }
-
-    @Test
     fun commandValidationRejectsCommandCreatedAtMillisBeforeRequestedAtMillis() {
         assertValidationFailure(
             "Hybrid bootstrap attempt command commandCreatedAtMillis must be greater than or equal to requestedAtMillis."

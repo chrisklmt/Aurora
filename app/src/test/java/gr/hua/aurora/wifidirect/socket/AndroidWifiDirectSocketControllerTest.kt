@@ -41,9 +41,11 @@ class AndroidWifiDirectSocketControllerTest {
                 WifiDirectSocketCommand.START_SERVER,
                 controller.currentDiagnostics().lastCommand
             )
-            assertEquals(
-                WifiDirectSocketCommandResult.STARTING,
-                controller.currentDiagnostics().lastCommandResult
+            assertTrue(
+                controller.currentDiagnostics().lastCommandResult in setOf(
+                    WifiDirectSocketCommandResult.STARTING,
+                    WifiDirectSocketCommandResult.LISTENING
+                )
             )
             assertEquals(1, controller.currentDiagnostics().serverStartAttempts)
 

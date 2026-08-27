@@ -2,7 +2,8 @@ package gr.hua.aurora.transport.hybrid
 
 object HybridBootstrapSocketEndpointResolver {
     fun resolve(
-        decision: HybridBootstrapDecision
+        decision: HybridBootstrapDecision,
+        socketHintObservation: HybridBootstrapSocketHintObservation? = null
     ): HybridBootstrapSocketEndpointResolution {
         return when (val selection = decision.selection) {
             HybridBootstrapCandidateSelection.NoCandidates ->
@@ -10,12 +11,16 @@ object HybridBootstrapSocketEndpointResolver {
             HybridBootstrapCandidateSelection.NoSocketReadyCandidates ->
                 HybridBootstrapSocketEndpointResolution.NoSocketReadyCandidate
             is HybridBootstrapCandidateSelection.Selected ->
-                resolveSelectedCandidate(selection.candidate)
+                resolveSelectedCandidate(
+                    candidate = selection.candidate,
+                    socketHintObservation = socketHintObservation
+                )
         }
     }
 
     private fun resolveSelectedCandidate(
-        candidate: HybridBootstrapCandidate
+        candidate: HybridBootstrapCandidate,
+        socketHintObservation: HybridBootstrapSocketHintObservation?
     ): HybridBootstrapSocketEndpointResolution {
         if (!candidate.socketReady) {
             return invalidResolution(
@@ -70,9 +75,28 @@ object HybridBootstrapSocketEndpointResolver {
                 bootstrapIdentifier = candidate.bootstrapIdentifier,
                 groupOwnerAddress = groupOwnerAddress,
                 socketPort = socketPort,
-                latestCreatedAtMillis = candidate.latestCreatedAtMillis
+                latestCreatedAtMillis = candidate.latestCreatedAtMillis,
+                localSocketHintObservedAtMonotonicMillis =
+                    socketHintObservation
+                        ?.takeIf {
+                            matchesSocketHintObservation(
+                                candidate = candidate,
+                                observation = it
+                            )
+                        }
+                        ?.observedAtMonotonicMillis
             )
         )
+    }
+
+    private fun matchesSocketHintObservation(
+        candidate: HybridBootstrapCandidate,
+        observation: HybridBootstrapSocketHintObservation
+    ): Boolean {
+        return candidate.peerId == observation.peerId &&
+            candidate.sessionId == observation.sessionId &&
+            candidate.groupOwnerAddress == observation.groupOwnerAddress &&
+            candidate.socketPort == observation.socketPort
     }
 
     private fun invalidResolution(

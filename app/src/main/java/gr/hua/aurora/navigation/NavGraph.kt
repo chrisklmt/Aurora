@@ -9,15 +9,14 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsRunner
-import gr.hua.aurora.model.OutgoingChatMessage
-import gr.hua.aurora.protocol.GlobalMeshDeliveryResult
 import gr.hua.aurora.protocol.hasSessionForPeer
 import gr.hua.aurora.state.AuroraAvailabilityPreference
 import gr.hua.aurora.state.AuroraBleRuntimeState
 import gr.hua.aurora.state.AuroraStateHolder
-import gr.hua.aurora.state.PrivateChatTransportSubmission
-import gr.hua.aurora.state.submitGlobalMeshMessage
-import gr.hua.aurora.protocol.PrivateChatMessageSendResult
+import gr.hua.aurora.state.retryGlobalChatMessageThroughProductionPath
+import gr.hua.aurora.state.retryPrivateChatMessageThroughProductionPath
+import gr.hua.aurora.state.sendGlobalChatMessageThroughProductionPath
+import gr.hua.aurora.state.sendPrivateChatMessageThroughProductionPath
 import gr.hua.aurora.ui.screens.AutomatedDiagnosticsScreen
 import gr.hua.aurora.ui.screens.nearbyContactPeerId
 import gr.hua.aurora.ui.screens.ContactsScreen
@@ -91,67 +90,55 @@ internal fun NavGraph(
                     stateHolder.updateDesiredAvailability(preference)
                 },
                 onSendMessage = { text ->
-                    val queuedMessage = stateHolder.sendGlobalPreviewMessage(text)
-                    if (queuedMessage != null) {
-                        sendScope.launch {
-                            val transportResult = submitGlobalQueuedMessage(
-                                queuedMessage = queuedMessage,
-                                currentUsername = { stateHolder.uiState.globalChatUsername },
-                                submitTransport = { message, senderId ->
-                                    bleRuntimeState.submitGlobalMeshMessage(
-                                        message,
-                                        senderId,
-                                        if (wifiDirectSocketState.globalDebugSendDiagnostics.enabled) {
-                                            null
-                                        } else {
-                                            wifiDirectSocketState.transportSender
-                                        }
-                                    )
-                                },
-                                submitWifiDirectDebugTransport =
-                                if (wifiDirectSocketState.globalDebugSendDiagnostics.enabled) {
-                                    wifiDirectSocketState.sendGlobalDebugMessage
-                                } else {
-                                    null
-                                }
-                            )
-                            stateHolder.handleGlobalMeshDeliveryResult(
-                                messageId = queuedMessage.messageId,
-                                result = transportResult
-                            )
-                        }
+                    sendScope.launch {
+                        sendGlobalChatMessageThroughProductionPath(
+                            text = text,
+                            stateHolder = stateHolder,
+                            currentUsername = { stateHolder.uiState.globalChatUsername },
+                            submitTransport = { message, senderId ->
+                                bleRuntimeState.submitGlobalMeshMessageWithOptionalWifiDirect(
+                                    message,
+                                    senderId,
+                                    if (wifiDirectSocketState.globalDebugSendDiagnostics.enabled) {
+                                        null
+                                    } else {
+                                        wifiDirectSocketState.transportSender
+                                    }
+                                )
+                            },
+                            submitWifiDirectDebugTransport =
+                            if (wifiDirectSocketState.globalDebugSendDiagnostics.enabled) {
+                                wifiDirectSocketState.sendGlobalDebugMessage
+                            } else {
+                                null
+                            }
+                        )
                     }
                 },
                 onRetryMessage = { messageId ->
-                    val queuedMessage = stateHolder.retryGlobalOutgoingMessage(messageId)
-                    if (queuedMessage != null) {
-                        sendScope.launch {
-                            val transportResult = submitGlobalQueuedMessage(
-                                queuedMessage = queuedMessage,
-                                currentUsername = { stateHolder.uiState.globalChatUsername },
-                                submitTransport = { message, senderId ->
-                                    bleRuntimeState.submitGlobalMeshMessage(
-                                        message,
-                                        senderId,
-                                        if (wifiDirectSocketState.globalDebugSendDiagnostics.enabled) {
-                                            null
-                                        } else {
-                                            wifiDirectSocketState.transportSender
-                                        }
-                                    )
-                                },
-                                submitWifiDirectDebugTransport =
-                                if (wifiDirectSocketState.globalDebugSendDiagnostics.enabled) {
-                                    wifiDirectSocketState.sendGlobalDebugMessage
-                                } else {
-                                    null
-                                }
-                            )
-                            stateHolder.handleGlobalMeshDeliveryResult(
-                                messageId = queuedMessage.messageId,
-                                result = transportResult
-                            )
-                        }
+                    sendScope.launch {
+                        retryGlobalChatMessageThroughProductionPath(
+                            messageId = messageId,
+                            stateHolder = stateHolder,
+                            currentUsername = { stateHolder.uiState.globalChatUsername },
+                            submitTransport = { message, senderId ->
+                                bleRuntimeState.submitGlobalMeshMessageWithOptionalWifiDirect(
+                                    message,
+                                    senderId,
+                                    if (wifiDirectSocketState.globalDebugSendDiagnostics.enabled) {
+                                        null
+                                    } else {
+                                        wifiDirectSocketState.transportSender
+                                    }
+                                )
+                            },
+                            submitWifiDirectDebugTransport =
+                            if (wifiDirectSocketState.globalDebugSendDiagnostics.enabled) {
+                                wifiDirectSocketState.sendGlobalDebugMessage
+                            } else {
+                                null
+                            }
+                        )
                     }
                 },
                 onResetLocalData = onResetLocalData
@@ -219,57 +206,43 @@ internal fun NavGraph(
                 },
                 onBack = onNavigateBackOrGlobal,
                 onSendMessage = { text ->
-                    val queuedMessage = stateHolder.sendPrivateChatMessage(peerId, text)
-                    if (queuedMessage != null) {
-                        sendScope.launch {
-                            val transportResult = submitPrivateQueuedMessage(
-                                queuedMessage = queuedMessage,
-                                peerId = peerId,
-                                currentUsername = { stateHolder.uiState.privateProfileUsername },
-                                resolvePrivateChatId = { targetPeerId ->
-                                    stateHolder.privateChatIdentityForPeerId(targetPeerId)?.privateChatId
-                                },
-                                submitTransport = bleRuntimeState.submitPrivateChatMessage,
-                                submitWifiDirectDebugTransport =
-                                if (wifiDirectSocketState.privateDebugSendDiagnostics.enabled) {
-                                    wifiDirectSocketState.sendPrivateDebugMessage
-                                } else {
-                                    null
-                                }
-                            )
-                            stateHolder.handlePrivateChatDeliveryResult(
-                                peerId = peerId,
-                                messageId = queuedMessage.messageId,
-                                result = transportResult
-                            )
-                        }
+                    sendScope.launch {
+                        sendPrivateChatMessageThroughProductionPath(
+                            peerId = peerId,
+                            text = text,
+                            stateHolder = stateHolder,
+                            currentUsername = { stateHolder.uiState.privateProfileUsername },
+                            resolvePrivateChatId = { targetPeerId ->
+                                stateHolder.privateChatIdentityForPeerId(targetPeerId)?.privateChatId
+                            },
+                            submitTransport = bleRuntimeState.submitPrivateChatMessage,
+                            submitWifiDirectDebugTransport =
+                            if (wifiDirectSocketState.privateDebugSendDiagnostics.enabled) {
+                                wifiDirectSocketState.sendPrivateDebugMessage
+                            } else {
+                                null
+                            }
+                        )
                     }
                 },
                 onRetryMessage = { messageId ->
-                    val queuedMessage = stateHolder.retryPrivateChatOutgoingMessage(peerId, messageId)
-                    if (queuedMessage != null) {
-                        sendScope.launch {
-                            val transportResult = submitPrivateQueuedMessage(
-                                queuedMessage = queuedMessage,
-                                peerId = peerId,
-                                currentUsername = { stateHolder.uiState.privateProfileUsername },
-                                resolvePrivateChatId = { targetPeerId ->
-                                    stateHolder.privateChatIdentityForPeerId(targetPeerId)?.privateChatId
-                                },
-                                submitTransport = bleRuntimeState.submitPrivateChatMessage,
-                                submitWifiDirectDebugTransport =
-                                if (wifiDirectSocketState.privateDebugSendDiagnostics.enabled) {
-                                    wifiDirectSocketState.sendPrivateDebugMessage
-                                } else {
-                                    null
-                                }
-                            )
-                            stateHolder.handlePrivateChatDeliveryResult(
-                                peerId = peerId,
-                                messageId = queuedMessage.messageId,
-                                result = transportResult
-                            )
-                        }
+                    sendScope.launch {
+                        retryPrivateChatMessageThroughProductionPath(
+                            peerId = peerId,
+                            messageId = messageId,
+                            stateHolder = stateHolder,
+                            currentUsername = { stateHolder.uiState.privateProfileUsername },
+                            resolvePrivateChatId = { targetPeerId ->
+                                stateHolder.privateChatIdentityForPeerId(targetPeerId)?.privateChatId
+                            },
+                            submitTransport = bleRuntimeState.submitPrivateChatMessage,
+                            submitWifiDirectDebugTransport =
+                            if (wifiDirectSocketState.privateDebugSendDiagnostics.enabled) {
+                                wifiDirectSocketState.sendPrivateDebugMessage
+                            } else {
+                                null
+                            }
+                        )
                     }
                 },
                 onResetLocalData = onResetLocalData
@@ -397,62 +370,4 @@ internal fun NavGraph(
             )
         }
     }
-}
-
-internal suspend fun submitGlobalQueuedMessage(
-    queuedMessage: OutgoingChatMessage,
-    currentUsername: () -> String,
-    submitTransport: suspend (OutgoingChatMessage, String) -> GlobalMeshDeliveryResult,
-    submitWifiDirectDebugTransport: ((OutgoingChatMessage, String) -> Unit)? = null
-): GlobalMeshDeliveryResult {
-    val senderId = currentUsername().trim()
-    val transportResult = runCatching {
-        submitTransport(
-            queuedMessage,
-            senderId
-        )
-    }.getOrElse { error ->
-        GlobalMeshDeliveryResult.Failed(
-            reason = error.message ?: "Public mesh transport submission failed."
-        )
-    }
-    runCatching {
-        submitWifiDirectDebugTransport?.invoke(
-            queuedMessage,
-            senderId
-        )
-    }
-    return transportResult
-}
-
-internal suspend fun submitPrivateQueuedMessage(
-    queuedMessage: OutgoingChatMessage,
-    peerId: String,
-    currentUsername: () -> String,
-    resolvePrivateChatId: (String) -> String?,
-    submitTransport: suspend (OutgoingChatMessage, String, String) -> PrivateChatTransportSubmission,
-    submitWifiDirectDebugTransport: ((gr.hua.aurora.protocol.PreparedPrivateChatTransportFrame) -> Unit)? = null
-): PrivateChatMessageSendResult {
-    val privateChatId = resolvePrivateChatId(peerId)
-        ?.trim()
-        ?.takeIf { it.isNotEmpty() }
-        ?: return PrivateChatMessageSendResult.KeysUnavailable
-
-    val submission = runCatching {
-        submitTransport(
-            queuedMessage,
-            currentUsername().trim(),
-            privateChatId
-        )
-    }.getOrElse { error ->
-        return PrivateChatMessageSendResult.Failed(
-            reason = error.message ?: "Private chat transport submission failed."
-        )
-    }
-    runCatching {
-        submission.preparedTransportFrame?.let { preparedTransportFrame ->
-            submitWifiDirectDebugTransport?.invoke(preparedTransportFrame)
-        }
-    }
-    return submission.result
 }

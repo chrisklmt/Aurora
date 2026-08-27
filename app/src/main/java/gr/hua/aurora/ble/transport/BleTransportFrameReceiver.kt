@@ -52,12 +52,18 @@ class BleTransportFrameReceiver(
             }
             is BleTransportReceiveBuffer.BufferResult.InvalidChunk -> {
                 BleTransportReceiveResult.InvalidChunk(
-                    reason = bufferResult.reason
+                    reason = bufferResult.reason,
+                    groupId = bufferResult.groupId,
+                    receivedChunks = bufferResult.receivedChunks,
+                    expectedChunks = bufferResult.expectedChunks
                 )
             }
             is BleTransportReceiveBuffer.BufferResult.BufferOverflow -> {
                 BleTransportReceiveResult.BufferOverflow(
-                    reason = bufferResult.reason
+                    reason = bufferResult.reason,
+                    groupId = bufferResult.groupId,
+                    receivedChunks = bufferResult.receivedChunks,
+                    expectedChunks = bufferResult.expectedChunks
                 )
             }
         }

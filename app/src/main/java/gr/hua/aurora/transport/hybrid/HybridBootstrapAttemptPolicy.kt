@@ -6,11 +6,17 @@ object HybridBootstrapAttemptPolicy {
     fun decide(
         resolution: HybridBootstrapSocketEndpointResolution,
         requestedAtMillis: Long,
+        currentMonotonicMillis: Long,
         maxEndpointAgeMillis: Long = DEFAULT_MAX_ENDPOINT_AGE_MILLIS
     ): HybridBootstrapAttemptDecision {
         if (requestedAtMillis < 0L) {
             return invalidDecision(
                 "Requested at millis must be non-negative."
+            )
+        }
+        if (currentMonotonicMillis < 0L) {
+            return invalidDecision(
+                "Current monotonic millis must be non-negative."
             )
         }
         if (maxEndpointAgeMillis < 0L) {
@@ -30,6 +36,7 @@ object HybridBootstrapAttemptPolicy {
                 decideResolvedEndpoint(
                     endpoint = resolution.endpoint,
                     requestedAtMillis = requestedAtMillis,
+                    currentMonotonicMillis = currentMonotonicMillis,
                     maxEndpointAgeMillis = maxEndpointAgeMillis
                 )
         }
@@ -38,12 +45,18 @@ object HybridBootstrapAttemptPolicy {
     private fun decideResolvedEndpoint(
         endpoint: HybridBootstrapSocketEndpoint,
         requestedAtMillis: Long,
+        currentMonotonicMillis: Long,
         maxEndpointAgeMillis: Long
     ): HybridBootstrapAttemptDecision {
-        val ageMillis = requestedAtMillis - endpoint.latestCreatedAtMillis
+        val observedAtMonotonicMillis =
+            endpoint.localSocketHintObservedAtMonotonicMillis
+                ?: return invalidDecision(
+                    "Socket hint has not been observed locally."
+                )
+        val ageMillis = currentMonotonicMillis - observedAtMonotonicMillis
         if (ageMillis < 0L) {
             return invalidDecision(
-                "Endpoint timestamp is in the future."
+                "Socket hint observation timestamp is in the future."
             )
         }
         if (ageMillis > maxEndpointAgeMillis) {

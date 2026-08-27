@@ -18,6 +18,18 @@ import gr.hua.aurora.ble.transport.OutgoingBleTransportSendPlan
 import gr.hua.aurora.crypto.Sec1PublicKeyEncoding
 import gr.hua.aurora.data.LocalProfileSettings
 import gr.hua.aurora.data.LocalProfileSettingsStore
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticStepId
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsApplicationProbeAssociationOutcome
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsApplicationProbeDirection
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsApplicationProbeKind
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsApplicationProbeMarker
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsPhaseApplicationProbeDescriptor
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsApplicationProbeTransportReceiveEvent
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsApplicationProbeSelectedSecurePeerGate
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsApplicationProbeSourceResolutionSource
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsPhaseSignal
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsPhaseState
+import gr.hua.aurora.diagnostics.automated.AutomatedDiagnosticsSharedRun
 import gr.hua.aurora.identity.AndroidKeystoreLocalAgreementKey.PrivateKeyLoadResult
 import gr.hua.aurora.model.ChatMessage
 import gr.hua.aurora.model.MessageStatus
@@ -49,8 +61,10 @@ import gr.hua.aurora.transport.processing.IncomingTransportFrameProcessingResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptDecision
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommandBuildResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptCommand
+import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptPolicy
 import gr.hua.aurora.transport.hybrid.HybridBootstrapAttemptRequest
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCandidate
+import gr.hua.aurora.transport.hybrid.ConnectedWifiDirectTransportHybridBootstrapSocketConnector
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutorConfig
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutorFactory
 import gr.hua.aurora.transport.hybrid.HybridBootstrapCommandExecutorMode
@@ -68,15 +82,22 @@ import gr.hua.aurora.transport.hybrid.HybridBootstrapManualSocketHintSendResult
 import gr.hua.aurora.transport.hybrid.HybridBootstrapManualTriggerSnapshot
 import gr.hua.aurora.transport.hybrid.HybridBootstrapSocketEndpoint
 import gr.hua.aurora.transport.hybrid.HybridBootstrapSocketEndpointResolution
+import gr.hua.aurora.transport.hybrid.HybridBootstrapSocketHintObservation
 import gr.hua.aurora.transport.hybrid.HybridTransportControlFrameFactory
 import gr.hua.aurora.transport.hybrid.HybridTransportControlMessage
 import gr.hua.aurora.transport.hybrid.HybridTransportControlStore
 import gr.hua.aurora.transport.hybrid.InMemoryHybridTransportControlStore
 import gr.hua.aurora.wifidirect.frame.WifiDirectTransportFrame
+import gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterDiagnostics
+import gr.hua.aurora.wifidirect.frame.WifiDirectTransportAdapterState
 import gr.hua.aurora.wifidirect.runtime.WifiDirectConnectionRole
 import gr.hua.aurora.wifidirect.runtime.WifiDirectConnectionState
 import gr.hua.aurora.wifidirect.runtime.WifiDirectConnectionStatus
 import gr.hua.aurora.wifidirect.runtime.WifiDirectGroupFormedState
+import gr.hua.aurora.wifidirect.socket.WifiDirectSocketDiagnostics
+import gr.hua.aurora.wifidirect.socket.WifiDirectSocketEndpoint
+import gr.hua.aurora.wifidirect.socket.WifiDirectSocketRole
+import gr.hua.aurora.wifidirect.socket.WifiDirectSocketState
 import gr.hua.aurora.wifidirect.transport.WifiDirectTransportSendResult
 import gr.hua.aurora.wifidirect.transport.WifiDirectTransportSender
 import org.junit.Assert.assertArrayEquals
@@ -94,9 +115,16 @@ import java.security.KeyPairGenerator
 import java.security.interfaces.ECPrivateKey
 import java.security.interfaces.ECPublicKey
 import java.security.spec.ECGenParameterSpec
+import java.util.ArrayDeque
+import java.util.concurrent.Executors
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.startCoroutine
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 class AuroraBleRuntimeHostTest {
     @Test
@@ -1772,10 +1800,14 @@ class AuroraBleRuntimeHostTest {
             "Hybrid bootstrap: socket-ready peer=peer-owner session=offer-session-hint address=192.168.49.1 port=8988",
             hybridBootstrapDiagnosticsRuntimeStatusText(diagnostics)
         )
-        val commandBuildResult = currentHybridBootstrapAttemptCommandBuildResult(
-            provider = provider,
-            requestedAtMillis = 1_716_510_031L,
-            commandCreatedAtMillis = 1_716_510_032L
+        val commandBuildResult = requireNotNull(
+            hybridBootstrapAttemptCommandBuildResultAfterReceiveOrNull(
+                result = receiveResult,
+                provider = provider,
+                requestedAtMillis = 1_716_510_031L,
+                currentMonotonicMillis = 9_001L,
+                commandCreatedAtMillis = 1_716_510_032L
+            )
         )
         assertTrue(commandBuildResult is HybridBootstrapAttemptCommandBuildResult.Built)
         val manualTriggerSnapshot = currentHybridBootstrapManualTriggerSnapshot(
@@ -1785,6 +1817,247 @@ class AuroraBleRuntimeHostTest {
         assertTrue(manualTriggerSnapshot.canTriggerNow)
         assertEquals(initialGlobalMessages, holder.uiState.globalMessages)
         assertEquals(initialPrivateMessages, holder.uiState.privateMessagesByPeerId)
+    }
+
+    @Test
+    fun hybridBootstrapAttemptDecisionAfterReceiveUsesLocalSocketHintObservationInsteadOfRemoteWallClock() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(generatedUsername = "PIAIUFN1"),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+        val receiveResult = receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridSocketHintMessage(
+                    sessionId = "skewed-trigger-session",
+                    createdAtMillis = 1_716_780_000L,
+                    groupOwnerAddress = "192.168.49.81",
+                    socketPort = 9081
+                ),
+                frameId = "hybrid-skewed-trigger",
+                senderId = "peer-skewed-trigger"
+            )
+        )
+
+        val decision = requireNotNull(
+            hybridBootstrapAttemptDecisionAfterReceiveOrNull(
+                result = receiveResult,
+                provider = provider,
+                requestedAtMillis = 1_716_680_000L,
+                currentMonotonicMillis = 9_500L
+            )
+        )
+
+        assertTrue(decision is HybridBootstrapAttemptDecision.Allowed)
+    }
+
+    @Test
+    fun hybridBootstrapAttemptDecisionAfterReceiveAllowsRemoteWallClockBehindByOneHundredSeconds() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(generatedUsername = "PIAIUFN1"),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+        val receiveResult = receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridSocketHintMessage(
+                    sessionId = "skewed-trigger-session-behind",
+                    createdAtMillis = 1_716_580_000L,
+                    groupOwnerAddress = "192.168.49.82",
+                    socketPort = 9082
+                ),
+                frameId = "hybrid-skewed-trigger-behind",
+                senderId = "peer-skewed-trigger-behind"
+            )
+        )
+
+        val decision = requireNotNull(
+            hybridBootstrapAttemptDecisionAfterReceiveOrNull(
+                result = receiveResult,
+                provider = provider,
+                requestedAtMillis = 1_716_680_000L,
+                currentMonotonicMillis = 9_500L
+            )
+        )
+
+        assertTrue(decision is HybridBootstrapAttemptDecision.Allowed)
+    }
+
+    @Test
+    fun currentHybridBootstrapCommandBuildResultStaysBlockedWithoutMatchingLocalSocketHintProof() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(generatedUsername = "PIAIUFN1"),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+        receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridSocketHintMessage(
+                    sessionId = "missing-proof-session",
+                    createdAtMillis = 1_716_810_000L,
+                    groupOwnerAddress = "192.168.49.82",
+                    socketPort = 9082
+                ),
+                frameId = "hybrid-missing-proof",
+                senderId = "peer-missing-proof"
+            )
+        )
+
+        val commandBuildResult = currentHybridBootstrapAttemptCommandBuildResult(
+            provider = provider,
+            requestedAtMillis = 1_716_810_010L,
+            currentMonotonicMillis = 9_600L,
+            commandCreatedAtMillis = 1_716_810_011L
+        )
+
+        assertEquals(
+            HybridBootstrapAttemptCommandBuildResult.InvalidEndpoint(
+                reason = "Socket hint has not been observed locally."
+            ),
+            commandBuildResult
+        )
+        assertFalse(
+            currentHybridBootstrapManualTriggerSnapshot(
+                commandBuildResult = commandBuildResult,
+                latestTriggerResult = null
+            ).canTriggerNow
+        )
+    }
+
+    @Test
+    fun currentHybridBootstrapCommandBuildResultStaysBlockedWithWrongLocalSocketHintProof() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(generatedUsername = "PIAIUFN1"),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+        receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridSocketHintMessage(
+                    sessionId = "wrong-proof-session",
+                    createdAtMillis = 1_716_820_000L,
+                    groupOwnerAddress = "192.168.49.83",
+                    socketPort = 9083
+                ),
+                frameId = "hybrid-wrong-proof",
+                senderId = "peer-wrong-proof"
+            )
+        )
+        val wrongObservation = HybridBootstrapSocketHintObservation(
+            peerId = "peer-other",
+            sessionId = "wrong-proof-session",
+            groupOwnerAddress = "192.168.49.83",
+            socketPort = 9083,
+            createdAtMillis = 1_716_820_000L,
+            observedAtMonotonicMillis = 9_700L
+        )
+
+        val commandBuildResult = currentHybridBootstrapAttemptCommandBuildResult(
+            provider = provider,
+            requestedAtMillis = 1_716_820_010L,
+            currentMonotonicMillis = 9_710L,
+            commandCreatedAtMillis = 1_716_820_011L,
+            socketHintObservationsByKey = mapOf(
+                hybridBootstrapSocketHintObservationKey(wrongObservation) to wrongObservation
+            )
+        )
+
+        assertEquals(
+            HybridBootstrapAttemptCommandBuildResult.InvalidEndpoint(
+                reason = "Socket hint has not been observed locally."
+            ),
+            commandBuildResult
+        )
+        assertFalse(
+            currentHybridBootstrapManualTriggerSnapshot(
+                commandBuildResult = commandBuildResult,
+                latestTriggerResult = null
+            ).canTriggerNow
+        )
+    }
+
+    @Test
+    fun currentHybridBootstrapCommandBuildResultMarksStaleLocalSocketHintProofTooOld() {
+        val holder = AuroraStateHolder(
+            initialState = SampleAuroraState.create(generatedUsername = "PIAIUFN1"),
+            localProfileStore = FakeProfileStore()
+        )
+        val store = InMemoryHybridTransportControlStore()
+        val provider = HybridBootstrapDecisionProvider(store)
+        val receiver = createAuroraBleTransportFrameReceiver(
+            stateHolder = holder,
+            hybridControlStore = store
+        )
+        receiveFrames(
+            receiver = receiver,
+            frames = hybridControlFrames(
+                message = hybridSocketHintMessage(
+                    sessionId = "stale-proof-session",
+                    createdAtMillis = 1_716_830_000L,
+                    groupOwnerAddress = "192.168.49.84",
+                    socketPort = 9084
+                ),
+                frameId = "hybrid-stale-proof",
+                senderId = "peer-stale-proof"
+            )
+        )
+        val staleObservation = HybridBootstrapSocketHintObservation(
+            peerId = "peer-stale-proof",
+            sessionId = "stale-proof-session",
+            groupOwnerAddress = "192.168.49.84",
+            socketPort = 9084,
+            createdAtMillis = 1_716_830_000L,
+            observedAtMonotonicMillis = 100L
+        )
+
+        val commandBuildResult = currentHybridBootstrapAttemptCommandBuildResult(
+            provider = provider,
+            requestedAtMillis = 1_716_830_010L,
+            currentMonotonicMillis =
+                100L + HybridBootstrapAttemptPolicy.DEFAULT_MAX_ENDPOINT_AGE_MILLIS + 1L,
+            commandCreatedAtMillis = 1_716_830_011L,
+            socketHintObservationsByKey = mapOf(
+                hybridBootstrapSocketHintObservationKey(staleObservation) to staleObservation
+            )
+        )
+
+        assertEquals(
+            HybridBootstrapAttemptCommandBuildResult.EndpointTooOld(
+                ageMillis = HybridBootstrapAttemptPolicy.DEFAULT_MAX_ENDPOINT_AGE_MILLIS + 1L,
+                maxAgeMillis = HybridBootstrapAttemptPolicy.DEFAULT_MAX_ENDPOINT_AGE_MILLIS
+            ),
+            commandBuildResult
+        )
+        assertFalse(
+            currentHybridBootstrapManualTriggerSnapshot(
+                commandBuildResult = commandBuildResult,
+                latestTriggerResult = null
+            ).canTriggerNow
+        )
     }
 
     @Test
@@ -3878,6 +4151,66 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun explicitHelperWithBuiltBuildResultReusesConnectedWifiDirectTransportOverride() {
+        val controller = currentHybridBootstrapCommandTriggerController(
+            config = HybridBootstrapCommandExecutorConfig(
+                mode = HybridBootstrapCommandExecutorMode.SOCKET_PLAN_JAVANET
+            ),
+            socketConnectorOverride =
+            ConnectedWifiDirectTransportHybridBootstrapSocketConnector(
+                currentSocketDiagnostics = {
+                    WifiDirectSocketDiagnostics(
+                        state = WifiDirectSocketState.CONNECTED,
+                        role = WifiDirectSocketRole.CLIENT,
+                        endpoint = WifiDirectSocketEndpoint(
+                            host = "192.168.49.1",
+                            port = 8988
+                        ),
+                        isConnected = true,
+                        isReadLoopActive = true
+                    )
+                },
+                currentAdapterDiagnostics = {
+                    WifiDirectTransportAdapterDiagnostics(
+                        state = WifiDirectTransportAdapterState.READY
+                    )
+                },
+                nowMillis = { 1_744_100_010L }
+            )
+        )
+
+        val result = triggerHybridBootstrapCommandIfExplicitlyRequested(
+            buildResult = HybridBootstrapAttemptCommandBuildResult.Built(
+                HybridBootstrapAttemptCommand(
+                    peerId = "peer-explicit-reuse",
+                    sessionId = "session-explicit-reuse",
+                    bootstrapIdentifier = "bootstrap-explicit-reuse",
+                    groupOwnerAddress = "192.168.49.1",
+                    socketPort = 8988,
+                    latestCreatedAtMillis = 1_744_100_000L,
+                    requestedAtMillis = 1_744_100_001L,
+                    commandCreatedAtMillis = 1_744_100_002L
+                )
+            ),
+            controller = controller
+        )
+
+        assertEquals(
+            HybridBootstrapCommandTriggerResult.Executed(
+                HybridBootstrapCommandExecutionResult.Accepted(
+                    peerId = "peer-explicit-reuse",
+                    sessionId = "session-explicit-reuse",
+                    bootstrapIdentifier = "bootstrap-explicit-reuse",
+                    groupOwnerAddress = "192.168.49.1",
+                    socketPort = 8988,
+                    commandCreatedAtMillis = 1_744_100_002L
+                )
+            ),
+            result
+        )
+    }
+
+    @Test
     fun explicitHelperRecordsLatestResultInController() {
         val controller = currentHybridBootstrapCommandTriggerController()
         val expected = HybridBootstrapCommandTriggerResult.NoCandidates
@@ -4205,10 +4538,64 @@ class AuroraBleRuntimeHostTest {
             }
         )
 
-        val result = callback()
+        val result = runBlocking { callback() }
 
         assertEquals(expected, result)
         assertEquals(1, invokeCount)
+    }
+
+    @Test
+    fun manualTriggerRequestCallbackDispatchesGuardedActionOnInjectedDispatcher() = runBlocking {
+        val dispatcher = MarkingCoroutineDispatcher("hybrid-bootstrap-trigger-test")
+        var invokeCount = 0
+
+        try {
+            val callback = createHybridBootstrapManualTriggerRequestCallback(
+                guardedManualTriggerAction = {
+                    invokeCount += 1
+                    assertTrue(dispatcher.isRunningOnMarkedDispatcherThread())
+                    HybridBootstrapCommandTriggerResult.NoCandidates
+                },
+                blockingExecutionDispatcher = dispatcher
+            )
+
+            val result = callback()
+
+            assertEquals(HybridBootstrapCommandTriggerResult.NoCandidates, result)
+            assertEquals(1, invokeCount)
+            assertEquals(1, dispatcher.dispatchCount)
+        } finally {
+            dispatcher.close()
+        }
+    }
+
+    @Test
+    fun manualTriggerRequestCallbackCancellationDoesNotBecomeFailureOrRetry() = runBlocking {
+        val dispatcher = QueuedCoroutineDispatcher()
+        var invokeCount = 0
+
+        try {
+            val callback = createHybridBootstrapManualTriggerRequestCallback(
+                guardedManualTriggerAction = {
+                    invokeCount += 1
+                    HybridBootstrapCommandTriggerResult.NoCandidates
+                },
+                blockingExecutionDispatcher = dispatcher
+            )
+
+            val job = launch {
+                callback()
+            }
+
+            job.cancel()
+            dispatcher.runPending()
+            job.cancelAndJoin()
+
+            assertTrue(job.isCancelled)
+            assertEquals(0, invokeCount)
+        } finally {
+            dispatcher.clear()
+        }
     }
 
     @Test
@@ -5005,7 +5392,7 @@ class AuroraBleRuntimeHostTest {
             guardedManualTriggerAction = guardedAction
         )
 
-        val result = callback()
+        val result = runBlocking { callback() }
 
         assertEquals(
             HybridBootstrapCommandTriggerResult.NotAllowed(
@@ -5053,7 +5440,7 @@ class AuroraBleRuntimeHostTest {
             guardedManualTriggerAction = guardedAction
         )
 
-        val result = callback()
+        val result = runBlocking { callback() }
 
         assertEquals(expected, result)
         assertEquals(result, latestTriggerResult)
@@ -5097,7 +5484,7 @@ class AuroraBleRuntimeHostTest {
             latestTriggerResult = latestTriggerResult
         )
 
-        val result = callback()
+        val result = runBlocking { callback() }
 
         assertEquals(HybridBootstrapCommandTriggerResult.NoCandidates, result)
         assertEquals(1, underlyingInvokeCount)
@@ -6311,6 +6698,1122 @@ class AuroraBleRuntimeHostTest {
     }
 
     @Test
+    fun applicationProbeObservationUsesResolvedSourcePeerAndPreservesGlobalApplicationSenderId() {
+        val marker = automatedDiagnosticsProbeMarker(
+            stepId = AutomatedDiagnosticStepId.GLOBAL_MESSAGE_PROBE,
+            probeKind = AutomatedDiagnosticsApplicationProbeKind.GLOBAL,
+            direction = AutomatedDiagnosticsApplicationProbeDirection.C2P
+        )
+        val result = BleTransportReceiveResult.Processed(
+            groupId = 0x46,
+            processingResult = IncomingTransportFrameProcessingResult.Received(
+                message = IncomingTransportMessage(
+                    frame = MessageFrame(
+                        id = "incoming-global-probe",
+                        type = MessageFrameType.GLOBAL_TEXT,
+                        senderId = "Chris",
+                        createdAtMillis = 1_716_400_010L,
+                        payload = marker.bodyText()
+                    )
+                ),
+                ingestionResult = IncomingMessageIngestionResult.Appended(
+                    message = ChatMessage(
+                        id = "incoming-global-probe",
+                        threadId = "global",
+                        senderId = "Chris",
+                        senderName = "Chris",
+                        text = marker.bodyText(),
+                        createdAtMillis = 1_716_400_010L,
+                        status = MessageStatus.RECEIVED,
+                        isOutgoing = false
+                    )
+                )
+            )
+        )
+
+        val observation = automatedDiagnosticsApplicationProbeObservationAfterReceiveOrNull(
+            result = result,
+            sourcePeerId = "peer-A",
+            receiverPeerId = "local-peer",
+            observedAtMonotonicMillis = 4_600L,
+            observedAtWallClockMillis = 1_716_400_011L
+        )
+
+        assertNotNull(observation)
+        assertEquals("shared-run-1", observation?.sharedRunId)
+        assertEquals(AutomatedDiagnosticStepId.GLOBAL_MESSAGE_PROBE, observation?.stepId)
+        assertEquals(AutomatedDiagnosticsApplicationProbeKind.GLOBAL, observation?.probeKind)
+        assertEquals(AutomatedDiagnosticsApplicationProbeDirection.C2P, observation?.direction)
+        assertEquals("incoming-global-probe", observation?.messageId)
+        assertEquals("peer-A", observation?.senderPeerId)
+        assertEquals("Chris", observation?.applicationSenderId)
+        assertEquals("local-peer", observation?.receiverPeerId)
+        assertEquals(MessageFrameType.GLOBAL_TEXT, observation?.messageType)
+        assertEquals("global", observation?.threadId)
+        assertEquals(4_600L, observation?.observedAtMonotonicMillis)
+    }
+
+    @Test
+    fun applicationProbeObservationIsNullWhenSourcePeerCannotResolve() {
+        val marker = automatedDiagnosticsProbeMarker(
+            stepId = AutomatedDiagnosticStepId.GLOBAL_MESSAGE_PROBE,
+            probeKind = AutomatedDiagnosticsApplicationProbeKind.GLOBAL,
+            direction = AutomatedDiagnosticsApplicationProbeDirection.C2P
+        )
+        val result = BleTransportReceiveResult.Processed(
+            groupId = 0x46,
+            processingResult = IncomingTransportFrameProcessingResult.Received(
+                message = IncomingTransportMessage(
+                    frame = MessageFrame(
+                        id = "incoming-global-probe",
+                        type = MessageFrameType.GLOBAL_TEXT,
+                        senderId = "Chris",
+                        createdAtMillis = 1_716_400_010L,
+                        payload = marker.bodyText()
+                    )
+                ),
+                ingestionResult = IncomingMessageIngestionResult.Appended(
+                    message = ChatMessage(
+                        id = "incoming-global-probe",
+                        threadId = "global",
+                        senderId = "Chris",
+                        senderName = "Chris",
+                        text = marker.bodyText(),
+                        createdAtMillis = 1_716_400_010L,
+                        status = MessageStatus.RECEIVED,
+                        isOutgoing = false
+                    )
+                )
+            )
+        )
+
+        assertNull(
+            automatedDiagnosticsApplicationProbeObservationAfterReceiveOrNull(
+                result = result,
+                sourcePeerId = null,
+                receiverPeerId = "local-peer",
+                observedAtMonotonicMillis = 4_650L
+            )
+        )
+    }
+
+    @Test
+    fun applicationProbeObservationIsNullForMalformedGlobalMarker() {
+        val result = BleTransportReceiveResult.Processed(
+            groupId = 0x47,
+            processingResult = IncomingTransportFrameProcessingResult.Received(
+                message = IncomingTransportMessage(
+                    frame = MessageFrame(
+                        id = "incoming-global-normal",
+                        type = MessageFrameType.GLOBAL_TEXT,
+                        senderId = "peer-chat",
+                        createdAtMillis = 1_716_400_020L,
+                        payload = "hello public chat"
+                    )
+                ),
+                ingestionResult = IncomingMessageIngestionResult.Appended(
+                    message = ChatMessage(
+                        id = "incoming-global-normal",
+                        threadId = "global",
+                        senderId = "peer-chat",
+                        senderName = "Peer chat",
+                        text = "hello public chat",
+                        createdAtMillis = 1_716_400_020L,
+                        status = MessageStatus.RECEIVED,
+                        isOutgoing = false
+                    )
+                )
+            )
+        )
+
+        assertNull(
+            automatedDiagnosticsApplicationProbeObservationAfterReceiveOrNull(
+                result = result,
+                sourcePeerId = "peer-chat",
+                receiverPeerId = "local-peer",
+                observedAtMonotonicMillis = 4_700L
+            )
+        )
+    }
+
+    @Test
+    fun applicationProbeObservationIsNullWhenGlobalMessageWasNotAppended() {
+        val marker = automatedDiagnosticsProbeMarker(
+            stepId = AutomatedDiagnosticStepId.GLOBAL_MESSAGE_PROBE,
+            probeKind = AutomatedDiagnosticsApplicationProbeKind.GLOBAL,
+            direction = AutomatedDiagnosticsApplicationProbeDirection.C2P
+        )
+        val result = BleTransportReceiveResult.Processed(
+            groupId = 0x48,
+            processingResult = IncomingTransportFrameProcessingResult.Received(
+                message = IncomingTransportMessage(
+                    frame = MessageFrame(
+                        id = "incoming-global-duplicate",
+                        type = MessageFrameType.GLOBAL_TEXT,
+                        senderId = "peer-chat",
+                        createdAtMillis = 1_716_400_030L,
+                        payload = marker.bodyText()
+                    )
+                ),
+                ingestionResult = IncomingMessageIngestionResult.Duplicate(
+                    messageId = "incoming-global-duplicate"
+                )
+            )
+        )
+
+        assertNull(
+            automatedDiagnosticsApplicationProbeObservationAfterReceiveOrNull(
+                result = result,
+                sourcePeerId = "peer-chat",
+                receiverPeerId = "local-peer",
+                observedAtMonotonicMillis = 4_800L
+            )
+        )
+    }
+
+    @Test
+    fun applicationProbeObservationIsNullWhenReceiverPeerIsBlank() {
+        val marker = automatedDiagnosticsProbeMarker(
+            stepId = AutomatedDiagnosticStepId.GLOBAL_MESSAGE_PROBE,
+            probeKind = AutomatedDiagnosticsApplicationProbeKind.GLOBAL,
+            direction = AutomatedDiagnosticsApplicationProbeDirection.C2P
+        )
+        val result = BleTransportReceiveResult.Processed(
+            groupId = 0x48,
+            processingResult = IncomingTransportFrameProcessingResult.Received(
+                message = IncomingTransportMessage(
+                    frame = MessageFrame(
+                        id = "incoming-global-blank-receiver",
+                        type = MessageFrameType.GLOBAL_TEXT,
+                        senderId = "Chris",
+                        createdAtMillis = 1_716_400_030L,
+                        payload = marker.bodyText()
+                    )
+                ),
+                ingestionResult = IncomingMessageIngestionResult.Appended(
+                    message = ChatMessage(
+                        id = "incoming-global-blank-receiver",
+                        threadId = "global",
+                        senderId = "Chris",
+                        senderName = "Chris",
+                        text = marker.bodyText(),
+                        createdAtMillis = 1_716_400_030L,
+                        status = MessageStatus.RECEIVED,
+                        isOutgoing = false
+                    )
+                )
+            )
+        )
+
+        assertNull(
+            automatedDiagnosticsApplicationProbeObservationAfterReceiveOrNull(
+                result = result,
+                sourcePeerId = "peer-A",
+                receiverPeerId = "   ",
+                observedAtMonotonicMillis = 4_850L
+            )
+        )
+    }
+
+    @Test
+    fun applicationProbeObservationPreservesPrivateChatIdOnlyAfterPrivateAppend() {
+        val marker = automatedDiagnosticsProbeMarker(
+            stepId = AutomatedDiagnosticStepId.PRIVATE_ENCRYPTED_MESSAGE_PROBE,
+            probeKind = AutomatedDiagnosticsApplicationProbeKind.PRIVATE,
+            direction = AutomatedDiagnosticsApplicationProbeDirection.C2P
+        )
+        val payload = PrivateChatMessagePayloadCodec.encode(
+            PrivateChatMessagePayload(
+                privateChatId = "chat-private-1",
+                senderUsername = "Peer private",
+                body = marker.bodyText()
+            )
+        )
+        val result = BleTransportReceiveResult.Processed(
+            groupId = 0x49,
+            processingResult = IncomingTransportFrameProcessingResult.Received(
+                message = IncomingTransportMessage(
+                    frame = MessageFrame(
+                        id = "incoming-private-probe",
+                        type = MessageFrameType.PRIVATE_TEXT,
+                        senderId = "peer-private",
+                        createdAtMillis = 1_716_400_040L,
+                        payload = payload
+                    ),
+                    senderPublicKey = senderPublicKeyBytes()
+                ),
+                ingestionResult = IncomingMessageIngestionResult.Appended(
+                    message = ChatMessage(
+                        id = "incoming-private-probe",
+                        threadId = "private:peer-private",
+                        senderId = "peer-private",
+                        senderName = "Peer private",
+                        text = marker.bodyText(),
+                        createdAtMillis = 1_716_400_040L,
+                        status = MessageStatus.RECEIVED,
+                        isOutgoing = false
+                    )
+                )
+            )
+        )
+
+        val observation = automatedDiagnosticsApplicationProbeObservationAfterReceiveOrNull(
+            result = result,
+            sourcePeerId = "peer-private",
+            receiverPeerId = "local-peer",
+            observedAtMonotonicMillis = 4_900L,
+            observedAtWallClockMillis = 1_716_400_041L
+        )
+
+        assertNotNull(observation)
+        assertEquals(AutomatedDiagnosticStepId.PRIVATE_ENCRYPTED_MESSAGE_PROBE, observation?.stepId)
+        assertEquals(AutomatedDiagnosticsApplicationProbeKind.PRIVATE, observation?.probeKind)
+        assertEquals("peer-private", observation?.applicationSenderId)
+        assertEquals(MessageFrameType.PRIVATE_TEXT, observation?.messageType)
+        assertEquals("private:peer-private", observation?.threadId)
+        assertEquals("chat-private-1", observation?.privateChatId)
+    }
+
+    @Test
+    fun applicationProbeObservationIsNullForPrivateDecryptFailureOrWrongPrivateThreadAcceptance() {
+        val marker = automatedDiagnosticsProbeMarker(
+            stepId = AutomatedDiagnosticStepId.PRIVATE_ENCRYPTED_MESSAGE_PROBE,
+            probeKind = AutomatedDiagnosticsApplicationProbeKind.PRIVATE,
+            direction = AutomatedDiagnosticsApplicationProbeDirection.C2P
+        )
+        val payload = PrivateChatMessagePayloadCodec.encode(
+            PrivateChatMessagePayload(
+                privateChatId = "chat-private-2",
+                senderUsername = "Peer private",
+                body = marker.bodyText()
+            )
+        )
+        val wrongPrivateChatIdResult = BleTransportReceiveResult.Processed(
+            groupId = 0x4A,
+            processingResult = IncomingTransportFrameProcessingResult.Received(
+                message = IncomingTransportMessage(
+                    frame = MessageFrame(
+                        id = "incoming-private-rejected",
+                        type = MessageFrameType.PRIVATE_TEXT,
+                        senderId = "peer-private",
+                        createdAtMillis = 1_716_400_050L,
+                        payload = payload
+                    ),
+                    senderPublicKey = senderPublicKeyBytes()
+                ),
+                ingestionResult = IncomingMessageIngestionResult.UnsupportedThread(
+                    reason = "privateChatId mismatch"
+                )
+            )
+        )
+        val decryptFailureResult = BleTransportReceiveResult.ProcessorFailed(
+            groupId = 0x4B,
+            processingResult = IncomingTransportFrameProcessingResult.ReceiveFailed(
+                receiveResult = IncomingTransportReceiveResult.InvalidEnvelope(
+                    reason = "AES-GCM authentication failed."
+                )
+            )
+        )
+
+        assertNull(
+            automatedDiagnosticsApplicationProbeObservationAfterReceiveOrNull(
+                result = wrongPrivateChatIdResult,
+                sourcePeerId = "peer-private",
+                receiverPeerId = "local-peer",
+                observedAtMonotonicMillis = 5_000L
+            )
+        )
+        assertNull(
+            automatedDiagnosticsApplicationProbeObservationAfterReceiveOrNull(
+                result = decryptFailureResult,
+                sourcePeerId = "peer-private",
+                receiverPeerId = "local-peer",
+                observedAtMonotonicMillis = 5_100L
+            )
+        )
+    }
+
+    @Test
+    fun applicationProbeReceiveDiagnosticResolvesMismatchedGattSourceAddressFromAcceptedCurrentRunSignal() {
+        val sharedRun = sampleDiagnosticsSharedRun()
+        val marker = automatedDiagnosticsProbeMarker(
+            stepId = AutomatedDiagnosticStepId.GLOBAL_MESSAGE_PROBE,
+            probeKind = AutomatedDiagnosticsApplicationProbeKind.GLOBAL,
+            direction = AutomatedDiagnosticsApplicationProbeDirection.C2P,
+            sharedRunId = sharedRun.runId
+        )
+        val sourceDeviceAddress = "6C:73:D6:A5:B8:4C"
+        val signal = sampleAcceptedPhaseSignal(
+            sharedRun = sharedRun,
+            peerId = "peer-A",
+            expectedRemotePeerId = "local-peer",
+            stepId = AutomatedDiagnosticStepId.GLOBAL_MESSAGE_PROBE,
+            attemptNumber = marker.attemptNumber,
+            sourceDeviceAddress = sourceDeviceAddress
+        )
+
+        val diagnostic = automatedDiagnosticsApplicationProbeReceiveDiagnosticAfterReceiveOrNull(
+            result = globalProbeReceiveResult(marker),
+            sourceDeviceAddress = sourceDeviceAddress,
+            activeTransportPeerId = "peer-A",
+            activeTransportDeviceAddress = "54:EC:18:4B:F4:80",
+            reachablePeers = emptyList(),
+            selectedSecurePeerId = null,
+            diagnosticsSourceAssociationsByAddress =
+            mapOf(sourceDeviceAddress to AutomatedDiagnosticsAcceptedSourceAssociation.from(signal)),
+            receiverPeerId = "local-peer",
+            observedAtMonotonicMillis = 5_200L
+        )
+
+        assertNotNull(diagnostic)
+        assertEquals(
+            AutomatedDiagnosticsApplicationProbeSourceResolutionSource
+                .CURRENT_RUN_DIAGNOSTICS_ASSOCIATION,
+            diagnostic?.sourceResolution?.resolutionSource
+        )
+        assertEquals(sourceDeviceAddress, diagnostic?.sourceResolution?.sourceDeviceAddress)
+        assertNull(diagnostic?.sourceResolution?.exactAddressSourcePeerId)
+        assertEquals("peer-A", diagnostic?.sourceResolution?.diagnosticsAssociatedSourcePeerId)
+        assertEquals("peer-A", diagnostic?.sourceResolution?.resolvedSourcePeerId)
+        assertEquals(
+            AutomatedDiagnosticsApplicationProbeAssociationOutcome.RESOLVED,
+            diagnostic?.sourceResolution?.diagnosticsAssociationOutcome
+        )
+        assertEquals(
+            AutomatedDiagnosticsApplicationProbeSelectedSecurePeerGate
+                .SELECTED_SECURE_PEER_UNAVAILABLE,
+            diagnostic?.sourceResolution?.selectedSecurePeerGate
+        )
+        assertEquals(0x4C, diagnostic?.transportGroupId)
+
+        val observation = automatedDiagnosticsApplicationProbeObservationFromReceiveDiagnosticOrNull(
+            diagnostic!!
+        )
+
+        assertNotNull(observation)
+        assertEquals("peer-A", observation?.senderPeerId)
+        assertEquals("incoming-global-probe", observation?.messageId)
+        assertEquals(0x4C, observation?.transportGroupId)
+    }
+
+    @Test
+    fun applicationProbeReceiveDiagnosticRemainsUnresolvedWithoutAcceptedDiagnosticsAssociation() {
+        val sharedRun = sampleDiagnosticsSharedRun()
+        val marker = automatedDiagnosticsProbeMarker(
+            stepId = AutomatedDiagnosticStepId.GLOBAL_MESSAGE_PROBE,
+            probeKind = AutomatedDiagnosticsApplicationProbeKind.GLOBAL,
+            direction = AutomatedDiagnosticsApplicationProbeDirection.C2P,
+            sharedRunId = sharedRun.runId
+        )
+
+        val diagnostic = automatedDiagnosticsApplicationProbeReceiveDiagnosticAfterReceiveOrNull(
+            result = globalProbeReceiveResult(marker),
+            sourceDeviceAddress = "6C:73:D6:A5:B8:4C",
+            activeTransportPeerId = "peer-A",
+            activeTransportDeviceAddress = "54:EC:18:4B:F4:80",
+            reachablePeers = emptyList(),
+            selectedSecurePeerId = "peer-A",
+            diagnosticsSourceAssociationsByAddress = emptyMap(),
+            receiverPeerId = "local-peer",
+            observedAtMonotonicMillis = 5_300L
+        )
+
+        assertNotNull(diagnostic)
+        assertEquals(
+            AutomatedDiagnosticsApplicationProbeSourceResolutionSource.UNRESOLVED,
+            diagnostic?.sourceResolution?.resolutionSource
+        )
+        assertNull(diagnostic?.sourceResolution?.resolvedSourcePeerId)
+        assertEquals(
+            AutomatedDiagnosticsApplicationProbeAssociationOutcome.NO_ASSOCIATION_FOR_SOURCE_ADDRESS,
+            diagnostic?.sourceResolution?.diagnosticsAssociationOutcome
+        )
+        assertNull(automatedDiagnosticsApplicationProbeObservationFromReceiveDiagnosticOrNull(diagnostic!!))
+    }
+
+    @Test
+    fun applicationProbeReceiveDiagnosticRejectsWrongRunAssociation() {
+        val currentRun = sampleDiagnosticsSharedRun()
+        val previousRun = sampleDiagnosticsSharedRun(runId = "diag-previous-run")
+        val marker = automatedDiagnosticsProbeMarker(
+            stepId = AutomatedDiagnosticStepId.GLOBAL_MESSAGE_PROBE,
+            probeKind = AutomatedDiagnosticsApplicationProbeKind.GLOBAL,
+            direction = AutomatedDiagnosticsApplicationProbeDirection.C2P,
+            sharedRunId = currentRun.runId
+        )
+        val sourceDeviceAddress = "6C:73:D6:A5:B8:4C"
+        val signal = sampleAcceptedPhaseSignal(
+            sharedRun = previousRun,
+            peerId = "peer-A",
+            expectedRemotePeerId = "local-peer",
+            stepId = AutomatedDiagnosticStepId.GLOBAL_MESSAGE_PROBE,
+            attemptNumber = marker.attemptNumber,
+            sourceDeviceAddress = sourceDeviceAddress
+        )
+
+        val diagnostic = automatedDiagnosticsApplicationProbeReceiveDiagnosticAfterReceiveOrNull(
+            result = globalProbeReceiveResult(marker),
+            sourceDeviceAddress = sourceDeviceAddress,
+            activeTransportPeerId = "peer-A",
+            activeTransportDeviceAddress = "54:EC:18:4B:F4:80",
+            reachablePeers = emptyList(),
+            selectedSecurePeerId = "peer-A",
+            diagnosticsSourceAssociationsByAddress =
+            mapOf(sourceDeviceAddress to AutomatedDiagnosticsAcceptedSourceAssociation.from(signal)),
+            receiverPeerId = "local-peer",
+            observedAtMonotonicMillis = 5_350L
+        )
+
+        assertNotNull(diagnostic)
+        assertEquals(
+            AutomatedDiagnosticsApplicationProbeSourceResolutionSource.UNRESOLVED,
+            diagnostic?.sourceResolution?.resolutionSource
+        )
+        assertNull(diagnostic?.sourceResolution?.resolvedSourcePeerId)
+        assertEquals(
+            AutomatedDiagnosticsApplicationProbeAssociationOutcome.ASSOCIATION_WRONG_RUN,
+            diagnostic?.sourceResolution?.diagnosticsAssociationOutcome
+        )
+    }
+
+    @Test
+    fun applicationProbeReceiveDiagnosticRejectsWrongStepAssociation() {
+        val sharedRun = sampleDiagnosticsSharedRun()
+        val marker = automatedDiagnosticsProbeMarker(
+            stepId = AutomatedDiagnosticStepId.GLOBAL_MESSAGE_PROBE,
+            probeKind = AutomatedDiagnosticsApplicationProbeKind.GLOBAL,
+            direction = AutomatedDiagnosticsApplicationProbeDirection.C2P,
+            sharedRunId = sharedRun.runId
+        )
+        val sourceDeviceAddress = "6C:73:D6:A5:B8:4C"
+        val signal = sampleAcceptedPhaseSignal(
+            sharedRun = sharedRun,
+            peerId = "peer-A",
+            expectedRemotePeerId = "local-peer",
+            stepId = AutomatedDiagnosticStepId.PRIVATE_ENCRYPTED_MESSAGE_PROBE,
+            attemptNumber = marker.attemptNumber,
+            sourceDeviceAddress = sourceDeviceAddress
+        )
+
+        val diagnostic = automatedDiagnosticsApplicationProbeReceiveDiagnosticAfterReceiveOrNull(
+            result = globalProbeReceiveResult(marker),
+            sourceDeviceAddress = sourceDeviceAddress,
+            activeTransportPeerId = "peer-A",
+            activeTransportDeviceAddress = "54:EC:18:4B:F4:80",
+            reachablePeers = emptyList(),
+            selectedSecurePeerId = "peer-A",
+            diagnosticsSourceAssociationsByAddress =
+            mapOf(sourceDeviceAddress to AutomatedDiagnosticsAcceptedSourceAssociation.from(signal)),
+            receiverPeerId = "local-peer",
+            observedAtMonotonicMillis = 5_400L
+        )
+
+        assertNotNull(diagnostic)
+        assertEquals(
+            AutomatedDiagnosticsApplicationProbeSourceResolutionSource.UNRESOLVED,
+            diagnostic?.sourceResolution?.resolutionSource
+        )
+        assertNull(diagnostic?.sourceResolution?.resolvedSourcePeerId)
+        assertEquals(
+            AutomatedDiagnosticsApplicationProbeAssociationOutcome.ASSOCIATION_WRONG_STEP,
+            diagnostic?.sourceResolution?.diagnosticsAssociationOutcome
+        )
+    }
+
+    @Test
+    fun applicationProbeReceiveDiagnosticRejectsWrongAttemptAssociation() {
+        val sharedRun = sampleDiagnosticsSharedRun()
+        val marker = automatedDiagnosticsProbeMarker(
+            stepId = AutomatedDiagnosticStepId.GLOBAL_MESSAGE_PROBE,
+            probeKind = AutomatedDiagnosticsApplicationProbeKind.GLOBAL,
+            direction = AutomatedDiagnosticsApplicationProbeDirection.C2P,
+            sharedRunId = sharedRun.runId
+        )
+        val sourceDeviceAddress = "6C:73:D6:A5:B8:4C"
+        val signal = sampleAcceptedPhaseSignal(
+            sharedRun = sharedRun,
+            peerId = "peer-A",
+            expectedRemotePeerId = "local-peer",
+            stepId = AutomatedDiagnosticStepId.GLOBAL_MESSAGE_PROBE,
+            attemptNumber = marker.attemptNumber + 1,
+            sourceDeviceAddress = sourceDeviceAddress
+        )
+
+        val diagnostic = automatedDiagnosticsApplicationProbeReceiveDiagnosticAfterReceiveOrNull(
+            result = globalProbeReceiveResult(marker),
+            sourceDeviceAddress = sourceDeviceAddress,
+            activeTransportPeerId = "peer-A",
+            activeTransportDeviceAddress = "54:EC:18:4B:F4:80",
+            reachablePeers = emptyList(),
+            selectedSecurePeerId = "peer-A",
+            diagnosticsSourceAssociationsByAddress =
+            mapOf(sourceDeviceAddress to AutomatedDiagnosticsAcceptedSourceAssociation.from(signal)),
+            receiverPeerId = "local-peer",
+            observedAtMonotonicMillis = 5_375L
+        )
+
+        assertNotNull(diagnostic)
+        assertEquals(
+            AutomatedDiagnosticsApplicationProbeSourceResolutionSource.UNRESOLVED,
+            diagnostic?.sourceResolution?.resolutionSource
+        )
+        assertNull(diagnostic?.sourceResolution?.resolvedSourcePeerId)
+        assertEquals(
+            AutomatedDiagnosticsApplicationProbeAssociationOutcome.ASSOCIATION_WRONG_ATTEMPT,
+            diagnostic?.sourceResolution?.diagnosticsAssociationOutcome
+        )
+    }
+
+    @Test
+    fun applicationProbeReceiveDiagnosticSelectedSecurePeerMismatchDoesNotRejectAcceptedAssociation() {
+        val sharedRun = sampleDiagnosticsSharedRun()
+        val marker = automatedDiagnosticsProbeMarker(
+            stepId = AutomatedDiagnosticStepId.GLOBAL_MESSAGE_PROBE,
+            probeKind = AutomatedDiagnosticsApplicationProbeKind.GLOBAL,
+            direction = AutomatedDiagnosticsApplicationProbeDirection.C2P,
+            sharedRunId = sharedRun.runId
+        )
+        val sourceDeviceAddress = "6C:73:D6:A5:B8:4C"
+        val signal = sampleAcceptedPhaseSignal(
+            sharedRun = sharedRun,
+            peerId = "peer-A",
+            expectedRemotePeerId = "local-peer",
+            stepId = AutomatedDiagnosticStepId.GLOBAL_MESSAGE_PROBE,
+            attemptNumber = marker.attemptNumber,
+            sourceDeviceAddress = sourceDeviceAddress
+        )
+
+        val diagnostic = automatedDiagnosticsApplicationProbeReceiveDiagnosticAfterReceiveOrNull(
+            result = globalProbeReceiveResult(marker),
+            sourceDeviceAddress = sourceDeviceAddress,
+            activeTransportPeerId = "peer-A",
+            activeTransportDeviceAddress = "54:EC:18:4B:F4:80",
+            reachablePeers = emptyList(),
+            selectedSecurePeerId = "peer-B",
+            diagnosticsSourceAssociationsByAddress =
+            mapOf(sourceDeviceAddress to AutomatedDiagnosticsAcceptedSourceAssociation.from(signal)),
+            receiverPeerId = "local-peer",
+            observedAtMonotonicMillis = 5_390L
+        )
+
+        assertNotNull(diagnostic)
+        assertEquals(
+            AutomatedDiagnosticsApplicationProbeSourceResolutionSource
+                .CURRENT_RUN_DIAGNOSTICS_ASSOCIATION,
+            diagnostic?.sourceResolution?.resolutionSource
+        )
+        assertEquals("peer-A", diagnostic?.sourceResolution?.resolvedSourcePeerId)
+        assertEquals(
+            AutomatedDiagnosticsApplicationProbeAssociationOutcome.RESOLVED,
+            diagnostic?.sourceResolution?.diagnosticsAssociationOutcome
+        )
+        assertEquals(
+            AutomatedDiagnosticsApplicationProbeSelectedSecurePeerGate
+                .SELECTED_SECURE_PEER_MISMATCH,
+            diagnostic?.sourceResolution?.selectedSecurePeerGate
+        )
+    }
+
+    @Test
+    fun applicationProbeReceiveDiagnosticFlagsWrongPeerAssociationWhenExactAddressResolvesDifferently() {
+        val sharedRun = sampleDiagnosticsSharedRun()
+        val marker = automatedDiagnosticsProbeMarker(
+            stepId = AutomatedDiagnosticStepId.GLOBAL_MESSAGE_PROBE,
+            probeKind = AutomatedDiagnosticsApplicationProbeKind.GLOBAL,
+            direction = AutomatedDiagnosticsApplicationProbeDirection.C2P,
+            sharedRunId = sharedRun.runId
+        )
+        val sourceDeviceAddress = "54:EC:18:4B:F4:80"
+        val signal = sampleAcceptedPhaseSignal(
+            sharedRun = sharedRun,
+            peerId = "peer-B",
+            expectedRemotePeerId = "local-peer",
+            stepId = AutomatedDiagnosticStepId.GLOBAL_MESSAGE_PROBE,
+            attemptNumber = marker.attemptNumber,
+            sourceDeviceAddress = sourceDeviceAddress
+        )
+
+        val diagnostic = automatedDiagnosticsApplicationProbeReceiveDiagnosticAfterReceiveOrNull(
+            result = globalProbeReceiveResult(marker),
+            sourceDeviceAddress = sourceDeviceAddress,
+            activeTransportPeerId = "peer-A",
+            activeTransportDeviceAddress = sourceDeviceAddress,
+            reachablePeers = emptyList(),
+            selectedSecurePeerId = "peer-A",
+            diagnosticsSourceAssociationsByAddress =
+            mapOf(sourceDeviceAddress to AutomatedDiagnosticsAcceptedSourceAssociation.from(signal)),
+            receiverPeerId = "local-peer",
+            observedAtMonotonicMillis = 5_395L
+        )
+
+        assertNotNull(diagnostic)
+        assertEquals(
+            AutomatedDiagnosticsApplicationProbeSourceResolutionSource.EXACT_ACTIVE_ADDRESS,
+            diagnostic?.sourceResolution?.resolutionSource
+        )
+        assertEquals("peer-A", diagnostic?.sourceResolution?.resolvedSourcePeerId)
+        assertEquals(
+            AutomatedDiagnosticsApplicationProbeAssociationOutcome.ASSOCIATION_WRONG_PEER,
+            diagnostic?.sourceResolution?.diagnosticsAssociationOutcome
+        )
+    }
+
+    @Test
+    fun applicationProbeReceiveDiagnosticRejectsWrongReceiverAssociation() {
+        val sharedRun = sampleDiagnosticsSharedRun()
+        val marker = automatedDiagnosticsProbeMarker(
+            stepId = AutomatedDiagnosticStepId.GLOBAL_MESSAGE_PROBE,
+            probeKind = AutomatedDiagnosticsApplicationProbeKind.GLOBAL,
+            direction = AutomatedDiagnosticsApplicationProbeDirection.C2P,
+            sharedRunId = sharedRun.runId
+        )
+        val sourceDeviceAddress = "6C:73:D6:A5:B8:4C"
+        val signal = sampleAcceptedPhaseSignal(
+            sharedRun = sharedRun,
+            peerId = "peer-A",
+            expectedRemotePeerId = "different-local-peer",
+            stepId = AutomatedDiagnosticStepId.GLOBAL_MESSAGE_PROBE,
+            attemptNumber = marker.attemptNumber,
+            sourceDeviceAddress = sourceDeviceAddress
+        )
+
+        val diagnostic = automatedDiagnosticsApplicationProbeReceiveDiagnosticAfterReceiveOrNull(
+            result = globalProbeReceiveResult(marker),
+            sourceDeviceAddress = sourceDeviceAddress,
+            activeTransportPeerId = "peer-A",
+            activeTransportDeviceAddress = "54:EC:18:4B:F4:80",
+            reachablePeers = emptyList(),
+            selectedSecurePeerId = "peer-A",
+            diagnosticsSourceAssociationsByAddress =
+            mapOf(sourceDeviceAddress to AutomatedDiagnosticsAcceptedSourceAssociation.from(signal)),
+            receiverPeerId = "local-peer",
+            observedAtMonotonicMillis = 5_400L
+        )
+
+        assertNotNull(diagnostic)
+        assertEquals(
+            AutomatedDiagnosticsApplicationProbeSourceResolutionSource.UNRESOLVED,
+            diagnostic?.sourceResolution?.resolutionSource
+        )
+        assertNull(diagnostic?.sourceResolution?.resolvedSourcePeerId)
+        assertEquals(
+            AutomatedDiagnosticsApplicationProbeAssociationOutcome.ASSOCIATION_WRONG_RECEIVER,
+            diagnostic?.sourceResolution?.diagnosticsAssociationOutcome
+        )
+    }
+
+    @Test
+    fun applicationProbeReceiveDiagnosticClearingAssociationsPreventsReuseAcrossReset() {
+        val sharedRun = sampleDiagnosticsSharedRun()
+        val marker = automatedDiagnosticsProbeMarker(
+            stepId = AutomatedDiagnosticStepId.GLOBAL_MESSAGE_PROBE,
+            probeKind = AutomatedDiagnosticsApplicationProbeKind.GLOBAL,
+            direction = AutomatedDiagnosticsApplicationProbeDirection.C2P,
+            sharedRunId = sharedRun.runId
+        )
+        val sourceDeviceAddress = "6C:73:D6:A5:B8:4C"
+        val associations = linkedMapOf(
+            sourceDeviceAddress to AutomatedDiagnosticsAcceptedSourceAssociation.from(
+                sampleAcceptedPhaseSignal(
+                    sharedRun = sharedRun,
+                    peerId = "peer-A",
+                    expectedRemotePeerId = "local-peer",
+                    stepId = AutomatedDiagnosticStepId.GLOBAL_MESSAGE_PROBE,
+                    attemptNumber = marker.attemptNumber,
+                    sourceDeviceAddress = sourceDeviceAddress
+                )
+            )
+        )
+        associations.clear()
+
+        val diagnostic = automatedDiagnosticsApplicationProbeReceiveDiagnosticAfterReceiveOrNull(
+            result = globalProbeReceiveResult(marker),
+            sourceDeviceAddress = sourceDeviceAddress,
+            activeTransportPeerId = "peer-A",
+            activeTransportDeviceAddress = "54:EC:18:4B:F4:80",
+            reachablePeers = emptyList(),
+            selectedSecurePeerId = "peer-A",
+            diagnosticsSourceAssociationsByAddress = associations,
+            receiverPeerId = "local-peer",
+            observedAtMonotonicMillis = 5_450L
+        )
+
+        assertNotNull(diagnostic)
+        assertEquals(
+            AutomatedDiagnosticsApplicationProbeSourceResolutionSource.UNRESOLVED,
+            diagnostic?.sourceResolution?.resolutionSource
+        )
+    }
+
+    @Test
+    fun applicationProbeReceiveDiagnosticUsesExactActiveAddressWithoutDiagnosticsFallback() {
+        val sharedRun = sampleDiagnosticsSharedRun()
+        val marker = automatedDiagnosticsProbeMarker(
+            stepId = AutomatedDiagnosticStepId.GLOBAL_MESSAGE_PROBE,
+            probeKind = AutomatedDiagnosticsApplicationProbeKind.GLOBAL,
+            direction = AutomatedDiagnosticsApplicationProbeDirection.C2P,
+            sharedRunId = sharedRun.runId
+        )
+
+        val diagnostic = automatedDiagnosticsApplicationProbeReceiveDiagnosticAfterReceiveOrNull(
+            result = globalProbeReceiveResult(marker),
+            sourceDeviceAddress = "54:EC:18:4B:F4:80",
+            activeTransportPeerId = "peer-A",
+            activeTransportDeviceAddress = "54:EC:18:4B:F4:80",
+            reachablePeers = emptyList(),
+            selectedSecurePeerId = "peer-A",
+            diagnosticsSourceAssociationsByAddress = emptyMap(),
+            receiverPeerId = "local-peer",
+            observedAtMonotonicMillis = 5_500L
+        )
+
+        assertNotNull(diagnostic)
+        assertEquals(
+            AutomatedDiagnosticsApplicationProbeSourceResolutionSource.EXACT_ACTIVE_ADDRESS,
+            diagnostic?.sourceResolution?.resolutionSource
+        )
+        assertEquals("peer-A", diagnostic?.sourceResolution?.resolvedSourcePeerId)
+        assertNotNull(automatedDiagnosticsApplicationProbeObservationFromReceiveDiagnosticOrNull(diagnostic!!))
+    }
+
+    @Test
+    fun privateApplicationProbeReceiveDiagnosticUsesDiagnosticsAssociationPath() {
+        val sharedRun = sampleDiagnosticsSharedRun()
+        val marker = automatedDiagnosticsProbeMarker(
+            stepId = AutomatedDiagnosticStepId.PRIVATE_ENCRYPTED_MESSAGE_PROBE,
+            probeKind = AutomatedDiagnosticsApplicationProbeKind.PRIVATE,
+            direction = AutomatedDiagnosticsApplicationProbeDirection.C2P,
+            sharedRunId = sharedRun.runId
+        )
+        val sourceDeviceAddress = "6C:73:D6:A5:B8:4C"
+        val signal = sampleAcceptedPhaseSignal(
+            sharedRun = sharedRun,
+            peerId = "peer-A",
+            expectedRemotePeerId = "local-peer",
+            stepId = AutomatedDiagnosticStepId.PRIVATE_ENCRYPTED_MESSAGE_PROBE,
+            attemptNumber = marker.attemptNumber,
+            sourceDeviceAddress = sourceDeviceAddress
+        )
+
+        val diagnostic = automatedDiagnosticsApplicationProbeReceiveDiagnosticAfterReceiveOrNull(
+            result = privateProbeReceiveResult(marker, privateChatId = "chat-private-1"),
+            sourceDeviceAddress = sourceDeviceAddress,
+            activeTransportPeerId = "peer-A",
+            activeTransportDeviceAddress = "54:EC:18:4B:F4:80",
+            reachablePeers = emptyList(),
+            selectedSecurePeerId = "peer-A",
+            diagnosticsSourceAssociationsByAddress =
+            mapOf(sourceDeviceAddress to AutomatedDiagnosticsAcceptedSourceAssociation.from(signal)),
+            receiverPeerId = "local-peer",
+            observedAtMonotonicMillis = 5_600L
+        )
+
+        assertNotNull(diagnostic)
+        assertEquals(
+            AutomatedDiagnosticsApplicationProbeSourceResolutionSource
+                .CURRENT_RUN_DIAGNOSTICS_ASSOCIATION,
+            diagnostic?.sourceResolution?.resolutionSource
+        )
+        assertEquals("peer-A", diagnostic?.sourceResolution?.resolvedSourcePeerId)
+        assertEquals("chat-private-1", diagnostic?.privateChatId)
+        assertEquals(
+            "chat-private-1",
+            automatedDiagnosticsApplicationProbeObservationFromReceiveDiagnosticOrNull(diagnostic!!)
+                ?.privateChatId
+        )
+    }
+
+    @Test
+    fun reverseDirectionGlobalProbeUsesDiagnosticsAssociationWhenGattSourceDiffers() {
+        val sharedRun = sampleDiagnosticsSharedRun()
+        val marker = automatedDiagnosticsProbeMarker(
+            stepId = AutomatedDiagnosticStepId.REVERSE_DIRECTION_MESSAGING_PROBE,
+            probeKind = AutomatedDiagnosticsApplicationProbeKind.GLOBAL,
+            direction = AutomatedDiagnosticsApplicationProbeDirection.P2C,
+            sharedRunId = sharedRun.runId
+        )
+        val sourceDeviceAddress = "6C:73:D6:A5:B8:4C"
+        val signal = sampleAcceptedPhaseSignal(
+            sharedRun = sharedRun,
+            peerId = "peer-participant",
+            expectedRemotePeerId = "peer-coordinator",
+            stepId = AutomatedDiagnosticStepId.REVERSE_DIRECTION_MESSAGING_PROBE,
+            attemptNumber = marker.attemptNumber,
+            sourceDeviceAddress = sourceDeviceAddress
+        )
+
+        val diagnostic = automatedDiagnosticsApplicationProbeReceiveDiagnosticAfterReceiveOrNull(
+            result = globalProbeReceiveResult(
+                marker = marker,
+                messageId = "incoming-global-reverse-probe",
+                senderId = "participant-user"
+            ),
+            sourceDeviceAddress = sourceDeviceAddress,
+            activeTransportPeerId = "peer-participant",
+            activeTransportDeviceAddress = "54:EC:18:4B:F4:80",
+            reachablePeers = emptyList(),
+            selectedSecurePeerId = "peer-participant",
+            diagnosticsSourceAssociationsByAddress =
+            mapOf(sourceDeviceAddress to AutomatedDiagnosticsAcceptedSourceAssociation.from(signal)),
+            receiverPeerId = "peer-coordinator",
+            observedAtMonotonicMillis = 5_700L
+        )
+
+        assertNotNull(diagnostic)
+        assertEquals("peer-participant", diagnostic?.sourceResolution?.resolvedSourcePeerId)
+        assertEquals(
+            AutomatedDiagnosticsApplicationProbeSourceResolutionSource
+                .CURRENT_RUN_DIAGNOSTICS_ASSOCIATION,
+            diagnostic?.sourceResolution?.resolutionSource
+        )
+    }
+
+    @Test
+    fun reverseDirectionPrivateProbeUsesDiagnosticsAssociationWhenGattSourceDiffers() {
+        val sharedRun = sampleDiagnosticsSharedRun()
+        val marker = automatedDiagnosticsProbeMarker(
+            stepId = AutomatedDiagnosticStepId.REVERSE_DIRECTION_MESSAGING_PROBE,
+            probeKind = AutomatedDiagnosticsApplicationProbeKind.PRIVATE,
+            direction = AutomatedDiagnosticsApplicationProbeDirection.P2C,
+            sharedRunId = sharedRun.runId
+        )
+        val sourceDeviceAddress = "6C:73:D6:A5:B8:4C"
+        val signal = sampleAcceptedPhaseSignal(
+            sharedRun = sharedRun,
+            peerId = "peer-participant",
+            expectedRemotePeerId = "peer-coordinator",
+            stepId = AutomatedDiagnosticStepId.REVERSE_DIRECTION_MESSAGING_PROBE,
+            attemptNumber = marker.attemptNumber,
+            sourceDeviceAddress = sourceDeviceAddress
+        )
+
+        val diagnostic = automatedDiagnosticsApplicationProbeReceiveDiagnosticAfterReceiveOrNull(
+            result = privateProbeReceiveResult(
+                marker = marker,
+                messageId = "incoming-private-reverse-probe",
+                senderId = "peer-participant",
+                threadId = "private:peer-participant",
+                privateChatId = "chat-private-reverse"
+            ),
+            sourceDeviceAddress = sourceDeviceAddress,
+            activeTransportPeerId = "peer-participant",
+            activeTransportDeviceAddress = "54:EC:18:4B:F4:80",
+            reachablePeers = emptyList(),
+            selectedSecurePeerId = "peer-participant",
+            diagnosticsSourceAssociationsByAddress =
+            mapOf(sourceDeviceAddress to AutomatedDiagnosticsAcceptedSourceAssociation.from(signal)),
+            receiverPeerId = "peer-coordinator",
+            observedAtMonotonicMillis = 5_800L
+        )
+
+        assertNotNull(diagnostic)
+        assertEquals("peer-participant", diagnostic?.sourceResolution?.resolvedSourcePeerId)
+        assertEquals("chat-private-reverse", diagnostic?.privateChatId)
+        assertEquals(
+            AutomatedDiagnosticsApplicationProbeSourceResolutionSource
+                .CURRENT_RUN_DIAGNOSTICS_ASSOCIATION,
+            diagnostic?.sourceResolution?.resolutionSource
+        )
+    }
+
+    @Test
+    fun phaseStateSignalRoundTripsApplicationProbeDescriptors() {
+        val sharedRun = sampleDiagnosticsSharedRun()
+        val signal = AutomatedDiagnosticsPhaseSignal(
+            sharedRun = sharedRun,
+            peerId = "peer-coordinator",
+            expectedRemotePeerId = "peer-participant",
+            stepId = AutomatedDiagnosticStepId.GLOBAL_MESSAGE_PROBE,
+            phaseState = AutomatedDiagnosticsPhaseState.RUNNING,
+            attemptNumber = 2,
+            applicationProbeDescriptors = listOf(
+                AutomatedDiagnosticsPhaseApplicationProbeDescriptor(
+                    probeKind = AutomatedDiagnosticsApplicationProbeKind.GLOBAL,
+                    messageId = "global-123",
+                    transportStatus = "queued-active:peer-participant",
+                    localBleTransportResult = "QueuedLocally",
+                    expectedTransportGroupId = 58_066,
+                    expectedChunkCount = 18,
+                    frameByteCount = 172,
+                    senderChunksQueued = 18,
+                    senderChunksWriteAttempted = 18,
+                    senderLastLocalWriteResult = "QueuedLocally"
+                ),
+                AutomatedDiagnosticsPhaseApplicationProbeDescriptor(
+                    probeKind = AutomatedDiagnosticsApplicationProbeKind.PRIVATE,
+                    messageId = "private-456",
+                    transportStatus = "submitted",
+                    localBleTransportResult = "QueuedLocally",
+                    expectedTransportGroupId = 48_811,
+                    expectedChunkCount = 9,
+                    frameByteCount = 96,
+                    senderChunksQueued = 9,
+                    senderChunksWriteAttempted = 9,
+                    senderLastLocalWriteResult = "QueuedLocally"
+                )
+            ),
+            createdAtMillis = 1_716_400_801L,
+            expiresAtMillis = 1_716_408_801L
+        )
+
+        val frame = createAutomatedDiagnosticsPhaseStateFrame(
+            signal = signal,
+            targetPeerId = "peer-participant"
+        )
+        val parsed = hybridTransportControlMessageAsAutomatedDiagnosticsPhaseSignalOrNull(
+            peerId = frame.senderId,
+            message = requireNotNull(HybridTransportControlFrameFactory.parseOrNull(frame))
+        )
+
+        assertNotNull(parsed)
+        assertEquals(signal.peerId, parsed?.peerId)
+        assertEquals(signal.expectedRemotePeerId, parsed?.expectedRemotePeerId)
+        assertEquals(signal.stepId, parsed?.stepId)
+        assertEquals(signal.phaseState, parsed?.phaseState)
+        assertEquals(signal.attemptNumber, parsed?.attemptNumber)
+        assertEquals(signal.applicationProbeDescriptors, parsed?.applicationProbeDescriptors)
+        assertEquals(signal.createdAtMillis, parsed?.createdAtMillis)
+        assertEquals(signal.expiresAtMillis, parsed?.expiresAtMillis)
+        assertEquals(signal.sharedRun.runId, parsed?.sharedRun?.runId)
+        assertEquals(signal.sharedRun.coordinatorPeerId, parsed?.sharedRun?.coordinatorPeerId)
+        assertEquals(signal.sharedRun.participantPeerId, parsed?.sharedRun?.participantPeerId)
+        assertEquals(signal.sharedRun.sessionAssociationId, parsed?.sharedRun?.sessionAssociationId)
+    }
+
+    @Test
+    fun phaseStateSignalRoundTripsProbeDescriptorWhenChunkFieldsAreStillPending() {
+        val sharedRun = sampleDiagnosticsSharedRun()
+        val signal = AutomatedDiagnosticsPhaseSignal(
+            sharedRun = sharedRun,
+            peerId = "peer-coordinator",
+            expectedRemotePeerId = "peer-participant",
+            stepId = AutomatedDiagnosticStepId.GLOBAL_MESSAGE_PROBE,
+            phaseState = AutomatedDiagnosticsPhaseState.RUNNING,
+            attemptNumber = 1,
+            applicationProbeDescriptors = listOf(
+                AutomatedDiagnosticsPhaseApplicationProbeDescriptor(
+                    probeKind = AutomatedDiagnosticsApplicationProbeKind.GLOBAL,
+                    messageId = "global-early",
+                    transportStatus = "queued-active:peer-participant",
+                    localBleTransportResult = "QueuedLocally",
+                    expectedTransportGroupId = 58_066,
+                    expectedChunkCount = null,
+                    frameByteCount = null
+                )
+            ),
+            createdAtMillis = 1_716_400_901L,
+            expiresAtMillis = 1_716_408_901L
+        )
+
+        val frame = createAutomatedDiagnosticsPhaseStateFrame(
+            signal = signal,
+            targetPeerId = "peer-participant"
+        )
+        val parsed = hybridTransportControlMessageAsAutomatedDiagnosticsPhaseSignalOrNull(
+            peerId = frame.senderId,
+            message = requireNotNull(HybridTransportControlFrameFactory.parseOrNull(frame))
+        )
+
+        assertNotNull(parsed)
+        assertEquals(signal.applicationProbeDescriptors, parsed?.applicationProbeDescriptors)
+    }
+
+    @Test
+    fun applicationProbeTransportReceiveEventCapturesProcessorFailureBeforeReceived() {
+        val result = BleTransportReceiveResult.ProcessorFailed(
+            groupId = 0x61,
+            sourceDeviceAddress = "54:EC:18:4B:F4:80",
+            processingResult = IncomingTransportFrameProcessingResult.ReceiveFailed(
+                receiveResult = IncomingTransportReceiveResult.InvalidEnvelope(
+                    reason = "Envelope payload is malformed."
+                )
+            )
+        )
+
+        val event = automatedDiagnosticsApplicationProbeTransportReceiveEventAfterReceiveOrNull(
+            result = result,
+            observedAtMonotonicMillis = 6_100L,
+            observedAtWallClockMillis = 1_716_400_810L
+        )
+
+        assertNotNull(event)
+        assertEquals("ProcessorFailed", event?.transportResultKind)
+        assertEquals("ReceiveFailed", event?.processingResultKind)
+        assertEquals("InvalidEnvelope", event?.receiveFailureKind)
+        assertEquals("Envelope payload is malformed.", event?.failureDetail)
+        assertNull(event?.messageId)
+        assertNull(event?.marker)
+    }
+
+    @Test
+    fun applicationProbeTransportReceiveEventBufferRemainsBounded() {
+        var events = emptyList<AutomatedDiagnosticsApplicationProbeTransportReceiveEvent>()
+
+        repeat(140) { index ->
+            events = appendAutomatedDiagnosticsApplicationProbeTransportReceiveEvent(
+                events = events,
+                event = AutomatedDiagnosticsApplicationProbeTransportReceiveEvent(
+                    groupId = index,
+                    sourceDeviceAddress = null,
+                    observedAtMonotonicMillis = index.toLong(),
+                    observedAtWallClockMillis = 1_716_400_900L + index,
+                    transportResultKind = "Buffered",
+                    receivedChunks = 1,
+                    expectedChunks = 2
+                )
+            )
+        }
+
+        assertEquals(128, events.size)
+        assertEquals(12, events.first().groupId)
+        assertEquals(139, events.last().groupId)
+    }
+
+    @Test
+    fun applicationProbeTransportReceiveEventCapturesReceivedButNonAppendedGlobalProbe() {
+        val marker = automatedDiagnosticsProbeMarker(
+            stepId = AutomatedDiagnosticStepId.GLOBAL_MESSAGE_PROBE,
+            probeKind = AutomatedDiagnosticsApplicationProbeKind.GLOBAL,
+            direction = AutomatedDiagnosticsApplicationProbeDirection.C2P
+        )
+        val result = BleTransportReceiveResult.Processed(
+            groupId = 0x62,
+            sourceDeviceAddress = "54:EC:18:4B:F4:80",
+            processingResult = IncomingTransportFrameProcessingResult.Received(
+                message = IncomingTransportMessage(
+                    frame = MessageFrame(
+                        id = "incoming-global-non-appended",
+                        type = MessageFrameType.GLOBAL_TEXT,
+                        senderId = "peer-coordinator",
+                        createdAtMillis = 1_716_400_820L,
+                        payload = marker.bodyText()
+                    )
+                ),
+                ingestionResult = IncomingMessageIngestionResult.UnsupportedType(
+                    reason = "Incoming probe message type is unsupported."
+                )
+            )
+        )
+
+        val event = automatedDiagnosticsApplicationProbeTransportReceiveEventAfterReceiveOrNull(
+            result = result,
+            observedAtMonotonicMillis = 6_200L,
+            observedAtWallClockMillis = 1_716_400_821L
+        )
+
+        assertNotNull(event)
+        assertEquals("Processed", event?.transportResultKind)
+        assertEquals("Received", event?.processingResultKind)
+        assertEquals("UnsupportedType", event?.ingestionResultKind)
+        assertEquals("Incoming probe message type is unsupported.", event?.failureDetail)
+        assertEquals("incoming-global-non-appended", event?.messageId)
+        assertEquals(MessageFrameType.GLOBAL_TEXT, event?.messageType)
+        assertEquals(marker, event?.marker)
+        assertEquals(MessageFrameType.GLOBAL_TEXT, event?.expectedMessageType)
+        assertEquals(true, event?.messageTypeMatchedExpectedProbe)
+    }
+
+    @Test
     fun runtimeStatusTextReportsIdentityHandlerUnavailable() {
         val result = BleTransportReceiveResult.Processed(
             groupId = 0x42,
@@ -6565,6 +8068,139 @@ class AuroraBleRuntimeHostTest {
         )
     }
 
+    private fun automatedDiagnosticsProbeMarker(
+        stepId: AutomatedDiagnosticStepId,
+        probeKind: AutomatedDiagnosticsApplicationProbeKind,
+        direction: AutomatedDiagnosticsApplicationProbeDirection,
+        sharedRunId: String = "shared-run-1",
+        attemptNumber: Int = 1
+    ): AutomatedDiagnosticsApplicationProbeMarker {
+        return AutomatedDiagnosticsApplicationProbeMarker(
+            sharedRunId = sharedRunId,
+            stepId = stepId,
+            attemptNumber = attemptNumber,
+            probeKind = probeKind,
+            direction = direction
+        )
+    }
+
+    private fun sampleDiagnosticsSharedRun(
+        runId: String = "diag-current-run",
+        coordinatorPeerId: String = "peer-coordinator",
+        participantPeerId: String = "peer-participant",
+        sessionAssociationId: String = "session-current-run",
+        createdAtMillis: Long = 1_716_400_000L,
+        expiresAtMillis: Long = 1_716_460_000L
+    ): AutomatedDiagnosticsSharedRun {
+        return AutomatedDiagnosticsSharedRun(
+            runId = runId,
+            coordinatorPeerId = coordinatorPeerId,
+            participantPeerId = participantPeerId,
+            sessionAssociationId = sessionAssociationId,
+            createdAtMillis = createdAtMillis,
+            expiresAtMillis = expiresAtMillis
+        )
+    }
+
+    private fun sampleAcceptedPhaseSignal(
+        sharedRun: AutomatedDiagnosticsSharedRun,
+        peerId: String,
+        expectedRemotePeerId: String,
+        stepId: AutomatedDiagnosticStepId,
+        attemptNumber: Int,
+        sourceDeviceAddress: String,
+        createdAtMillis: Long = sharedRun.createdAtMillis + 1_000L,
+        expiresAtMillis: Long = sharedRun.createdAtMillis + 9_000L
+    ): AutomatedDiagnosticsPhaseSignal {
+        return AutomatedDiagnosticsPhaseSignal(
+            sharedRun = sharedRun,
+            peerId = peerId,
+            expectedRemotePeerId = expectedRemotePeerId,
+            stepId = stepId,
+            phaseState = AutomatedDiagnosticsPhaseState.READY,
+            attemptNumber = attemptNumber,
+            createdAtMillis = createdAtMillis,
+            expiresAtMillis = expiresAtMillis,
+            sourceDeviceAddress = sourceDeviceAddress
+        )
+    }
+
+    private fun globalProbeReceiveResult(
+        marker: AutomatedDiagnosticsApplicationProbeMarker,
+        messageId: String = "incoming-global-probe",
+        senderId: String = "Chris"
+    ): BleTransportReceiveResult.Processed {
+        return BleTransportReceiveResult.Processed(
+            groupId = 0x4C,
+            processingResult = IncomingTransportFrameProcessingResult.Received(
+                message = IncomingTransportMessage(
+                    frame = MessageFrame(
+                        id = messageId,
+                        type = MessageFrameType.GLOBAL_TEXT,
+                        senderId = senderId,
+                        createdAtMillis = 1_716_400_060L,
+                        payload = marker.bodyText()
+                    )
+                ),
+                ingestionResult = IncomingMessageIngestionResult.Appended(
+                    message = ChatMessage(
+                        id = messageId,
+                        threadId = "global",
+                        senderId = senderId,
+                        senderName = senderId,
+                        text = marker.bodyText(),
+                        createdAtMillis = 1_716_400_060L,
+                        status = MessageStatus.RECEIVED,
+                        isOutgoing = false
+                    )
+                )
+            )
+        )
+    }
+
+    private fun privateProbeReceiveResult(
+        marker: AutomatedDiagnosticsApplicationProbeMarker,
+        messageId: String = "incoming-private-probe",
+        senderId: String = "peer-private",
+        threadId: String = "private:peer-private",
+        privateChatId: String = "chat-private-1"
+    ): BleTransportReceiveResult.Processed {
+        val payload = PrivateChatMessagePayloadCodec.encode(
+            PrivateChatMessagePayload(
+                privateChatId = privateChatId,
+                senderUsername = "Peer private",
+                body = marker.bodyText()
+            )
+        )
+        return BleTransportReceiveResult.Processed(
+            groupId = 0x4D,
+            processingResult = IncomingTransportFrameProcessingResult.Received(
+                message = IncomingTransportMessage(
+                    frame = MessageFrame(
+                        id = messageId,
+                        type = MessageFrameType.PRIVATE_TEXT,
+                        senderId = senderId,
+                        createdAtMillis = 1_716_400_070L,
+                        payload = payload
+                    ),
+                    senderPublicKey = senderPublicKeyBytes()
+                ),
+                ingestionResult = IncomingMessageIngestionResult.Appended(
+                    message = ChatMessage(
+                        id = messageId,
+                        threadId = threadId,
+                        senderId = senderId,
+                        senderName = "Peer private",
+                        text = marker.bodyText(),
+                        createdAtMillis = 1_716_400_070L,
+                        status = MessageStatus.RECEIVED,
+                        isOutgoing = false
+                    )
+                )
+            )
+        )
+    }
+
     private fun hybridOfferMessage(
         sessionId: String,
         createdAtMillis: Long
@@ -6734,6 +8370,64 @@ class AuroraBleRuntimeHostTest {
         return requireNotNull(outcome) {
             "Suspending runtime mesh operation did not complete synchronously in the test harness."
         }.getOrThrow()
+    }
+
+    private class MarkingCoroutineDispatcher(
+        threadName: String
+    ) : CoroutineDispatcher(), AutoCloseable {
+        private val threadFlag = ThreadLocal.withInitial { false }
+        private val delegate = Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, threadName)
+        }.asCoroutineDispatcher()
+        var dispatchCount: Int = 0
+            private set
+
+        override fun dispatch(
+            context: kotlin.coroutines.CoroutineContext,
+            block: Runnable
+        ) {
+            dispatchCount += 1
+            delegate.dispatch(context) {
+                threadFlag.set(true)
+                try {
+                    block.run()
+                } finally {
+                    threadFlag.remove()
+                }
+            }
+        }
+
+        fun isRunningOnMarkedDispatcherThread(): Boolean {
+            return threadFlag.get()
+        }
+
+        override fun close() {
+            delegate.close()
+        }
+    }
+
+    private class QueuedCoroutineDispatcher : CoroutineDispatcher() {
+        private val pendingRunnables = ArrayDeque<Runnable>()
+
+        val pendingCount: Int
+            get() = pendingRunnables.size
+
+        override fun dispatch(
+            context: kotlin.coroutines.CoroutineContext,
+            block: Runnable
+        ) {
+            pendingRunnables += block
+        }
+
+        fun runPending() {
+            while (pendingRunnables.isNotEmpty()) {
+                pendingRunnables.removeFirst().run()
+            }
+        }
+
+        fun clear() {
+            pendingRunnables.clear()
+        }
     }
 
     private class RecordingWifiDirectTransportSender(
